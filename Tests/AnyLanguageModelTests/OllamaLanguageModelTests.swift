@@ -69,7 +69,7 @@ struct OllamaLanguageModelTests {
     }
 
     @Test func withTools() async throws {
-        let weatherTool = WeatherTool()
+        let weatherTool = spy(on: WeatherTool())
         let session = LanguageModelSession(model: model, tools: [weatherTool])
 
         let response = try await session.respond(to: Prompt("What's the weather in San Francisco?"))
@@ -80,5 +80,15 @@ struct OllamaLanguageModelTests {
             foundToolOutput = true
         }
         #expect(foundToolOutput)
+        
+        let calls = await weatherTool.calls
+        #expect(calls.count == 1)
+        #expect(calls.first?.arguments.city == "San Francisco")
+
+        if case .success(let output) = calls.first?.result {
+            #expect(output.contains("San Francisco"))
+        } else {
+            Issue.record("Expected successful tool call")
+        }
     }
 }
