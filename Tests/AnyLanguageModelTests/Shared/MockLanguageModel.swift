@@ -1,7 +1,9 @@
-public struct MockLanguageModel: LanguageModel {
-    public var responseProvider: @Sendable (Prompt, GenerationOptions) async throws -> String
+@testable import AnyLanguageModel
 
-    public init(
+struct MockLanguageModel: LanguageModel {
+    var responseProvider: @Sendable (Prompt, GenerationOptions) async throws -> String
+
+    init(
         responseProvider:
             @escaping @Sendable (Prompt, GenerationOptions) async throws ->
             String = { _, _ in "Mock response" }
@@ -9,7 +11,7 @@ public struct MockLanguageModel: LanguageModel {
         self.responseProvider = responseProvider
     }
 
-    public func respond<Content>(
+    func respond<Content>(
         within session: LanguageModelSession,
         to prompt: Prompt,
         generating type: Content.Type,
@@ -20,10 +22,10 @@ public struct MockLanguageModel: LanguageModel {
         guard type == String.self else {
             fatalError("MockLanguageModel only supports generating String content")
         }
-        
+
         let promptWithInstructions = Prompt("Instructions: \(session.instructions?.description ?? "N/A")\n\(prompt))")
         let text = try await responseProvider(promptWithInstructions, options)
-                                            
+
         return LanguageModelSession.Response(
             content: text as! Content,
             rawContent: GeneratedContent(text),
@@ -31,7 +33,7 @@ public struct MockLanguageModel: LanguageModel {
         )
     }
 
-    public func streamResponse<Content>(
+    func streamResponse<Content>(
         within session: LanguageModelSession,
         to prompt: Prompt,
         generating type: Content.Type,
@@ -57,13 +59,13 @@ public struct MockLanguageModel: LanguageModel {
 // MARK: -
 
 extension MockLanguageModel {
-    public static var echo: Self {
+    static var echo: Self {
         MockLanguageModel { prompt, _ in
             prompt.description
         }
     }
 
-    public static func fixed(_ response: String) -> Self {
+    static func fixed(_ response: String) -> Self {
         MockLanguageModel { _, _ in response }
     }
 }
