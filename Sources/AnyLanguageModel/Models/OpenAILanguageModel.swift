@@ -1,0 +1,255 @@
+import Foundation
+import JSONSchema
+
+#if canImport(FoundationNetworking)
+    import FoundationNetworking
+#endif
+
+public struct OpenAILanguageModel: LanguageModel {
+    public static let defaultBaseURL = URL(string: "https://api.openai.com")!
+
+    public let baseURL: URL
+    public let apiKey: String
+    public let model: String
+    private let urlSession: URLSession
+
+    public init(
+        baseURL: URL = defaultBaseURL,
+        apiKey: String,
+        model: String,
+        session: URLSession = URLSession(configuration: .default)
+    ) {
+        var baseURL = baseURL
+        if !baseURL.path.hasSuffix("/") {
+            baseURL = baseURL.appendingPathComponent("")
+        }
+
+        self.baseURL = baseURL
+        self.apiKey = apiKey
+        self.model = model
+        self.urlSession = session
+    }
+
+    public func respond<Content>(
+        within session: LanguageModelSession,
+        to prompt: Prompt,
+        generating type: Content.Type,
+        includeSchemaInPrompt: Bool,
+        options: GenerationOptions
+    ) async throws -> LanguageModelSession.Response<Content> where Content: Generable {
+        // For now, only String is supported
+        guard type == String.self else {
+            fatalError("OpenAILanguageModel only supports generating String content")
+        }
+
+        let messages = [
+            OpenAIMessage(role: .user, content: .text(prompt.description))
+        ]
+        let params = createRequestBody(
+            model: model,
+            messages: messages,
+            tools: nil,
+            options: options,
+            stream: false
+        )
+
+        let url = baseURL.appendingPathComponent("v1/responses")
+        let body = try JSONEncoder().encode(params)
+        let resp: ResponsesCreateResponse = try await urlSession.fetch(
+            .post,
+            url: url,
+            headers: [
+                "Authorization": "Bearer \(apiKey)"
+            ],
+            body: body
+        )
+
+        let text = resp.outputText ?? ""
+        return LanguageModelSession.Response(
+            content: text as! Content,
+            rawContent: GeneratedContent(text),
+            transcriptEntries: []
+        )
+    }
+
+    public func streamResponse<Content>(
+        within session: LanguageModelSession,
+        to prompt: Prompt,
+        generating type: Content.Type,
+        includeSchemaInPrompt: Bool,
+        options: GenerationOptions
+    ) -> sending LanguageModelSession.ResponseStream<Content> where Content: Generable {
+        // For now, only String is supported
+        guard type == String.self else {
+            fatalError("OpenAILanguageModel only supports generating String content")
+        }
+
+        // For OpenAILanguageModel, we'll simulate streaming by yielding the response immediately
+        // In a real implementation, this would make a streaming request to OpenAI's API
+        // and yield chunks as they arrive
+        // Since we can't make this function async, we'll create a placeholder stream
+        let placeholderText = "OpenAI streaming response"
+        let generatedContent = GeneratedContent(placeholderText)
+
+        return LanguageModelSession.ResponseStream(content: placeholderText as! Content, rawContent: generatedContent)
+    }
+}
+
+// MARK: - Conversions
+
+private func createRequestBody(
+    model: String,
+    messages: [OpenAIMessage],
+    tools: [OpenAITool]?,
+    options: GenerationOptions,
+    stream: Bool
+) -> JSONValue {
+    var body: [String: JSONValue] = [
+        "model": .string(model),
+        "input": .object(["type": .string("input_text"), "text": .string("")]),
+        "messages": .array(messages.map { $0.jsonValue }),
+        "stream": .bool(stream),
+    ]
+
+    if let tools {
+        body["tools"] = .array(tools.map { $0.jsonValue })
+    }
+
+    if let temperature = options.temperature {
+        body["temperature"] = .double(temperature)
+    }
+    if let maxTokens = options.maximumResponseTokens {
+        body["max_output_tokens"] = .int(maxTokens)
+    }
+
+    return .object(body)
+}
+
+// MARK: - Supporting Types
+
+private struct OpenAIMessage: Hashable, Codable, Sendable {
+    enum Role: String, Hashable, Codable, Sendable { case system, user, assistant, tool }
+
+    enum Content: Hashable, Codable, Sendable {
+        case text(String)
+    }
+
+    let role: Role
+    let content: Content
+
+    var jsonValue: JSONValue {
+        switch content {
+        case .text(let text):
+            return .object([
+                "role": .string(role.rawValue),
+                "content": .array([.object(["type": .string("text"), "text": .string(text)])]),
+            ])
+        }
+    }
+}
+
+private struct OpenAITool: Hashable, Codable, Sendable {
+    let type: String
+    let function: OpenAIFunction
+
+    var jsonValue: JSONValue {
+        return .object([
+            "type": .string(type),
+            "function": function.jsonValue,
+        ])
+    }
+}
+
+private struct OpenAIFunction: Hashable, Codable, Sendable {
+    let name: String
+    let description: String
+    let parameters: OpenAIParameters?
+
+    var jsonValue: JSONValue {
+        var obj: [String: JSONValue] = [
+            "name": .string(name),
+            "description": .string(description),
+        ]
+        if let parameters { obj["parameters"] = parameters.jsonValue }
+        return .object(obj)
+    }
+}
+
+private struct OpenAIParameters: Hashable, Codable, Sendable {
+    let type: String
+    let properties: [String: OpenAISchema]
+    let required: [String]
+
+    var jsonValue: JSONValue {
+        return .object([
+            "type": .string(type),
+            "properties": .object(properties.mapValues { $0.jsonValue }),
+            "required": .array(required.map { .string($0) }),
+        ])
+    }
+}
+
+private struct OpenAISchema: Hashable, Codable, Sendable {
+    let type: String
+    let description: String?
+    let enumValues: [String]?
+
+    var jsonValue: JSONValue {
+        var obj: [String: JSONValue] = ["type": .string(type)]
+        if let description { obj["description"] = .string(description) }
+        if let enumValues { obj["enum"] = .array(enumValues.map { .string($0) }) }
+        return .object(obj)
+    }
+}
+
+private struct ResponsesCreateResponse: Decodable, Sendable {
+    let id: String
+    let outputText: String?
+    let finishReason: String?
+    let toolCalls: [OpenAIToolCall]?
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case outputText = "output_text"
+        case finishReason = "finish_reason"
+        case toolCalls = "tool_calls"
+    }
+}
+
+private struct OpenAIToolCall: Decodable, Sendable {
+    let id: String?
+    let name: String?
+    let arguments: String?
+}
+
+private enum ResponsesServerEvent: Decodable, Sendable {
+    case outputTextDelta(String)
+    case toolCallCreated(OpenAIToolCall)
+    case toolCallDelta(OpenAIToolCall)
+    case completed(String)
+    case ignored
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let type = try container.decodeIfPresent(String.self, forKey: .type)
+        switch type {
+        case "response.output_text.delta":
+            self = .outputTextDelta(try container.decode(String.self, forKey: .text))
+        case "response.tool_call.created":
+            self = .toolCallCreated(try container.decode(OpenAIToolCall.self, forKey: .toolCall))
+        case "response.tool_call.delta":
+            self = .toolCallDelta(try container.decode(OpenAIToolCall.self, forKey: .toolCall))
+        case "response.completed":
+            self = .completed(try container.decode(String.self, forKey: .finishReason))
+        default:
+            self = .ignored
+        }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case text
+        case toolCall = "tool_call"
+        case finishReason = "finish_reason"
+    }
+}
