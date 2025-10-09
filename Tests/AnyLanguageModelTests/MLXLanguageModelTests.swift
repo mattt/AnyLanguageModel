@@ -3,7 +3,28 @@ import Testing
 
 @testable import AnyLanguageModel
 
-@Suite("MLXLanguageModel", .serialized, .enabled(if: ProcessInfo.processInfo.environment["CI"] == nil))
+// Check if Metal/MLX is available
+private let isMLXAvailable = {
+    // Skip in CI environments
+    if ProcessInfo.processInfo.environment["CI"] != nil {
+        return false
+    }
+
+    // Enable when running with Xcode/xcodebuild
+    if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
+        return true
+    }
+
+    // Enable when explicitly requested via environment variable
+    if ProcessInfo.processInfo.environment["ENABLE_MLX_TESTS"] != nil {
+        return true
+    }
+
+    // Skip by default when running with swift test
+    return false
+}()
+
+@Suite("MLXLanguageModel", .enabled(if: isMLXAvailable))
 struct MLXLanguageModelTests {
     let model = MLXLanguageModel(modelId: "mlx-community/Qwen1.5-0.5B-Chat-4bit")
 
@@ -36,7 +57,7 @@ struct MLXLanguageModelTests {
         // Prompt that encourages tool usage per MLXLMCommon ToolCallProcessor
         // Expected format: <tool_call>{"name":"getWeather","arguments":{...}}</tool_call>
         let response = try await session.respond(
-            to: Prompt("Use tools if needed. What's the weather in San Francisco?")
+            to: Prompt("Use provided tools. What's the weather in San Francisco?")
         )
 
         var foundToolOutput = false
