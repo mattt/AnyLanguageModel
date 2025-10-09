@@ -68,35 +68,11 @@ public struct OllamaLanguageModel: LanguageModel {
         var entries: [Transcript.Entry] = []
 
         if let toolCalls = chatResponse.message.toolCalls, !toolCalls.isEmpty {
-            // Convert to Transcript.ToolCalls
-            let transcriptCalls = try Transcript.ToolCalls(
-                toolCalls.map { call in
-                    let args = try toGeneratedContent(call.function.arguments)
-                    return Transcript.ToolCall(
-                        id: call.id ?? UUID().uuidString,
-                        toolName: call.function.name,
-                        arguments: args
-                    )
-                }
-            )
-            entries.append(.toolCalls(transcriptCalls))
-
-            // Execute tools
-            for call in toolCalls {
-                guard let tool = session.tools.first(where: { $0.name == call.function.name }) else {
-                    let segs = [Transcript.Segment.text(.init(content: "Tool not found: \(call.function.name)"))]
-                    entries.append(
-                        .toolOutput(.init(id: call.function.name, toolName: call.function.name, segments: segs))
-                    )
-                    continue
-                }
-
-                do {
-                    let args = try toGeneratedContent(call.function.arguments)
-                    let segs = try await tool._invokeErased(with: args)
-                    entries.append(.toolOutput(.init(id: tool.name, toolName: tool.name, segments: segs)))
-                } catch {
-                    throw LanguageModelSession.ToolCallError(tool: tool, underlyingError: error)
+            let invocations = try await resolveToolCalls(toolCalls, session: session)
+            if !invocations.isEmpty {
+                entries.append(.toolCalls(Transcript.ToolCalls(invocations.map(\.call))))
+                for invocation in invocations {
+                    entries.append(.toolOutput(invocation.output))
                 }
             }
         }
@@ -130,6 +106,67 @@ public struct OllamaLanguageModel: LanguageModel {
 
         return LanguageModelSession.ResponseStream(content: placeholderText as! Content, rawContent: generatedContent)
     }
+}
+
+// MARK: - Tool Invocation Handling
+
+private struct ToolInvocationResult {
+    let call: Transcript.ToolCall
+    let output: Transcript.ToolOutput
+}
+
+private func resolveToolCalls(
+    _ toolCalls: [OllamaToolCall],
+    session: LanguageModelSession
+) async throws -> [ToolInvocationResult] {
+    if toolCalls.isEmpty {
+        return []
+    }
+
+    var toolsByName: [String: any Tool] = [:]
+    for tool in session.tools {
+        if toolsByName[tool.name] == nil {
+            toolsByName[tool.name] = tool
+        }
+    }
+
+    var results: [ToolInvocationResult] = []
+    results.reserveCapacity(toolCalls.count)
+
+    for call in toolCalls {
+        let args = try toGeneratedContent(call.function.arguments)
+        let callID = call.id ?? UUID().uuidString
+        let transcriptCall = Transcript.ToolCall(
+            id: callID,
+            toolName: call.function.name,
+            arguments: args
+        )
+
+        guard let tool = toolsByName[call.function.name] else {
+            let message = Transcript.Segment.text(.init(content: "Tool not found: \(call.function.name)"))
+            let output = Transcript.ToolOutput(
+                id: callID,
+                toolName: call.function.name,
+                segments: [message]
+            )
+            results.append(ToolInvocationResult(call: transcriptCall, output: output))
+            continue
+        }
+
+        do {
+            let segments = try await tool.makeOutputSegments(from: args)
+            let output = Transcript.ToolOutput(
+                id: tool.name,
+                toolName: tool.name,
+                segments: segments
+            )
+            results.append(ToolInvocationResult(call: transcriptCall, output: output))
+        } catch {
+            throw LanguageModelSession.ToolCallError(tool: tool, underlyingError: error)
+        }
+    }
+
+    return results
 }
 
 // MARK: - Conversions
@@ -242,26 +279,5 @@ private struct OllamaToolFunction: Decodable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case name
         case arguments
-    }
-}
-
-private struct ErrorResponse: Decodable {
-    let error: String
-}
-
-extension Tool {
-    fileprivate func _invokeErased(with args: GeneratedContent) async throws -> [Transcript.Segment] {
-        let parsed = try Arguments(args)
-        let output = try await call(arguments: parsed)
-
-        // Convert output to string safely
-        let text: String
-        if let stringOutput = output as? String {
-            text = stringOutput
-        } else {
-            text = output.promptRepresentation.description
-        }
-
-        return [Transcript.Segment.text(.init(content: text))]
     }
 }

@@ -9,8 +9,8 @@ public struct GeneratedContent: Sendable, Equatable, Generable, CustomDebugStrin
     public static var generationSchema: GenerationSchema {
         // GeneratedContent is self-describing, it doesn't have a fixed schema
         // This is a placeholder that should rarely be called
-        GenerationSchema.__createPrimitive(
-            type: GeneratedContent.self,
+        GenerationSchema.primitive(
+            GeneratedContent.self,
             node: .string(
                 GenerationSchema.StringNode(description: "Dynamic generated content", pattern: nil, enumChoices: nil)
             )
@@ -53,8 +53,7 @@ public struct GeneratedContent: Sendable, Equatable, Generable, CustomDebugStrin
             dict[key] = value.generatedContent
             keys.append(key)
         }
-        self._kind = .structure(properties: dict, orderedKeys: keys)
-        self.id = id
+        self.init(kind: .structure(properties: dict, orderedKeys: keys), id: id)
     }
 
     /// Creates new generated content from the key-value pairs in the given sequence,
@@ -107,8 +106,7 @@ public struct GeneratedContent: Sendable, Equatable, Generable, CustomDebugStrin
             }
         }
 
-        self._kind = .structure(properties: dict, orderedKeys: keys)
-        self.id = id
+        self.init(kind: .structure(properties: dict, orderedKeys: keys), id: id)
     }
 
     /// Creates content representing an array of elements you specify.
@@ -117,8 +115,7 @@ public struct GeneratedContent: Sendable, Equatable, Generable, CustomDebugStrin
         id: GenerationID? = nil
     ) where S: Sequence, S.Element == any ConvertibleToGeneratedContent {
         let contentArray = elements.map { $0.generatedContent }
-        self._kind = .array(contentArray)
-        self.id = id
+        self.init(kind: .array(contentArray), id: id)
     }
 
     /// Creates content that contains a single value.
@@ -126,8 +123,7 @@ public struct GeneratedContent: Sendable, Equatable, Generable, CustomDebugStrin
     /// - Parameters:
     ///   - value: The underlying value.
     public init(_ value: some ConvertibleToGeneratedContent) {
-        self._kind = value.generatedContent._kind
-        self.id = value.generatedContent.id
+        self = value.generatedContent
     }
 
     /// Creates content that contains a single value with a custom generation ID.
@@ -136,8 +132,7 @@ public struct GeneratedContent: Sendable, Equatable, Generable, CustomDebugStrin
     ///   - value: The underlying value.
     ///   - id: The generation ID for this content.
     public init(_ value: some ConvertibleToGeneratedContent, id: GenerationID) {
-        self._kind = value.generatedContent._kind
-        self.id = id
+        self.init(kind: value.generatedContent.kind, id: id)
     }
 
     /// Creates equivalent content from a JSON string.
@@ -193,8 +188,7 @@ public struct GeneratedContent: Sendable, Equatable, Generable, CustomDebugStrin
         }
 
         // If all else fails, treat it as a string
-        self._kind = .string(completedJSON)
-        self.id = nil
+        self.init(kind: .string(completedJSON))
     }
 
     private static func fromJSONValue(_ value: Any) throws -> GeneratedContent {
