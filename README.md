@@ -11,8 +11,8 @@ This lets developers use `LanguageModelSession` APIs with models other than syst
 ### Supported Providers
 
 - [x] Apple Foundation Models
-- [ ] Swift Transformers models
-- [ ] Swift MLX models
+- [ ] Core ML models
+- [x] Swift MLX models
 - [x] Ollama [HTTP API](https://github.com/ollama/ollama/blob/main/docs/api.md)
 - [x] Anthropic [Messages API](https://docs.claude.com/en/api/messages)
 - [x] OpenAI [Responses API](https://platform.openai.com/docs/api-reference/responses)
