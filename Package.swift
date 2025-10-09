@@ -25,6 +25,7 @@ let package = Package(
         .package(url: "https://github.com/swiftlang/swift-syntax.git", from: "600.0.0"),
         .package(url: "https://github.com/mattt/JSONSchema.git", from: "1.3.0"),
         .package(url: "https://github.com/mattt/EventSource.git", from: "1.2.0"),
+        .package(url: "https://github.com/ml-explore/mlx-swift-examples/", branch: "main"),
     ],
     targets: [
         .target(
@@ -33,6 +34,8 @@ let package = Package(
                 .target(name: "AnyLanguageModelMacros"),
                 .product(name: "EventSource", package: "EventSource"),
                 .product(name: "JSONSchema", package: "JSONSchema"),
+                .product(name: "MLXLLM", package: "mlx-swift-examples"),
+                .product(name: "MLXLMCommon", package: "mlx-swift-examples"),
             ]
         ),
         .macro(
