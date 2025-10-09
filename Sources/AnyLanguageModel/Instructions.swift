@@ -61,8 +61,7 @@ public struct InstructionsBuilder {
         return expression
     }
 
-    public static func buildArray(_ instructions: [some InstructionsRepresentable]) -> Instructions
-    {
+    public static func buildArray(_ instructions: [some InstructionsRepresentable]) -> Instructions {
         let combinedText = instructions.map {
             $0.instructionsRepresentation.description
         }.joined(separator: "\n")
@@ -73,13 +72,11 @@ public struct InstructionsBuilder {
         return instructions ?? Instructions("")
     }
 
-    public static func buildEither(first component: some InstructionsRepresentable) -> Instructions
-    {
+    public static func buildEither(first component: some InstructionsRepresentable) -> Instructions {
         return component.instructionsRepresentation
     }
 
-    public static func buildEither(second component: some InstructionsRepresentable) -> Instructions
-    {
+    public static func buildEither(second component: some InstructionsRepresentable) -> Instructions {
         return component.instructionsRepresentation
     }
 

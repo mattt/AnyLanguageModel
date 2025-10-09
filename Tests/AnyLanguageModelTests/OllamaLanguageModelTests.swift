@@ -80,7 +80,7 @@ struct OllamaLanguageModelTests {
             foundToolOutput = true
         }
         #expect(foundToolOutput)
-        
+
         let calls = await weatherTool.calls
         #expect(calls.count == 1)
         #expect(calls.first?.arguments.city == "San Francisco")
