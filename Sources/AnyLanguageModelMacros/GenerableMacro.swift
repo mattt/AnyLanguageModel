@@ -21,9 +21,15 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
                 generateRawContentProperty(),
                 generateInitFromGeneratedContent(structName: structName, properties: properties),
                 generateGeneratedContentProperty(
-                    structName: structName, description: description, properties: properties),
+                    structName: structName,
+                    description: description,
+                    properties: properties
+                ),
                 generateGenerationSchemaProperty(
-                    structName: structName, description: description, properties: properties),
+                    structName: structName,
+                    description: description,
+                    properties: properties
+                ),
                 generatePartiallyGeneratedStruct(structName: structName, properties: properties),
                 generateAsPartiallyGeneratedMethod(structName: structName),
                 generateInstructionsRepresentationProperty(),
@@ -38,9 +44,15 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
             return [
                 generateEnumInitFromGeneratedContent(enumName: enumName, cases: cases),
                 generateEnumGeneratedContentProperty(
-                    enumName: enumName, description: description, cases: cases),
+                    enumName: enumName,
+                    description: description,
+                    cases: cases
+                ),
                 generateEnumGenerationSchemaProperty(
-                    enumName: enumName, description: description, cases: cases),
+                    enumName: enumName,
+                    description: description,
+                    cases: cases
+                ),
                 generateAsPartiallyGeneratedMethodForEnum(enumName: enumName),
                 generateInstructionsRepresentationProperty(),
                 generatePromptRepresentationProperty(),
@@ -87,8 +99,7 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
         return stringLiteral.segments.description.trimmingCharacters(in: .init(charactersIn: "\""))
     }
 
-    private static func extractGuidedProperties(from structDecl: StructDeclSyntax) -> [PropertyInfo]
-    {
+    private static func extractGuidedProperties(from structDecl: StructDeclSyntax) -> [PropertyInfo] {
         var properties: [PropertyInfo] = []
 
         for member in structDecl.memberBlock.members {
@@ -109,7 +120,8 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
                         guideDescription: guideInfo.description,
                         guides: guideInfo.guides,
                         pattern: guideInfo.pattern
-                    ))
+                    )
+                )
             }
         }
 
@@ -126,7 +138,8 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
                     let stringLiteral = descArg.expression.as(StringLiteralExprSyntax.self)
                 {
                     let description = stringLiteral.segments.description.trimmingCharacters(
-                        in: .init(charactersIn: "\""))
+                        in: .init(charactersIn: "\"")
+                    )
 
                     var guides: [String] = []
                     var pattern: String? = nil
@@ -235,11 +248,13 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
         return DeclSyntax(
             stringLiteral: """
                 private let _rawGeneratedContent: GeneratedContent
-                """)
+                """
+        )
     }
 
     private static func generateInitFromGeneratedContent(
-        structName: String, properties: [PropertyInfo]
+        structName: String,
+        properties: [PropertyInfo]
     ) -> DeclSyntax {
         let propertyExtractions = properties.map { prop in
             generatePropertyExtraction(propertyName: prop.name, propertyType: prop.type)
@@ -258,7 +273,8 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
                             )
                         }
                     }
-                    """)
+                    """
+            )
         } else {
             return DeclSyntax(
                 stringLiteral: """
@@ -274,12 +290,14 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
                         
                         \(propertyExtractions)
                     }
-                    """)
+                    """
+            )
         }
     }
 
     private static func generatePartialPropertyExtraction(
-        propertyName: String, propertyType: String
+        propertyName: String,
+        propertyType: String
     ) -> String {
         switch propertyType {
         case "String", "String?":
@@ -341,7 +359,8 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
         default:
             let isOptional = propertyType.hasSuffix("?")
             let isDictionary = isDictionaryType(
-                propertyType.replacingOccurrences(of: "?", with: ""))
+                propertyType.replacingOccurrences(of: "?", with: "")
+            )
             let isArray =
                 !isDictionary && propertyType.hasPrefix("[") && propertyType.hasSuffix("]")
 
@@ -407,7 +426,9 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
     }
 
     private static func generateGeneratedContentProperty(
-        structName: String, description: String?, properties: [PropertyInfo]
+        structName: String,
+        description: String?,
+        properties: [PropertyInfo]
     ) -> DeclSyntax {
         let propertyConversions = properties.map { prop in
             let propName = prop.name
@@ -478,7 +499,8 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
                             )
                         )
                     }
-                    """)
+                    """
+            )
         } else {
             return DeclSyntax(
                 stringLiteral: """
@@ -493,12 +515,15 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
                             )
                         )
                     }
-                    """)
+                    """
+            )
         }
     }
 
     private static func generateGenerationSchemaProperty(
-        structName: String, description: String?, properties: [PropertyInfo]
+        structName: String,
+        description: String?,
+        properties: [PropertyInfo]
     ) -> DeclSyntax {
         let propertySchemas = properties.map { prop in
             var guidesArray = "[]"
@@ -533,7 +558,8 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
                         properties: [\(properties.isEmpty ? "" : "\n            \(propertySchemas)\n        ")]
                     )
                 }
-                """)
+                """
+        )
     }
 
     private static func generateAsPartiallyGeneratedMethod(structName: String) -> DeclSyntax {
@@ -542,7 +568,8 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
                 public func asPartiallyGenerated() -> PartiallyGenerated {
                     return try! PartiallyGenerated(_rawGeneratedContent)
                 }
-                """)
+                """
+        )
     }
 
     private static func generateAsPartiallyGeneratedMethodForEnum(enumName: String) -> DeclSyntax {
@@ -551,11 +578,13 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
                 public func asPartiallyGenerated() -> \(enumName) {
                     return self
                 }
-                """)
+                """
+        )
     }
 
     private static func generatePartiallyGeneratedStruct(
-        structName: String, properties: [PropertyInfo]
+        structName: String,
+        properties: [PropertyInfo]
     ) -> DeclSyntax {
         let optionalProperties = properties.map { prop in
             let propertyType = prop.type
@@ -591,7 +620,8 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
                         return rawContent
                     }
                 }
-                """)
+                """
+        )
     }
 
     private static func generateInstructionsRepresentationProperty() -> DeclSyntax {
@@ -600,7 +630,8 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
                 public var instructionsRepresentation: Instructions {
                     return Instructions(self.generatedContent.jsonString)
                 }
-                """)
+                """
+        )
     }
 
     private static func generatePromptRepresentationProperty() -> DeclSyntax {
@@ -609,7 +640,8 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
                 public var promptRepresentation: Prompt {
                     return Prompt(self.generatedContent.jsonString)
                 }
-                """)
+                """
+        )
     }
 
     private static func extractEnumCases(from enumDecl: EnumDeclSyntax) -> [EnumCaseInfo] {
@@ -625,7 +657,8 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
                         for parameter in parameterClause.parameters {
                             let label = parameter.firstName?.text
                             let type = parameter.type.description.trimmingCharacters(
-                                in: .whitespacesAndNewlines)
+                                in: .whitespacesAndNewlines
+                            )
                             associatedValues.append((label: label, type: type))
                         }
                     }
@@ -637,7 +670,8 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
                             name: caseName,
                             associatedValues: associatedValues,
                             guideDescription: guideDescription
-                        ))
+                        )
+                    )
                 }
             }
         }
@@ -646,7 +680,8 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
     }
 
     private static func generateEnumInitFromGeneratedContent(
-        enumName: String, cases: [EnumCaseInfo]
+        enumName: String,
+        cases: [EnumCaseInfo]
     ) -> DeclSyntax {
         let hasAnyAssociatedValues = cases.contains { $0.hasAssociatedValues }
 
@@ -662,7 +697,9 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
                     return generateSingleValueCase(caseName: enumCase.name, valueType: valueType)
                 } else {
                     return generateMultipleValueCase(
-                        caseName: enumCase.name, associatedValues: enumCase.associatedValues)
+                        caseName: enumCase.name,
+                        associatedValues: enumCase.associatedValues
+                    )
                 }
             }.joined(separator: "\n                ")
 
@@ -714,7 +751,8 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
                             }
                         }
                     }
-                    """)
+                    """
+            )
         } else {
             let switchCases = cases.map { enumCase in
                 "case \"\(enumCase.name)\": self = .\(enumCase.name)"
@@ -739,7 +777,8 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
                             )
                         }
                     }
-                    """)
+                    """
+            )
         }
     }
 
@@ -802,7 +841,8 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
     }
 
     private static func generateMultipleValueCase(
-        caseName: String, associatedValues: [(label: String?, type: String)]
+        caseName: String,
+        associatedValues: [(label: String?, type: String)]
     ) -> String {
         let valueExtractions = associatedValues.enumerated().map { index, assocValue in
             let label = assocValue.label ?? "param\(index)"
@@ -853,7 +893,9 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
     }
 
     private static func generateEnumGeneratedContentProperty(
-        enumName: String, description: String?, cases: [EnumCaseInfo]
+        enumName: String,
+        description: String?,
+        cases: [EnumCaseInfo]
     ) -> DeclSyntax {
         let hasAnyAssociatedValues = cases.contains { $0.hasAssociatedValues }
 
@@ -877,7 +919,9 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
                         """
                 } else {
                     return generateMultipleValueSerialization(
-                        caseName: enumCase.name, associatedValues: enumCase.associatedValues)
+                        caseName: enumCase.name,
+                        associatedValues: enumCase.associatedValues
+                    )
                 }
             }.joined(separator: "\n            ")
 
@@ -888,7 +932,8 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
                         \(switchCases)
                         }
                     }
-                    """)
+                    """
+            )
         } else {
             let switchCases = cases.map { enumCase in
                 "case .\(enumCase.name): return GeneratedContent(\"\(enumCase.name)\")"
@@ -901,7 +946,8 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
                         \(switchCases)
                         }
                     }
-                    """)
+                    """
+            )
         }
     }
 
@@ -929,7 +975,8 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
     }
 
     private static func generateMultipleValueSerialization(
-        caseName: String, associatedValues: [(label: String?, type: String)]
+        caseName: String,
+        associatedValues: [(label: String?, type: String)]
     ) -> String {
         let parameterList = associatedValues.enumerated().map { index, assocValue in
             let label = assocValue.label ?? "param\(index)"
@@ -965,11 +1012,14 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
                 public static func from(generatedContent: GeneratedContent) throws -> \(enumName) {
                     return try \(enumName)(generatedContent)
                 }
-                """)
+                """
+        )
     }
 
     private static func generateEnumGenerationSchemaProperty(
-        enumName: String, description: String?, cases: [EnumCaseInfo]
+        enumName: String,
+        description: String?,
+        cases: [EnumCaseInfo]
     ) -> DeclSyntax {
         let hasAnyAssociatedValues = cases.contains { $0.hasAssociatedValues }
 
@@ -1005,7 +1055,8 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
                             ]
                         )
                     }
-                    """)
+                    """
+            )
         } else {
             let caseNames = cases.map { "\"\($0.name)\"" }.joined(separator: ", ")
 
@@ -1019,7 +1070,8 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
                             anyOf: [\(caseNames)]
                         )
                     }
-                    """)
+                    """
+            )
         }
     }
 }

@@ -143,8 +143,7 @@ extension GenerationOptions {
         ///     - probabilityThreshold: A number between `0.0` and `1.0` that
         ///       increases sampling pool size.
         ///     - seed: An optional random seed used to make output more deterministic.
-        public static func random(probabilityThreshold: Double, seed: UInt64? = nil) -> SamplingMode
-        {
+        public static func random(probabilityThreshold: Double, seed: UInt64? = nil) -> SamplingMode {
             SamplingMode(mode: .nucleus(probabilityThreshold, seed: seed))
         }
     }

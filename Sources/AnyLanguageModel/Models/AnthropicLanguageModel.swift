@@ -47,11 +47,17 @@ public struct AnthropicLanguageModel: LanguageModel {
         let messages = [
             AnthropicMessage(role: .user, content: [.text(.init(text: prompt.description))])
         ]
+
+        // Convert available tools to Anthropic format
+        let anthropicTools: [AnthropicTool] = try session.tools.map { tool in
+            try convertToolToAnthropicFormat(tool)
+        }
+
         let params = try createMessageParams(
             model: model,
             system: nil,
             messages: messages,
-            tools: nil,
+            tools: anthropicTools.isEmpty ? nil : anthropicTools,
             options: options
         )
 
@@ -67,6 +73,24 @@ public struct AnthropicLanguageModel: LanguageModel {
             body: body
         )
 
+        var entries: [Transcript.Entry] = []
+
+        // Handle tool calls, if present
+        let toolUses: [AnthropicToolUse] = message.content.compactMap { block in
+            if case .toolUse(let u) = block { return u }
+            return nil
+        }
+
+        if !toolUses.isEmpty {
+            let invocations = try await resolveToolUses(toolUses, session: session)
+            if !invocations.isEmpty {
+                entries.append(.toolCalls(Transcript.ToolCalls(invocations.map(\.call))))
+                for invocation in invocations {
+                    entries.append(.toolOutput(invocation.output))
+                }
+            }
+        }
+
         let text = message.content.compactMap { block -> String? in
             switch block {
             case .text(let t): return t.text
@@ -77,7 +101,7 @@ public struct AnthropicLanguageModel: LanguageModel {
         return LanguageModelSession.Response(
             content: text as! Content,
             rawContent: GeneratedContent(text),
-            transcriptEntries: []
+            transcriptEntries: ArraySlice(entries)
         )
     }
 
@@ -130,6 +154,80 @@ private func createMessageParams(
     }
 
     return params
+}
+
+// MARK: - Tool Invocation Handling
+
+private struct ToolInvocationResult {
+    let call: Transcript.ToolCall
+    let output: Transcript.ToolOutput
+}
+
+private func resolveToolUses(
+    _ toolUses: [AnthropicToolUse],
+    session: LanguageModelSession
+) async throws -> [ToolInvocationResult] {
+    if toolUses.isEmpty { return [] }
+
+    var toolsByName: [String: any Tool] = [:]
+    for tool in session.tools {
+        if toolsByName[tool.name] == nil {
+            toolsByName[tool.name] = tool
+        }
+    }
+
+    var results: [ToolInvocationResult] = []
+    results.reserveCapacity(toolUses.count)
+
+    for use in toolUses {
+        let args = try toGeneratedContent(use.input)
+        let callID = use.id
+        let transcriptCall = Transcript.ToolCall(
+            id: callID,
+            toolName: use.name,
+            arguments: args
+        )
+
+        guard let tool = toolsByName[use.name] else {
+            let message = Transcript.Segment.text(.init(content: "Tool not found: \(use.name)"))
+            let output = Transcript.ToolOutput(
+                id: callID,
+                toolName: use.name,
+                segments: [message]
+            )
+            results.append(ToolInvocationResult(call: transcriptCall, output: output))
+            continue
+        }
+
+        do {
+            let segments = try await tool.makeOutputSegments(from: args)
+            let output = Transcript.ToolOutput(
+                id: tool.name,
+                toolName: tool.name,
+                segments: segments
+            )
+            results.append(ToolInvocationResult(call: transcriptCall, output: output))
+        } catch {
+            throw LanguageModelSession.ToolCallError(tool: tool, underlyingError: error)
+        }
+    }
+
+    return results
+}
+
+// Convert our GenerationSchema into Anthropic's expected JSON Schema payload
+private func convertToolToAnthropicFormat(_ tool: any Tool) throws -> AnthropicTool {
+    // Encode our internal schema then decode to JSONSchema type
+    let data = try JSONEncoder().encode(tool.parameters)
+    let schema = try JSONDecoder().decode(JSONSchema.self, from: data)
+    return AnthropicTool(name: tool.name, description: tool.description, inputSchema: schema)
+}
+
+private func toGeneratedContent(_ value: [String: JSONValue]?) throws -> GeneratedContent {
+    guard let value else { return GeneratedContent(properties: [:]) }
+    let data = try JSONEncoder().encode(JSONValue.object(value))
+    let json = String(data: data, encoding: .utf8) ?? "{}"
+    return try GeneratedContent(json: json)
 }
 
 // MARK: - Supporting Types

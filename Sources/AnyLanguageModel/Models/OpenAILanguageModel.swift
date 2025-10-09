@@ -45,10 +45,22 @@ public struct OpenAILanguageModel: LanguageModel {
         let messages = [
             OpenAIMessage(role: .user, content: .text(prompt.description))
         ]
+
+        // Convert tools if any are available in the session
+        let openAITools: [OpenAITool]? = {
+            guard !session.tools.isEmpty else { return nil }
+            var converted: [OpenAITool] = []
+            converted.reserveCapacity(session.tools.count)
+            for tool in session.tools {
+                converted.append(convertToolToOpenAIFormat(tool))
+            }
+            return converted
+        }()
+
         let params = createRequestBody(
             model: model,
             messages: messages,
-            tools: nil,
+            tools: openAITools,
             options: options,
             stream: false
         )
@@ -64,11 +76,23 @@ public struct OpenAILanguageModel: LanguageModel {
             body: body
         )
 
+        var entries: [Transcript.Entry] = []
+
+        if let toolCalls = resp.toolCalls, !toolCalls.isEmpty {
+            let invocations = try await resolveToolCalls(toolCalls, session: session)
+            if !invocations.isEmpty {
+                entries.append(.toolCalls(Transcript.ToolCalls(invocations.map { $0.call })))
+                for invocation in invocations {
+                    entries.append(.toolOutput(invocation.output))
+                }
+            }
+        }
+
         let text = resp.outputText ?? ""
         return LanguageModelSession.Response(
             content: text as! Content,
             rawContent: GeneratedContent(text),
-            transcriptEntries: []
+            transcriptEntries: ArraySlice(entries)
         )
     }
 
@@ -164,13 +188,20 @@ private struct OpenAIFunction: Hashable, Codable, Sendable {
     let name: String
     let description: String
     let parameters: OpenAIParameters?
+    // When available, prefer passing raw JSON Schema converted from GenerationSchema
+    // to preserve nested object structures.
+    let rawParameters: JSONValue?
 
     var jsonValue: JSONValue {
         var obj: [String: JSONValue] = [
             "name": .string(name),
             "description": .string(description),
         ]
-        if let parameters { obj["parameters"] = parameters.jsonValue }
+        if let rawParameters {
+            obj["parameters"] = rawParameters
+        } else if let parameters {
+            obj["parameters"] = parameters.jsonValue
+        }
         return .object(obj)
     }
 }
@@ -218,8 +249,99 @@ private struct ResponsesCreateResponse: Decodable, Sendable {
 
 private struct OpenAIToolCall: Decodable, Sendable {
     let id: String?
-    let name: String?
+    let type: String?
+    let function: OpenAIToolFunction?
+}
+
+private struct OpenAIToolFunction: Decodable, Sendable {
+    let name: String
     let arguments: String?
+}
+
+// MARK: - Tool Invocation Handling
+
+private struct ToolInvocationResult {
+    let call: Transcript.ToolCall
+    let output: Transcript.ToolOutput
+}
+
+private func resolveToolCalls(
+    _ toolCalls: [OpenAIToolCall],
+    session: LanguageModelSession
+) async throws -> [ToolInvocationResult] {
+    if toolCalls.isEmpty { return [] }
+
+    var toolsByName: [String: any Tool] = [:]
+    for tool in session.tools {
+        if toolsByName[tool.name] == nil {
+            toolsByName[tool.name] = tool
+        }
+    }
+
+    var results: [ToolInvocationResult] = []
+    results.reserveCapacity(toolCalls.count)
+
+    for call in toolCalls {
+        guard let function = call.function else { continue }
+        let args = try toGeneratedContent(function.arguments)
+        let callID = call.id ?? UUID().uuidString
+        let transcriptCall = Transcript.ToolCall(
+            id: callID,
+            toolName: function.name,
+            arguments: args
+        )
+
+        guard let tool = toolsByName[function.name] else {
+            let message = Transcript.Segment.text(.init(content: "Tool not found: \(function.name)"))
+            let output = Transcript.ToolOutput(
+                id: callID,
+                toolName: function.name,
+                segments: [message]
+            )
+            results.append(ToolInvocationResult(call: transcriptCall, output: output))
+            continue
+        }
+
+        do {
+            let segments = try await tool.makeOutputSegments(from: args)
+            let output = Transcript.ToolOutput(
+                id: tool.name,
+                toolName: tool.name,
+                segments: segments
+            )
+            results.append(ToolInvocationResult(call: transcriptCall, output: output))
+        } catch {
+            throw LanguageModelSession.ToolCallError(tool: tool, underlyingError: error)
+        }
+    }
+
+    return results
+}
+
+// MARK: - Converters
+
+private func convertToolToOpenAIFormat(_ tool: any Tool) -> OpenAITool {
+    // Prefer passing through a JSONSchema value built from GenerationSchema
+    // where possible; fallback to minimal type/required map.
+    let rawParameters: JSONValue?
+    if let raw = try? JSONValue(tool.parameters) {
+        rawParameters = raw
+    } else {
+        rawParameters = nil
+    }
+
+    let fn = OpenAIFunction(
+        name: tool.name,
+        description: tool.description,
+        parameters: nil,
+        rawParameters: rawParameters
+    )
+    return OpenAITool(type: "function", function: fn)
+}
+
+private func toGeneratedContent(_ jsonString: String?) throws -> GeneratedContent {
+    guard let jsonString, !jsonString.isEmpty else { return GeneratedContent(properties: [:]) }
+    return try GeneratedContent(json: jsonString)
 }
 
 private enum ResponsesServerEvent: Decodable, Sendable {
