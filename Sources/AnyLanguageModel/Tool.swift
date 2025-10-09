@@ -106,3 +106,25 @@ extension Tool where Self.Arguments: Generable {
         Arguments.generationSchema
     }
 }
+
+// MARK: - Helpers
+
+extension Tool {
+    internal func makeOutputSegments(from arguments: GeneratedContent) async throws -> [Transcript.Segment] {
+        let parsedArguments = try Arguments(arguments)
+        let output = try await call(arguments: parsedArguments)
+
+        if let structured = output as? any ConvertibleToGeneratedContent {
+            let content = structured.generatedContent
+            let segment = Transcript.Segment.structure(.init(source: name, content: content))
+            return [segment]
+        }
+
+        if let stringOutput = output as? String {
+            return [Transcript.Segment.text(.init(content: stringOutput))]
+        }
+
+        let fallback = output.promptRepresentation.description
+        return [Transcript.Segment.text(.init(content: fallback))]
+    }
+}

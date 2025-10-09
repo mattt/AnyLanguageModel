@@ -556,7 +556,7 @@ public struct GenerationSchema: Sendable, Codable, CustomDebugStringConvertible 
 
     // MARK: - Helpers
 
-    static func __createPrimitive(type: any Generable.Type, node: Node) -> GenerationSchema {
+    static func primitive<T: Generable>(_: T.Type, node: Node) -> GenerationSchema {
         GenerationSchema(root: node, defs: [:])
     }
 

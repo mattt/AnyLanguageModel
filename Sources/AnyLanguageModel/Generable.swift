@@ -93,7 +93,7 @@ extension Bool: Generable {
     /// An instance of the generation schema.
     public static var generationSchema: GenerationSchema {
         // Bool is a primitive, create a simple schema
-        GenerationSchema.__createPrimitive(type: Bool.self, node: .boolean)
+        GenerationSchema.primitive(Bool.self, node: .boolean)
     }
 
     /// Creates an instance with the content.
@@ -115,8 +115,8 @@ extension Bool: Generable {
 extension String: Generable {
     /// An instance of the generation schema.
     public static var generationSchema: GenerationSchema {
-        GenerationSchema.__createPrimitive(
-            type: String.self,
+        GenerationSchema.primitive(
+            String.self,
             node: .string(GenerationSchema.StringNode(description: nil, pattern: nil, enumChoices: nil))
         )
     }
@@ -140,8 +140,8 @@ extension String: Generable {
 extension Int: Generable {
     /// An instance of the generation schema.
     public static var generationSchema: GenerationSchema {
-        GenerationSchema.__createPrimitive(
-            type: Int.self,
+        GenerationSchema.primitive(
+            Int.self,
             node: .number(GenerationSchema.NumberNode(description: nil, minimum: nil, maximum: nil, integerOnly: true))
         )
     }
@@ -165,8 +165,8 @@ extension Int: Generable {
 extension Float: Generable {
     /// An instance of the generation schema.
     public static var generationSchema: GenerationSchema {
-        GenerationSchema.__createPrimitive(
-            type: Float.self,
+        GenerationSchema.primitive(
+            Float.self,
             node: .number(GenerationSchema.NumberNode(description: nil, minimum: nil, maximum: nil, integerOnly: false))
         )
     }
@@ -190,8 +190,8 @@ extension Float: Generable {
 extension Double: Generable {
     /// An instance of the generation schema.
     public static var generationSchema: GenerationSchema {
-        GenerationSchema.__createPrimitive(
-            type: Double.self,
+        GenerationSchema.primitive(
+            Double.self,
             node: .number(GenerationSchema.NumberNode(description: nil, minimum: nil, maximum: nil, integerOnly: false))
         )
     }
@@ -215,8 +215,8 @@ extension Double: Generable {
 extension Decimal: Generable {
     /// An instance of the generation schema.
     public static var generationSchema: GenerationSchema {
-        GenerationSchema.__createPrimitive(
-            type: Decimal.self,
+        GenerationSchema.primitive(
+            Decimal.self,
             node: .number(GenerationSchema.NumberNode(description: nil, minimum: nil, maximum: nil, integerOnly: false))
         )
     }
@@ -251,8 +251,8 @@ extension Array: Generable where Element: Generable {
             minItems: nil,
             maxItems: nil
         )
-        return GenerationSchema.__createPrimitive(
-            type: [Element].self,
+        return GenerationSchema.primitive(
+            [Element].self,
             node: .array(arrayNode)
         )
     }
