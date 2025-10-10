@@ -32,51 +32,81 @@ public struct MLXLanguageModel: LanguageModel {
                 convertToolToMLXSpec(tool)
             }
 
-        // Build user input from prompt and tools
-        let userInput = MLXLMCommon.UserInput(
-            chat: [.user(prompt.description)],
-            tools: toolSpecs
-        )
-        let lmInput = try await context.processor.prepare(input: userInput)
-
         // Map AnyLanguageModel GenerationOptions to MLX GenerateParameters
         let generateParameters = toGenerateParameters(options)
 
-        // Use streaming generation to capture tool calls
-        let stream = try MLXLMCommon.generate(
-            input: lmInput,
-            parameters: generateParameters,
-            context: context
-        )
+        // Start with user prompt
+        var chat: [MLXLMCommon.Chat.Message] = [.user(prompt.description)]
+        var allTextChunks: [String] = []
+        var allEntries: [Transcript.Entry] = []
 
-        var chunks: [String] = []
-        var collectedToolCalls: [MLXLMCommon.ToolCall] = []
+        // Loop until no more tool calls
+        while true {
+            // Build user input with current chat history and tools
+            let userInput = MLXLMCommon.UserInput(
+                chat: chat,
+                tools: toolSpecs
+            )
+            let lmInput = try await context.processor.prepare(input: userInput)
 
-        for await item in stream {
-            if let chunk = item.chunk {
-                chunks.append(chunk)
-            }
-            if let toolCall = item.toolCall {
-                collectedToolCalls.append(toolCall)
-            }
-        }
+            // Generate
+            let stream = try MLXLMCommon.generate(
+                input: lmInput,
+                parameters: generateParameters,
+                context: context
+            )
 
-        var entries: [Transcript.Entry] = []
-        if !collectedToolCalls.isEmpty {
-            let invocations = try await resolveToolCalls(collectedToolCalls, session: session)
-            if !invocations.isEmpty {
-                entries.append(.toolCalls(Transcript.ToolCalls(invocations.map(\.call))))
-                for invocation in invocations {
-                    entries.append(.toolOutput(invocation.output))
+            var chunks: [String] = []
+            var collectedToolCalls: [MLXLMCommon.ToolCall] = []
+
+            for await item in stream {
+                switch item {
+                case .chunk(let text):
+                    chunks.append(text)
+                case .info:
+                    break
+                case .toolCall(let call):
+                    collectedToolCalls.append(call)
                 }
             }
+
+            let assistantText = chunks.joined()
+            allTextChunks.append(assistantText)
+
+            // Add assistant response to chat history
+            if !assistantText.isEmpty {
+                chat.append(.assistant(assistantText))
+            }
+
+            // If there are tool calls, execute them and continue
+            if !collectedToolCalls.isEmpty {
+                let invocations = try await resolveToolCalls(collectedToolCalls, session: session)
+                if !invocations.isEmpty {
+                    allEntries.append(.toolCalls(Transcript.ToolCalls(invocations.map(\.call))))
+
+                    // Execute each tool and add results to chat
+                    for invocation in invocations {
+                        allEntries.append(.toolOutput(invocation.output))
+
+                        // Convert tool output to JSON string for MLX
+                        let toolResultJSON = toolOutputToJSON(invocation.output)
+                        chat.append(.tool(toolResultJSON))
+                    }
+
+                    // Continue loop to generate with tool results
+                    continue
+                }
+            }
+
+            // No more tool calls, exit loop
+            break
         }
 
-        let text = chunks.joined()
+        let text = allTextChunks.joined()
         return LanguageModelSession.Response(
             content: text as! Content,
             rawContent: GeneratedContent(text),
-            transcriptEntries: ArraySlice(entries)
+            transcriptEntries: ArraySlice(allEntries)
         )
     }
 
@@ -119,6 +149,8 @@ private func toGenerateParameters(_ options: GenerationOptions) -> MLXLMCommon.G
 
 // MARK: - Tool Conversion
 
+// TODO: Improve JSON handling by using JSONValue from JSONSchema package
+// instead of [String: Any] for better type safety
 private func convertToolToMLXSpec(_ tool: any Tool) -> ToolSpec {
     // Convert AnyLanguageModel's GenerationSchema to JSON-compatible dictionary
     let parametersDict: [String: Any]
@@ -220,4 +252,19 @@ private func toGeneratedContent(_ args: [String: MLXLMCommon.JSONValue]) throws 
     let data = try JSONEncoder().encode(args)
     let json = String(data: data, encoding: .utf8) ?? "{}"
     return try GeneratedContent(json: json)
+}
+
+private func toolOutputToJSON(_ output: Transcript.ToolOutput) -> String {
+    // Extract text content from segments
+    var textParts: [String] = []
+    for segment in output.segments {
+        switch segment {
+        case .text(let textSegment):
+            textParts.append(textSegment.content)
+        case .structure(let structuredSegment):
+            // structured content already has jsonString property
+            textParts.append(structuredSegment.content.jsonString)
+        }
+    }
+    return textParts.joined(separator: "\n")
 }

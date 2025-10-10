@@ -26,7 +26,8 @@ private let isMLXAvailable = {
 
 @Suite("MLXLanguageModel", .enabled(if: isMLXAvailable))
 struct MLXLanguageModelTests {
-    let model = MLXLanguageModel(modelId: "mlx-community/Qwen1.5-0.5B-Chat-4bit")
+    // Qwen3-0.6B is a small model that supports tool calling
+    let model = MLXLanguageModel(modelId: "mlx-community/Qwen3-0.6B-4bit")
 
     @Test func basicResponse() async throws {
         let session = LanguageModelSession(model: model)
@@ -52,13 +53,13 @@ struct MLXLanguageModelTests {
 
     @Test func withTools() async throws {
         let weatherTool = spy(on: WeatherTool())
-        let session = LanguageModelSession(model: model, tools: [weatherTool])
+        let session = LanguageModelSession(model: model, tools: [weatherTool]) {
+            "You are a helpful assistant. Use available tools when needed."
+        }
 
-        // Prompt that encourages tool usage per MLXLMCommon ToolCallProcessor
-        // Expected format: <tool_call>{"name":"getWeather","arguments":{...}}</tool_call>
-        let response = try await session.respond(
-            to: Prompt("Use provided tools. What's the weather in San Francisco?")
-        )
+        let response = try await session.respond {
+            "What's the weather in San Francisco?"
+        }
 
         var foundToolOutput = false
         for case let .toolOutput(toolOutput) in response.transcriptEntries {
