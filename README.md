@@ -11,7 +11,7 @@ This lets developers use `LanguageModelSession` APIs with models other than syst
 ### Supported Providers
 
 - [x] Apple Foundation Models
-- [ ] Core ML models
+- [x] Core ML models
 - [x] Swift MLX models
 - [x] Ollama [HTTP API](https://github.com/ollama/ollama/blob/main/docs/api.md)
 - [x] Anthropic [Messages API](https://docs.claude.com/en/api/messages)
@@ -45,6 +45,7 @@ import MLX
 
 let models = [(any LanguageModel)] = [
     SystemLanguageModel(), // Apple Foundation Models
+    CoreMLLanguageModel(url: "path/to/some.mlpackage"),
     MLXLanguageModel(modelId: "mlx-community/Qwen3-0.6B-4bit"),
     OllamaLanguageModel(model: "qwen3") // `ollama pull qwen3:0.6b`
     AnthropicLanguageModel(
