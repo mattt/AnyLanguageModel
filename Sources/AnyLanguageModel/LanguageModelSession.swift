@@ -21,6 +21,14 @@ public final class LanguageModelSession {
     public convenience init(
         model: any LanguageModel,
         tools: [any Tool] = [],
+        instructions: String
+    ) {
+        self.init(model: model, tools: tools, instructions: Instructions(instructions), transcript: Transcript())
+    }
+
+    public convenience init(
+        model: any LanguageModel,
+        tools: [any Tool] = [],
         instructions: Instructions? = nil
     ) {
         self.init(model: model, tools: tools, instructions: instructions, transcript: Transcript())
