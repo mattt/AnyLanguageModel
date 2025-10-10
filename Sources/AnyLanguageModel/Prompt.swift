@@ -57,7 +57,6 @@ extension Prompt: CustomStringConvertible {
 
 @resultBuilder
 public struct PromptBuilder {
-
     public static func buildBlock<each P>(_ components: repeat each P) -> Prompt
     where repeat each P: PromptRepresentable {
         var parts: [String] = []

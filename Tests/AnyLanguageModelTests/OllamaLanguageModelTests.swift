@@ -16,24 +16,24 @@ struct OllamaLanguageModelTests {
     @Test func basicResponse() async throws {
         let session = LanguageModelSession(model: model)
 
-        let response = try await session.respond(to: Prompt("Say hello"))
+        let response = try await session.respond(to: "Say hello")
         #expect(!response.content.isEmpty)
     }
 
     @Test func withInstructions() async throws {
         let session = LanguageModelSession(
             model: model,
-            instructions: Instructions("You are a helpful assistant. Be concise.")
+            instructions: "You are a helpful assistant. Be concise."
         )
 
-        let response = try await session.respond(to: Prompt("What is 2+2?"))
+        let response = try await session.respond(to: "What is 2+2?")
         #expect(!response.content.isEmpty)
     }
 
     @Test func streaming() async throws {
         let session = LanguageModelSession(model: model)
 
-        let stream = session.streamResponse(to: Prompt("Count to 5"))
+        let stream = session.streamResponse(to: "Count to 5")
         var chunks: [String] = []
 
         for try await response in stream {
@@ -52,7 +52,7 @@ struct OllamaLanguageModelTests {
         )
 
         let response = try await session.respond(
-            to: Prompt("Tell me a fact"),
+            to: "Tell me a fact",
             options: options
         )
         #expect(!response.content.isEmpty)
@@ -61,10 +61,10 @@ struct OllamaLanguageModelTests {
     @Test func conversationContext() async throws {
         let session = LanguageModelSession(model: model)
 
-        let firstResponse = try await session.respond(to: Prompt("My favorite color is blue"))
+        let firstResponse = try await session.respond(to: "My favorite color is blue")
         #expect(!firstResponse.content.isEmpty)
 
-        let secondResponse = try await session.respond(to: Prompt("What did I just tell you?"))
+        let secondResponse = try await session.respond(to: "What did I just tell you?")
         #expect(!secondResponse.content.isEmpty)
     }
 
@@ -72,7 +72,7 @@ struct OllamaLanguageModelTests {
         let weatherTool = spy(on: WeatherTool())
         let session = LanguageModelSession(model: model, tools: [weatherTool])
 
-        let response = try await session.respond(to: Prompt("What's the weather in San Francisco?"))
+        let response = try await session.respond(to: "What's the weather in San Francisco?")
 
         var foundToolOutput = false
         for case let .toolOutput(toolOutput) in response.transcriptEntries {
