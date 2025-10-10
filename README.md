@@ -38,15 +38,14 @@ dependencies: [
 
 ```swift
 import AnyLanguageModel
-import Foundation
 
-import MLX
+import Foundation
 import CoreML
+import MLX
 
 let models = [(any LanguageModel)] = [
     SystemLanguageModel(), // Apple Foundation Models
-    CoreMLModel(model: URL(filePath: "model.mlpackage"), computeUnits: .cpuAndNeuralEngine),
-    MLXModel(model: try await loadModel(id: "mlx-community/Qwen3-4B-4bit"))
+    MLXLanguageModel(modelId: "mlx-community/Qwen3-0.6B-4bit"),
     OllamaLanguageModel(model: "qwen3") // `ollama pull qwen3:0.6b`
     AnthropicLanguageModel(
         apiKey: ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"]!,
@@ -58,10 +57,24 @@ let models = [(any LanguageModel)] = [
     ),
 ]
 
+struct WeatherTool: Tool {
+    let name = "getWeather"
+    let description = "Retrieve the latest weather information for a city"
+
+    @Generable
+    struct Arguments {
+        @Guide(description: "The city to fetch the weather for")
+        var city: String
+    }
+
+    func call(arguments: Arguments) async throws -> String {
+        "The weather in \(arguments.city) is sunny and 72°F / 23°C"
+    }
+}
+
 for model in models {
     let session = LanguageModelSession(model: model, tools: [WeatherTool()])
     let response = try await session.respond(to: "What's the weather in Cupertino?")
-    let response = try await session.respond(to: Prompt("Say 'Hello'"))
-    print(response.text) // "Hello"
+    print(response.text) // "It's sunny and 72°F in Cupertino"
 }
 ```
