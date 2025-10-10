@@ -27,15 +27,19 @@ public struct Prompt: Sendable {
     private let content: String
 
     /// Creates an instance with the content you specify.
-    public init(_ content: some PromptRepresentable) {
-        switch content {
+    public init(_ representable: some PromptRepresentable) {
+        switch representable {
         case let prompt as Prompt:
             self = prompt
         case let string as String:
-            self.content = string
+            self.init(content: string)
         default:
-            self = content.promptRepresentation
+            self.init(content: representable.promptRepresentation.content)
         }
+    }
+
+    init(content: String) {
+        self.content = content
     }
 
     public init(@PromptBuilder _ content: () throws -> Prompt) rethrows {
@@ -59,7 +63,7 @@ public struct PromptBuilder {
         var parts: [String] = []
         repeat parts.append((each components).promptRepresentation.description)
         let combinedText = parts.joined(separator: "\n")
-        return Prompt(combinedText.trimmingCharacters(in: .whitespacesAndNewlines))
+        return Prompt(content: combinedText.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
     public static func buildExpression<P>(_ expression: P) -> P where P: PromptRepresentable {
@@ -70,11 +74,11 @@ public struct PromptBuilder {
         let combinedText = prompts.map {
             $0.promptRepresentation.description
         }.joined(separator: "\n")
-        return Prompt(combinedText)
+        return Prompt(content: combinedText)
     }
 
     public static func buildOptional(_ component: Prompt?) -> Prompt {
-        return component ?? Prompt("")
+        return component ?? Prompt(content: "")
     }
 
     public static func buildEither(first component: some PromptRepresentable) -> Prompt {
@@ -95,7 +99,7 @@ public struct PromptBuilder {
 /// A protocol that represents a prompt.
 public protocol PromptRepresentable {
     /// An instance that represents a prompt.
-    @PromptBuilder var promptRepresentation: Prompt { get }
+    var promptRepresentation: Prompt { get }
 }
 
 // MARK: - Default Implementations
@@ -110,7 +114,7 @@ extension Prompt: PromptRepresentable {
 extension String: PromptRepresentable {
     /// An instance that represents a prompt.
     public var promptRepresentation: Prompt {
-        Prompt(self)
+        Prompt(content: self)
     }
 }
 
@@ -119,6 +123,6 @@ extension Array: PromptRepresentable where Element: PromptRepresentable {
     public var promptRepresentation: Prompt {
         let combined = self.map { $0.promptRepresentation.description }
             .joined(separator: "\n")
-        return Prompt(combined)
+        return Prompt(content: combined)
     }
 }

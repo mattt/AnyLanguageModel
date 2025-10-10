@@ -22,15 +22,19 @@ public struct Instructions {
     private let content: String
 
     /// Creates an instance with the content you specify.
-    public init(_ content: some InstructionsRepresentable) {
-        switch content {
+    public init(_ representable: some InstructionsRepresentable) {
+        switch representable {
         case let instructions as Instructions:
             self = instructions
         case let string as String:
-            self.content = string
+            self.init(content: string)
         default:
-            self.content = content.instructionsRepresentation.content
+            self.init(content: representable.instructionsRepresentation.content)
         }
+    }
+
+    init(content: String) {
+        self.content = content
     }
 
     public init(@InstructionsBuilder _ content: () throws -> Instructions) rethrows {
@@ -48,13 +52,12 @@ extension Instructions: CustomStringConvertible {
 
 @resultBuilder
 public struct InstructionsBuilder {
-
     public static func buildBlock<each I>(_ components: repeat each I) -> Instructions
     where repeat each I: InstructionsRepresentable {
         var parts: [String] = []
         repeat parts.append((each components).instructionsRepresentation.description)
         let combinedText = parts.joined(separator: "\n")
-        return Instructions(combinedText.trimmingCharacters(in: .whitespacesAndNewlines))
+        return Instructions(content: combinedText.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
     public static func buildExpression<I>(_ expression: I) -> I where I: InstructionsRepresentable {
@@ -65,11 +68,11 @@ public struct InstructionsBuilder {
         let combinedText = instructions.map {
             $0.instructionsRepresentation.description
         }.joined(separator: "\n")
-        return Instructions(combinedText)
+        return Instructions(content: combinedText)
     }
 
     public static func buildOptional(_ instructions: Instructions?) -> Instructions {
-        return instructions ?? Instructions("")
+        return instructions ?? Instructions(content: "")
     }
 
     public static func buildEither(first component: some InstructionsRepresentable) -> Instructions {
@@ -90,7 +93,7 @@ public struct InstructionsBuilder {
 /// Conforming types represent instructions.
 public protocol InstructionsRepresentable {
     /// An instance that represents the instructions.
-    @InstructionsBuilder var instructionsRepresentation: Instructions { get }
+    var instructionsRepresentation: Instructions { get }
 }
 
 // MARK: - Default Implementations
@@ -105,7 +108,7 @@ extension Instructions: InstructionsRepresentable {
 extension String: InstructionsRepresentable {
     /// An instance that represents the instructions.
     public var instructionsRepresentation: Instructions {
-        Instructions(self)
+        Instructions(content: self)
     }
 }
 
@@ -114,6 +117,6 @@ extension Array: InstructionsRepresentable where Element: InstructionsRepresenta
     public var instructionsRepresentation: Instructions {
         let combined = self.map { $0.instructionsRepresentation.description }
             .joined(separator: "\n")
-        return Instructions(combined)
+        return Instructions(content: combined)
     }
 }
