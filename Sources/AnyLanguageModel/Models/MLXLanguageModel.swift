@@ -1,5 +1,6 @@
 import Foundation
 import MLXLMCommon
+import Tokenizers
 
 public struct MLXLanguageModel: LanguageModel {
     public let modelId: String
@@ -23,8 +24,19 @@ public struct MLXLanguageModel: LanguageModel {
         // Load model context via MLXLMCommon
         let context = try await MLXLMCommon.loadModel(id: modelId)
 
-        // Build user input from prompt only
-        let userInput = MLXLMCommon.UserInput(chat: [.user(prompt.description)])
+        // Convert session tools to MLX ToolSpec format
+        let toolSpecs: [ToolSpec]? =
+            session.tools.isEmpty
+            ? nil
+            : session.tools.map { tool in
+                convertToolToMLXSpec(tool)
+            }
+
+        // Build user input from prompt and tools
+        let userInput = MLXLMCommon.UserInput(
+            chat: [.user(prompt.description)],
+            tools: toolSpecs
+        )
         let lmInput = try await context.processor.prepare(input: userInput)
 
         // Map AnyLanguageModel GenerationOptions to MLX GenerateParameters
@@ -103,6 +115,46 @@ private func toGenerateParameters(_ options: GenerationOptions) -> MLXLMCommon.G
         repetitionPenalty: nil,
         repetitionContextSize: 20
     )
+}
+
+// MARK: - Tool Conversion
+
+private func convertToolToMLXSpec(_ tool: any Tool) -> ToolSpec {
+    // Convert AnyLanguageModel's GenerationSchema to JSON-compatible dictionary
+    let parametersDict: [String: Any]
+    do {
+        let encoder = JSONEncoder()
+        let data = try encoder.encode(tool.parameters)
+        if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            // Resolve $ref if present
+            if let ref = json["$ref"] as? String,
+                let defs = json["$defs"] as? [String: Any]
+            {
+                // Extract the definition name from the $ref (e.g., "#/$defs/TypeName" -> "TypeName")
+                let defName = ref.replacingOccurrences(of: "#/$defs/", with: "")
+                if let resolvedDef = defs[defName] as? [String: Any] {
+                    parametersDict = resolvedDef
+                } else {
+                    parametersDict = ["type": "object", "properties": [:], "required": []]
+                }
+            } else {
+                parametersDict = json
+            }
+        } else {
+            parametersDict = ["type": "object", "properties": [:], "required": []]
+        }
+    } catch {
+        parametersDict = ["type": "object", "properties": [:], "required": []]
+    }
+
+    return [
+        "type": "function",
+        "function": [
+            "name": tool.name,
+            "description": tool.description,
+            "parameters": parametersDict,
+        ],
+    ]
 }
 
 // MARK: - Tool Invocation Handling
