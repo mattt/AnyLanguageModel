@@ -18,7 +18,7 @@ import Testing
             let model: SystemLanguageModel = SystemLanguageModel()
             let session = LanguageModelSession(model: model)
 
-            let response = try await session.respond(to: Prompt("Say 'Hello'"))
+            let response = try await session.respond(to: "Say 'Hello'")
             #expect(!response.content.isEmpty)
         }
 
@@ -27,10 +27,10 @@ import Testing
             let model = SystemLanguageModel()
             let session = LanguageModelSession(
                 model: model,
-                instructions: Instructions("You are a helpful assistant.")
+                instructions: "You are a helpful assistant."
             )
 
-            let response = try await session.respond(to: Prompt("What is 2+2?"))
+            let response = try await session.respond(to: "What is 2+2?")
             #expect(!response.content.isEmpty)
         }
 
@@ -52,7 +52,7 @@ import Testing
         //     let model: SystemLanguageModel = SystemLanguageModel()
         //     let session = LanguageModelSession(model: model)
 
-        //     let stream = session.streamResponse(to: Prompt("Count to 3"))
+        //     let stream = session.streamResponse(to: "Count to 3")
 
         //     var responses: [Response<String>] = []
         //     for try await response in stream {
@@ -68,10 +68,10 @@ import Testing
         //     let model = SystemLanguageModel()
         //     let session = LanguageModelSession(
         //         model: model,
-        //         instructions: Instructions("Be concise.")
+        //         instructions: "Be concise."
         //     )
 
-        //     let stream = try await session.streamResponse(to: Prompt("Say hi"))
+        //     let stream = try await session.streamResponse(to: "Say hi")
 
         //     var responses: [Response] = []
         //     for try await response in stream {

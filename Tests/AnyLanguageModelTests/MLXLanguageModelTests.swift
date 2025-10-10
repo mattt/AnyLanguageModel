@@ -32,7 +32,7 @@ struct MLXLanguageModelTests {
     @Test func basicResponse() async throws {
         let session = LanguageModelSession(model: model)
 
-        let response = try await session.respond(to: Prompt("Say hello"))
+        let response = try await session.respond(to: "Say hello")
         #expect(!response.content.isEmpty)
     }
 
@@ -45,7 +45,7 @@ struct MLXLanguageModelTests {
         )
 
         let response = try await session.respond(
-            to: Prompt("Tell me a fact"),
+            to: "Tell me a fact",
             options: options
         )
         #expect(!response.content.isEmpty)
@@ -53,13 +53,9 @@ struct MLXLanguageModelTests {
 
     @Test func withTools() async throws {
         let weatherTool = spy(on: WeatherTool())
-        let session = LanguageModelSession(model: model, tools: [weatherTool]) {
-            "You are a helpful assistant. Use available tools when needed."
-        }
+        let session = LanguageModelSession(model: model, tools: [weatherTool], instructions: "You are a helpful assistant. Use available tools when needed.")
 
-        let response = try await session.respond {
-            "What's the weather in San Francisco?"
-        }
+        let response = try await session.respond(to: "What's the weather in San Francisco?")
 
         var foundToolOutput = false
         for case let .toolOutput(toolOutput) in response.transcriptEntries {
