@@ -8,12 +8,12 @@ private let shouldRunMLXTests = {
     if ProcessInfo.processInfo.environment["ENABLE_MLX_TESTS"] != nil {
         return true
     }
-    
+
     // Skip in CI environments
     if ProcessInfo.processInfo.environment["CI"] != nil {
         return false
     }
-    
+
     // Skip unless Hugging Face API token is provided
     if ProcessInfo.processInfo.environment["HF_TOKEN"] == nil {
         return false
@@ -57,7 +57,11 @@ struct MLXLanguageModelTests {
 
     @Test func withTools() async throws {
         let weatherTool = spy(on: WeatherTool())
-        let session = LanguageModelSession(model: model, tools: [weatherTool], instructions: "You are a helpful assistant. Use available tools when needed.")
+        let session = LanguageModelSession(
+            model: model,
+            tools: [weatherTool],
+            instructions: "You are a helpful assistant. Use available tools when needed."
+        )
 
         let response = try await session.respond(to: "What's the weather in San Francisco?")
 
