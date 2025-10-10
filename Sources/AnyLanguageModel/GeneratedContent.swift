@@ -234,7 +234,7 @@ public struct GeneratedContent: Sendable, Equatable, Generable, CustomDebugStrin
     public var jsonString: String {
         do {
             let jsonValue = try toJSONValue()
-            let data = try JSONSerialization.data(withJSONObject: jsonValue, options: [])
+            let data = try JSONSerialization.data(withJSONObject: jsonValue, options: [.fragmentsAllowed])
             return String(data: data, encoding: .utf8) ?? "{}"
         } catch {
             return "{}"
