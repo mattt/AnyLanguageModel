@@ -3,7 +3,7 @@ import Testing
 @testable import AnyLanguageModel
 
 #if canImport(FoundationModels)
-    let isSystemLanguageModelAvailable = {
+    private let isSystemLanguageModelAvailable = {
         if #available(macOS 26.0, *) {
             return SystemLanguageModel().systemModel.isAvailable
         } else {

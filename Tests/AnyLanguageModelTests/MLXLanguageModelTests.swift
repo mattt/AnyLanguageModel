@@ -3,10 +3,19 @@ import Testing
 
 @testable import AnyLanguageModel
 
-// Check if Metal/MLX is available
-private let isMLXAvailable = {
+private let shouldRunMLXTests = {
+    // Enable when explicitly requested via environment variable
+    if ProcessInfo.processInfo.environment["ENABLE_MLX_TESTS"] != nil {
+        return true
+    }
+    
     // Skip in CI environments
     if ProcessInfo.processInfo.environment["CI"] != nil {
+        return false
+    }
+    
+    // Skip unless Hugging Face API token is provided
+    if ProcessInfo.processInfo.environment["HF_TOKEN"] == nil {
         return false
     }
 
@@ -15,16 +24,11 @@ private let isMLXAvailable = {
         return true
     }
 
-    // Enable when explicitly requested via environment variable
-    if ProcessInfo.processInfo.environment["ENABLE_MLX_TESTS"] != nil {
-        return true
-    }
-
     // Skip by default when running with swift test
     return false
 }()
 
-@Suite("MLXLanguageModel", .enabled(if: isMLXAvailable))
+@Suite("MLXLanguageModel", .enabled(if: shouldRunMLXTests))
 struct MLXLanguageModelTests {
     // Qwen3-0.6B is a small model that supports tool calling
     let model = MLXLanguageModel(modelId: "mlx-community/Qwen3-0.6B-4bit")
