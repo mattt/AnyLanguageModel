@@ -6,17 +6,28 @@ import JSONSchema
 #endif
 
 public struct OpenAILanguageModel: LanguageModel {
-    public static let defaultBaseURL = URL(string: "https://api.openai.com")!
+    public static let defaultBaseURL = URL(string: "https://api.openai.com/v1/")!
+
+    public enum APIVariant: Sendable {
+        /// When selected, use the Chat Completions API.
+        /// https://platform.openai.com/docs/api-reference/chat/create
+        case chatCompletions
+        /// When selected, use the Responses API.
+        /// https://platform.openai.com/docs/api-reference/responses
+        case responses
+    }
 
     public let baseURL: URL
     public let apiKey: String
     public let model: String
+    public let apiVariant: APIVariant
     private let urlSession: URLSession
 
     public init(
         baseURL: URL = defaultBaseURL,
         apiKey: String,
         model: String,
+        apiVariant: APIVariant = .chatCompletions,
         session: URLSession = URLSession(configuration: .default)
     ) {
         var baseURL = baseURL
@@ -27,6 +38,7 @@ public struct OpenAILanguageModel: LanguageModel {
         self.baseURL = baseURL
         self.apiKey = apiKey
         self.model = model
+        self.apiVariant = apiVariant
         self.urlSession = session
     }
 
@@ -57,17 +69,94 @@ public struct OpenAILanguageModel: LanguageModel {
             return converted
         }()
 
-        let params = createRequestBody(
+        switch apiVariant {
+        case .chatCompletions:
+            return try await respondWithChatCompletions(
+                messages: messages,
+                tools: openAITools,
+                options: options,
+                session: session
+            )
+        case .responses:
+            return try await respondWithResponses(
+                messages: messages,
+                tools: openAITools,
+                options: options,
+                session: session
+            )
+        }
+    }
+
+    private func respondWithChatCompletions<Content>(
+        messages: [OpenAIMessage],
+        tools: [OpenAITool]?,
+        options: GenerationOptions,
+        session: LanguageModelSession
+    ) async throws -> LanguageModelSession.Response<Content> where Content: Generable {
+        let params = ChatCompletions.createRequestBody(
             model: model,
             messages: messages,
-            tools: openAITools,
+            tools: tools,
             options: options,
             stream: false
         )
 
-        let url = baseURL.appendingPathComponent("v1/responses")
+        let url = baseURL.appendingPathComponent("chat/completions")
         let body = try JSONEncoder().encode(params)
-        let resp: ResponsesCreateResponse = try await urlSession.fetch(
+        let resp: ChatCompletions.Response = try await urlSession.fetch(
+            .post,
+            url: url,
+            headers: [
+                "Authorization": "Bearer \(apiKey)"
+            ],
+            body: body
+        )
+
+        var entries: [Transcript.Entry] = []
+
+        guard let choice = resp.choices.first else {
+            return LanguageModelSession.Response(
+                content: "" as! Content,
+                rawContent: GeneratedContent(""),
+                transcriptEntries: ArraySlice(entries)
+            )
+        }
+
+        if let toolCalls = choice.message.toolCalls, !toolCalls.isEmpty {
+            let invocations = try await resolveToolCalls(toolCalls, session: session)
+            if !invocations.isEmpty {
+                entries.append(.toolCalls(Transcript.ToolCalls(invocations.map { $0.call })))
+                for invocation in invocations {
+                    entries.append(.toolOutput(invocation.output))
+                }
+            }
+        }
+
+        let text = choice.message.content ?? ""
+        return LanguageModelSession.Response(
+            content: text as! Content,
+            rawContent: GeneratedContent(text),
+            transcriptEntries: ArraySlice(entries)
+        )
+    }
+
+    private func respondWithResponses<Content>(
+        messages: [OpenAIMessage],
+        tools: [OpenAITool]?,
+        options: GenerationOptions,
+        session: LanguageModelSession
+    ) async throws -> LanguageModelSession.Response<Content> where Content: Generable {
+        let params = Responses.createRequestBody(
+            model: model,
+            messages: messages,
+            tools: tools,
+            options: options,
+            stream: false
+        )
+
+        let url = baseURL.appendingPathComponent("responses")
+        let body = try JSONEncoder().encode(params)
+        let resp: Responses.Response = try await urlSession.fetch(
             .post,
             url: url,
             headers: [
@@ -119,34 +208,106 @@ public struct OpenAILanguageModel: LanguageModel {
     }
 }
 
-// MARK: - Conversions
+// MARK: - API Variants
 
-private func createRequestBody(
-    model: String,
-    messages: [OpenAIMessage],
-    tools: [OpenAITool]?,
-    options: GenerationOptions,
-    stream: Bool
-) -> JSONValue {
-    var body: [String: JSONValue] = [
-        "model": .string(model),
-        "input": .object(["type": .string("input_text"), "text": .string("")]),
-        "messages": .array(messages.map { $0.jsonValue }),
-        "stream": .bool(stream),
-    ]
+private enum ChatCompletions {
+    static func createRequestBody(
+        model: String,
+        messages: [OpenAIMessage],
+        tools: [OpenAITool]?,
+        options: GenerationOptions,
+        stream: Bool
+    ) -> JSONValue {
+        var body: [String: JSONValue] = [
+            "model": .string(model),
+            "messages": .array(messages.map { $0.jsonValue(for: .chatCompletions) }),
+            "stream": .bool(stream),
+        ]
 
-    if let tools {
-        body["tools"] = .array(tools.map { $0.jsonValue })
+        if let tools {
+            body["tools"] = .array(tools.map { $0.jsonValue })
+        }
+
+        if let temperature = options.temperature {
+            body["temperature"] = .double(temperature)
+        }
+        if let maxTokens = options.maximumResponseTokens {
+            body["max_tokens"] = .int(maxTokens)
+        }
+
+        return .object(body)
     }
 
-    if let temperature = options.temperature {
-        body["temperature"] = .double(temperature)
+    struct Response: Decodable, Sendable {
+        let id: String
+        let choices: [Choice]
+
+        struct Choice: Decodable, Sendable {
+            let message: Message
+            let finishReason: String?
+
+            private enum CodingKeys: String, CodingKey {
+                case message
+                case finishReason = "finish_reason"
+            }
+        }
+
+        struct Message: Decodable, Sendable {
+            let role: String
+            let content: String?
+            let toolCalls: [OpenAIToolCall]?
+
+            private enum CodingKeys: String, CodingKey {
+                case role
+                case content
+                case toolCalls = "tool_calls"
+            }
+        }
     }
-    if let maxTokens = options.maximumResponseTokens {
-        body["max_output_tokens"] = .int(maxTokens)
+}
+
+private enum Responses {
+    static func createRequestBody(
+        model: String,
+        messages: [OpenAIMessage],
+        tools: [OpenAITool]?,
+        options: GenerationOptions,
+        stream: Bool
+    ) -> JSONValue {
+        var body: [String: JSONValue] = [
+            "model": .string(model),
+            "input": .object(["type": .string("input_text"), "text": .string("")]),
+            "messages": .array(messages.map { $0.jsonValue(for: .responses) }),
+            "stream": .bool(stream),
+        ]
+
+        if let tools {
+            body["tools"] = .array(tools.map { $0.jsonValue })
+        }
+
+        if let temperature = options.temperature {
+            body["temperature"] = .double(temperature)
+        }
+        if let maxTokens = options.maximumResponseTokens {
+            body["max_output_tokens"] = .int(maxTokens)
+        }
+
+        return .object(body)
     }
 
-    return .object(body)
+    struct Response: Decodable, Sendable {
+        let id: String
+        let outputText: String?
+        let finishReason: String?
+        let toolCalls: [OpenAIToolCall]?
+
+        private enum CodingKeys: String, CodingKey {
+            case id
+            case outputText = "output_text"
+            case finishReason = "finish_reason"
+            case toolCalls = "tool_calls"
+        }
+    }
 }
 
 // MARK: - Supporting Types
@@ -161,13 +322,23 @@ private struct OpenAIMessage: Hashable, Codable, Sendable {
     let role: Role
     let content: Content
 
-    var jsonValue: JSONValue {
+    func jsonValue(for apiVariant: OpenAILanguageModel.APIVariant) -> JSONValue {
         switch content {
         case .text(let text):
-            return .object([
-                "role": .string(role.rawValue),
-                "content": .array([.object(["type": .string("text"), "text": .string(text)])]),
-            ])
+            switch apiVariant {
+            case .chatCompletions:
+                // Chat Completions uses simple string content
+                return .object([
+                    "role": .string(role.rawValue),
+                    "content": .string(text),
+                ])
+            case .responses:
+                // Responses API uses array of content blocks
+                return .object([
+                    "role": .string(role.rawValue),
+                    "content": .array([.object(["type": .string("text"), "text": .string(text)])]),
+                ])
+            }
         }
     }
 }
@@ -230,20 +401,6 @@ private struct OpenAISchema: Hashable, Codable, Sendable {
         if let description { obj["description"] = .string(description) }
         if let enumValues { obj["enum"] = .array(enumValues.map { .string($0) }) }
         return .object(obj)
-    }
-}
-
-private struct ResponsesCreateResponse: Decodable, Sendable {
-    let id: String
-    let outputText: String?
-    let finishReason: String?
-    let toolCalls: [OpenAIToolCall]?
-
-    private enum CodingKeys: String, CodingKey {
-        case id
-        case outputText = "output_text"
-        case finishReason = "finish_reason"
-        case toolCalls = "tool_calls"
     }
 }
 
