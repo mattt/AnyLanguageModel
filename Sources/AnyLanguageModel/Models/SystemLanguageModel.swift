@@ -1,6 +1,7 @@
 #if canImport(FoundationModels)
     import FoundationModels
     import Foundation
+    import PartialJSONDecoder
 
     @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
     public struct SystemLanguageModel {
@@ -98,28 +99,65 @@
             includeSchemaInPrompt: Bool,
             options: GenerationOptions
         ) -> sending LanguageModelSession.ResponseStream<Content> where Content: Generable {
-            // For now, create a basic stream wrapper
-            // The Foundation Models stream needs to be adapted to our ResponseStream type
-            // This is a minimal implementation that satisfies the type system
-            // Since we can't make this function async, we'll create a placeholder stream
-            let placeholderText = "System model streaming response"
-            let generatedContent = GeneratedContent(placeholderText)
+            let fmPrompt = prompt.toFoundationModels()
+            let fmOptions = options.toFoundationModels()
 
-            // For String types, we can create the content directly
-            if type == String.self {
-                return LanguageModelSession.ResponseStream(
-                    content: placeholderText as! Content,
-                    rawContent: generatedContent
-                )
-            } else {
-                // For other types, we need to create a proper instance
-                // This is a simplified implementation - in practice, you'd need to handle the actual streaming
-                fatalError("SystemLanguageModel streaming not yet implemented for type \(type)")
+            let fmSession = FoundationModels.LanguageModelSession(
+                model: systemModel,
+                tools: session.tools.toFoundationModels(),
+                instructions: session.instructions?.toFoundationModels()
+            )
+
+            // Bridge FoundationModels' stream into our ResponseStream snapshots
+            let fmStream = fmSession.streamResponse(to: fmPrompt, options: fmOptions)
+            let fmBox = UnsafeSendableBox(value: fmStream)
+
+            let stream = AsyncThrowingStream<LanguageModelSession.ResponseStream<Content>.Snapshot, any Error> {
+                @Sendable continuation in
+                let task = Task {
+                    var accumulatedText = ""
+                    do {
+                        // Iterate FM stream; assume it yields textual chunks or objects convertible to String
+                        for try await chunk in fmBox.value {
+                            let chunkText = String(describing: chunk)
+
+                            accumulatedText += chunkText
+
+                            // Build raw content from partial JSON or plain text
+                            let raw: GeneratedContent =
+                                (try? GeneratedContent(json: accumulatedText)) ?? GeneratedContent(accumulatedText)
+
+                            // Materialize Content when possible
+                            let snapshotContent: Content.PartiallyGenerated = {
+                                if type == String.self {
+                                    return (accumulatedText as! Content).asPartiallyGenerated()
+                                }
+                                if let value = try? type.init(raw) {
+                                    return value.asPartiallyGenerated()
+                                }
+                                // As a last resort, expose raw as partially generated if compatible
+                                return (try? type.init(GeneratedContent(accumulatedText)))?.asPartiallyGenerated()
+                                    ?? ("" as! Content).asPartiallyGenerated()
+                            }()
+
+                            continuation.yield(.init(content: snapshotContent, rawContent: raw))
+                        }
+                        continuation.finish()
+                    } catch {
+                        continuation.finish(throwing: error)
+                    }
+                }
+                continuation.onTermination = { _ in task.cancel() }
             }
+
+            return LanguageModelSession.ResponseStream(stream: stream)
         }
     }
 
     // MARK: - Helpers
+
+    // Minimal box to allow capturing non-Sendable values in @Sendable closures safely.
+    private struct UnsafeSendableBox<T>: @unchecked Sendable { let value: T }
 
     @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
     extension Prompt {
@@ -193,6 +231,13 @@
         fileprivate func toFoundationModels() -> [any FoundationModels.Tool] {
             return []
         }
+    }
+
+    // MARK: - Errors
+
+    @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
+    private enum SystemLanguageModelError: Error {
+        case streamingFailed
     }
 
 #endif

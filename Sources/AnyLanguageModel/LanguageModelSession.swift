@@ -406,10 +406,20 @@ extension LanguageModelSession {
     public struct ResponseStream<Content> where Content: Generable {
         private let content: Content
         private let rawContent: GeneratedContent
+        private let streaming: AsyncThrowingStream<Snapshot, any Error>?
 
         init(content: Content, rawContent: GeneratedContent) {
             self.content = content
             self.rawContent = rawContent
+            self.streaming = nil
+        }
+
+        init(stream: AsyncThrowingStream<Snapshot, any Error>) {
+            // Fallback values when consumers call collect() before any snapshots arrive
+            // These will be replaced by the last yielded snapshot during collect()
+            self.content = (try? Content(GeneratedContent(""))) ?? ("" as! Content)
+            self.rawContent = GeneratedContent("")
+            self.streaming = stream
         }
 
         public struct Snapshot {
@@ -426,30 +436,71 @@ extension LanguageModelSession.ResponseStream: AsyncSequence {
         private var hasYielded = false
         private let content: Content
         private let rawContent: GeneratedContent
+        private var streamIterator: AsyncThrowingStream<Snapshot, any Error>.AsyncIterator?
+        private let useStream: Bool
 
-        init(content: Content, rawContent: GeneratedContent) {
+        init(content: Content, rawContent: GeneratedContent, stream: AsyncThrowingStream<Snapshot, any Error>?) {
             self.content = content
             self.rawContent = rawContent
+            if let stream {
+                let iterator = stream.makeAsyncIterator()
+                self.streamIterator = iterator
+                self.useStream = true
+            } else {
+                self.streamIterator = nil
+                self.useStream = false
+            }
         }
 
         public mutating func next() async throws -> Snapshot? {
-            guard !hasYielded else { return nil }
-            hasYielded = true
-
-            return Snapshot(
-                content: content.asPartiallyGenerated(),
-                rawContent: rawContent
-            )
+            if useStream {
+                if var iterator = streamIterator {
+                    if let value = try await iterator.next() {
+                        // store back the advanced iterator
+                        streamIterator = iterator
+                        return value
+                    }
+                    streamIterator = iterator
+                }
+                return nil
+            } else {
+                guard !hasYielded else { return nil }
+                hasYielded = true
+                return Snapshot(
+                    content: content.asPartiallyGenerated(),
+                    rawContent: rawContent
+                )
+            }
         }
 
         public typealias Element = Snapshot
     }
 
     public func makeAsyncIterator() -> AsyncIterator {
-        return AsyncIterator(content: content, rawContent: rawContent)
+        return AsyncIterator(content: content, rawContent: rawContent, stream: streaming)
     }
 
     nonisolated(nonsending) public func collect() async throws -> sending LanguageModelSession.Response<Content> {
+        if let streaming {
+            var last: Snapshot?
+            for try await snapshot in streaming {
+                last = snapshot
+            }
+            if let last {
+                // Attempt to materialize a concrete Content from the last snapshot
+                let finalContent: Content
+                if let concrete = last.content as? Content {
+                    finalContent = concrete
+                } else {
+                    finalContent = try Content(last.rawContent)
+                }
+                return LanguageModelSession.Response(
+                    content: finalContent,
+                    rawContent: last.rawContent,
+                    transcriptEntries: []
+                )
+            }
+        }
         return LanguageModelSession.Response(
             content: content,
             rawContent: rawContent,

@@ -47,38 +47,41 @@ import Testing
             #expect(!response.content.isEmpty)
         }
 
-        // @available(macOS 26.0, *)
-        // @Test func streamResponse() async throws {
-        //     let model: SystemLanguageModel = SystemLanguageModel()
-        //     let session = LanguageModelSession(model: model)
+        @available(macOS 26.0, *)
+        @Test func streamingString() async throws {
+            guard isSystemLanguageModelAvailable else { return }
+            let model: SystemLanguageModel = SystemLanguageModel()
+            let session = LanguageModelSession(model: model)
 
-        //     let stream = session.streamResponse(to: "Count to 3")
+            let stream = session.streamResponse(to: "Say 'Hello' slowly")
 
-        //     var responses: [Response<String>] = []
-        //     for try await response in stream {
-        //         responses.append(response)
-        //     }
+            var snapshots: [LanguageModelSession.ResponseStream<String>.Snapshot] = []
+            for try await snapshot in stream {
+                snapshots.append(snapshot)
+            }
 
-        //     #expect(!responses.isEmpty)
-        //     #expect(!responses.last!.text.isEmpty)
-        // }
+            #expect(!snapshots.isEmpty)
+            #expect(!snapshots.last!.rawContent.jsonString.isEmpty)
+        }
 
-        // @available(macOS 26.0, *)
-        // @Test func streamWithInstructions() async throws {
-        //     let model = SystemLanguageModel()
-        //     let session = LanguageModelSession(
-        //         model: model,
-        //         instructions: "Be concise."
-        //     )
+        @available(macOS 26.0, *)
+        @Test func streamingGeneratedContent() async throws {
+            guard isSystemLanguageModelAvailable else { return }
+            let model: SystemLanguageModel = SystemLanguageModel()
+            let session = LanguageModelSession(model: model)
 
-        //     let stream = try await session.streamResponse(to: "Say hi")
+            let stream = session.streamResponse(
+                to: Prompt("Provide a JSON object with a field 'text'"),
+                schema: GeneratedContent.generationSchema
+            )
 
-        //     var responses: [Response] = []
-        //     for try await response in stream {
-        //         responses.append(response)
-        //     }
+            var snapshots: [LanguageModelSession.ResponseStream<GeneratedContent>.Snapshot] = []
+            for try await snapshot in stream {
+                snapshots.append(snapshot)
+            }
 
-        //     #expect(!responses.isEmpty)
-        // }
+            #expect(!snapshots.isEmpty)
+            #expect(!snapshots.last!.rawContent.jsonString.isEmpty)
+        }
     }
 #endif

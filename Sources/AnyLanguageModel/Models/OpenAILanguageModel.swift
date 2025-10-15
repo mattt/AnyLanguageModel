@@ -197,14 +197,121 @@ public struct OpenAILanguageModel: LanguageModel {
             fatalError("OpenAILanguageModel only supports generating String content")
         }
 
-        // For OpenAILanguageModel, we'll simulate streaming by yielding the response immediately
-        // In a real implementation, this would make a streaming request to OpenAI's API
-        // and yield chunks as they arrive
-        // Since we can't make this function async, we'll create a placeholder stream
-        let placeholderText = "OpenAI streaming response"
-        let generatedContent = GeneratedContent(placeholderText)
+        let messages = [
+            OpenAIMessage(role: .user, content: .text(prompt.description))
+        ]
 
-        return LanguageModelSession.ResponseStream(content: placeholderText as! Content, rawContent: generatedContent)
+        // Convert tools if any are available in the session
+        let openAITools: [OpenAITool]? = {
+            guard !session.tools.isEmpty else { return nil }
+            var converted: [OpenAITool] = []
+            converted.reserveCapacity(session.tools.count)
+            for tool in session.tools {
+                converted.append(convertToolToOpenAIFormat(tool))
+            }
+            return converted
+        }()
+
+        // Build request for Responses API with streaming enabled
+        let params = Responses.createRequestBody(
+            model: model,
+            messages: messages,
+            tools: openAITools,
+            options: options,
+            stream: true
+        )
+
+        let url = baseURL.appendingPathComponent("responses")
+
+        let stream: AsyncThrowingStream<LanguageModelSession.ResponseStream<Content>.Snapshot, any Error> = .init {
+            continuation in
+            let task = Task { @Sendable in
+                do {
+                    let body = try JSONEncoder().encode(params)
+
+                    // Stream server-sent events from OpenAI Responses API
+                    let events: AsyncThrowingStream<ResponsesServerEvent, any Error> =
+                        urlSession
+                        .fetchEventStream(
+                            .post,
+                            url: url,
+                            headers: [
+                                "Authorization": "Bearer \(apiKey)"
+                            ],
+                            body: body
+                        )
+
+                    var accumulatedText = ""
+                    var toolCallsById: [String: AccumulatedToolCall] = [:]
+
+                    for try await event in events {
+                        switch event {
+                        case .outputTextDelta(let delta):
+                            accumulatedText += delta
+
+                            // Yield snapshot with partially generated content
+                            let raw = GeneratedContent(accumulatedText)
+                            let content: Content.PartiallyGenerated = (accumulatedText as! Content)
+                                .asPartiallyGenerated()
+                            continuation.yield(.init(content: content, rawContent: raw))
+
+                        case .toolCallCreated(let toolCall):
+                            // Initialize a new tool call accumulator
+                            if let id = toolCall.id {
+                                toolCallsById[id] = AccumulatedToolCall(
+                                    id: id,
+                                    type: toolCall.type ?? "function",
+                                    functionName: toolCall.function?.name ?? "",
+                                    arguments: ""
+                                )
+                            }
+                        case .toolCallDelta(let delta):
+                            // Accumulate arguments for the tool call
+                            if let id = delta.id, var accumulated = toolCallsById[id] {
+                                if let arguments = delta.function?.arguments {
+                                    accumulated.arguments += arguments
+                                    toolCallsById[id] = accumulated
+                                }
+                                if let name = delta.function?.name {
+                                    accumulated.functionName = name
+                                    toolCallsById[id] = accumulated
+                                }
+                            }
+                        case .completed(_):
+                            // Execute accumulated tool calls before finishing
+                            if !toolCallsById.isEmpty {
+                                let toolCalls = toolCallsById.values.map { accumulated in
+                                    OpenAIToolCall(
+                                        id: accumulated.id,
+                                        type: accumulated.type,
+                                        function: OpenAIToolFunction(
+                                            name: accumulated.functionName,
+                                            arguments: accumulated.arguments
+                                        )
+                                    )
+                                }
+
+                                // Execute tools and yield final result with tool outputs
+                                _ = try? await resolveToolCalls(toolCalls, session: session)
+                                // Since we can't add transcript entries mid-stream,
+                                // we just finish. The non-streaming API should be used
+                                // for full tool execution support.
+                            }
+                            continuation.finish()
+                        case .ignored:
+                            break
+                        }
+                    }
+
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+
+        return LanguageModelSession.ResponseStream(stream: stream)
     }
 }
 
@@ -413,6 +520,13 @@ private struct OpenAIToolCall: Decodable, Sendable {
 private struct OpenAIToolFunction: Decodable, Sendable {
     let name: String
     let arguments: String?
+}
+
+private struct AccumulatedToolCall {
+    var id: String
+    var type: String
+    var functionName: String
+    var arguments: String
 }
 
 // MARK: - Tool Invocation Handling
