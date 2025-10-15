@@ -109,7 +109,8 @@
             )
 
             // Bridge FoundationModels' stream into our ResponseStream snapshots
-            let fmStream = fmSession.streamResponse(to: fmPrompt, options: fmOptions)
+            let fmStream: FoundationModels.LanguageModelSession.ResponseStream<String> =
+                fmSession.streamResponse(to: fmPrompt, options: fmOptions)
             let fmBox = UnsafeSendableBox(value: fmStream)
 
             let stream = AsyncThrowingStream<LanguageModelSession.ResponseStream<Content>.Snapshot, any Error> {
@@ -117,15 +118,33 @@
                 let task = Task {
                     var accumulatedText = ""
                     do {
-                        // Iterate FM stream; assume it yields textual chunks or objects convertible to String
-                        for try await chunk in fmBox.value {
-                            let chunkText = String(describing: chunk)
+                        // Iterate FM stream of String snapshots
+                        var lastLength = 0
+                        for try await snapshot in fmBox.value {
+                            let chunkText: String = snapshot.content
 
-                            accumulatedText += chunkText
+                            if chunkText.count >= lastLength, chunkText.hasPrefix(accumulatedText) {
+                                // Cumulative; compute delta via previous length
+                                let startIdx = chunkText.index(chunkText.startIndex, offsetBy: lastLength)
+                                let delta = String(chunkText[startIdx...])
+                                accumulatedText += delta
+                                lastLength = chunkText.count
+                            } else if chunkText.hasPrefix(accumulatedText) {
+                                // Fallback cumulative detection
+                                accumulatedText = chunkText
+                                lastLength = chunkText.count
+                            } else if accumulatedText.hasPrefix(chunkText) {
+                                // In unlikely case of an unexpected shrink, reset to the full chunk
+                                accumulatedText = chunkText
+                                lastLength = chunkText.count
+                            } else {
+                                // Treat as delta and append
+                                accumulatedText += chunkText
+                                lastLength = accumulatedText.count
+                            }
 
-                            // Build raw content from partial JSON or plain text
-                            let raw: GeneratedContent =
-                                (try? GeneratedContent(json: accumulatedText)) ?? GeneratedContent(accumulatedText)
+                            // Build raw content from plain text
+                            let raw: GeneratedContent = GeneratedContent(accumulatedText)
 
                             // Materialize Content when possible
                             let snapshotContent: Content.PartiallyGenerated = {
