@@ -1,3 +1,4 @@
+import EventSource
 import Foundation
 import JSONSchema
 import OrderedCollections
@@ -117,14 +118,76 @@ public struct AnthropicLanguageModel: LanguageModel {
             fatalError("AnthropicLanguageModel only supports generating String content")
         }
 
-        // For AnthropicLanguageModel, we'll simulate streaming by yielding the response immediately
-        // In a real implementation, this would make a streaming request to Anthropic's API
-        // and yield chunks as they arrive
-        // Since we can't make this function async, we'll create a placeholder stream
-        let placeholderText = "Anthropic streaming response"
-        let generatedContent = GeneratedContent(placeholderText)
+        let messages = [
+            AnthropicMessage(role: .user, content: [.text(.init(text: prompt.description))])
+        ]
 
-        return LanguageModelSession.ResponseStream(content: placeholderText as! Content, rawContent: generatedContent)
+        let url = baseURL.appendingPathComponent("v1/messages")
+
+        let stream: AsyncThrowingStream<LanguageModelSession.ResponseStream<Content>.Snapshot, any Error> = .init {
+            continuation in
+            let task = Task { @Sendable in
+                do {
+                    // Convert available tools to Anthropic format
+                    let anthropicTools: [AnthropicTool] = try session.tools.map { tool in
+                        try convertToolToAnthropicFormat(tool)
+                    }
+
+                    var params = try createMessageParams(
+                        model: model,
+                        system: nil,
+                        messages: messages,
+                        tools: anthropicTools.isEmpty ? nil : anthropicTools,
+                        options: options
+                    )
+                    params["stream"] = .bool(true)
+
+                    let body = try JSONEncoder().encode(params)
+
+                    // Stream server-sent events from Anthropic API
+                    let events: AsyncThrowingStream<AnthropicStreamEvent, any Error> =
+                        urlSession
+                        .fetchEventStream(
+                            .post,
+                            url: url,
+                            headers: [
+                                "x-api-key": apiKey,
+                                "anthropic-version": Self.defaultAPIVersion,
+                            ],
+                            body: body
+                        )
+
+                    var accumulatedText = ""
+
+                    for try await event in events {
+                        switch event {
+                        case .contentBlockDelta(let delta):
+                            if case .textDelta(let textDelta) = delta.delta {
+                                accumulatedText += textDelta.text
+
+                                // Yield snapshot with partially generated content
+                                let raw = GeneratedContent(accumulatedText)
+                                let content: Content.PartiallyGenerated = (accumulatedText as! Content)
+                                    .asPartiallyGenerated()
+                                continuation.yield(.init(content: content, rawContent: raw))
+                            }
+                        case .messageStop:
+                            continuation.finish()
+                            return
+                        case .messageStart, .contentBlockStart, .contentBlockStop, .messageDelta, .ping, .ignored:
+                            break
+                        }
+                    }
+
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+
+        return LanguageModelSession.ResponseStream(stream: stream)
     }
 }
 
@@ -330,4 +393,156 @@ private struct AnthropicErrorResponse: Codable { let error: AnthropicErrorDetail
 private struct AnthropicErrorDetail: Codable {
     let type: String
     let message: String
+}
+
+// MARK: - Streaming Event Types
+
+private enum AnthropicStreamEvent: Codable, Sendable {
+    case messageStart(MessageStartEvent)
+    case contentBlockStart(ContentBlockStartEvent)
+    case contentBlockDelta(ContentBlockDeltaEvent)
+    case contentBlockStop(ContentBlockStopEvent)
+    case messageDelta(MessageDeltaEvent)
+    case messageStop
+    case ping
+    case ignored
+
+    enum CodingKeys: String, CodingKey { case type }
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let type = try container.decode(String.self, forKey: .type)
+
+        switch type {
+        case "message_start":
+            self = .messageStart(try MessageStartEvent(from: decoder))
+        case "content_block_start":
+            self = .contentBlockStart(try ContentBlockStartEvent(from: decoder))
+        case "content_block_delta":
+            self = .contentBlockDelta(try ContentBlockDeltaEvent(from: decoder))
+        case "content_block_stop":
+            self = .contentBlockStop(try ContentBlockStopEvent(from: decoder))
+        case "message_delta":
+            self = .messageDelta(try MessageDeltaEvent(from: decoder))
+        case "message_stop":
+            self = .messageStop
+        case "ping":
+            self = .ping
+        default:
+            self = .ignored
+        }
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        switch self {
+        case .messageStart(let event): try event.encode(to: encoder)
+        case .contentBlockStart(let event): try event.encode(to: encoder)
+        case .contentBlockDelta(let event): try event.encode(to: encoder)
+        case .contentBlockStop(let event): try event.encode(to: encoder)
+        case .messageDelta(let event): try event.encode(to: encoder)
+        case .messageStop:
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode("message_stop", forKey: .type)
+        case .ping:
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode("ping", forKey: .type)
+        case .ignored:
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode("ignored", forKey: .type)
+        }
+    }
+
+    struct MessageStartEvent: Codable, Sendable {
+        let type: String
+        let message: AnthropicMessageResponse
+    }
+
+    struct ContentBlockStartEvent: Codable, Sendable {
+        let type: String
+        let index: Int
+        let contentBlock: ContentBlock
+
+        enum CodingKeys: String, CodingKey {
+            case type, index
+            case contentBlock = "content_block"
+        }
+
+        struct ContentBlock: Codable, Sendable {
+            let type: String
+            let text: String?
+        }
+    }
+
+    struct ContentBlockDeltaEvent: Codable, Sendable {
+        let type: String
+        let index: Int
+        let delta: Delta
+
+        enum Delta: Codable, Sendable {
+            case textDelta(TextDelta)
+            case inputJsonDelta(InputJsonDelta)
+            case ignored
+
+            enum CodingKeys: String, CodingKey { case type }
+
+            init(from decoder: any Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                let type = try container.decode(String.self, forKey: .type)
+
+                switch type {
+                case "text_delta":
+                    self = .textDelta(try TextDelta(from: decoder))
+                case "input_json_delta":
+                    self = .inputJsonDelta(try InputJsonDelta(from: decoder))
+                default:
+                    self = .ignored
+                }
+            }
+
+            func encode(to encoder: any Encoder) throws {
+                switch self {
+                case .textDelta(let delta): try delta.encode(to: encoder)
+                case .inputJsonDelta(let delta): try delta.encode(to: encoder)
+                case .ignored:
+                    var container = encoder.container(keyedBy: CodingKeys.self)
+                    try container.encode("ignored", forKey: .type)
+                }
+            }
+
+            struct TextDelta: Codable, Sendable {
+                let type: String
+                let text: String
+            }
+
+            struct InputJsonDelta: Codable, Sendable {
+                let type: String
+                let partialJson: String
+
+                enum CodingKeys: String, CodingKey {
+                    case type
+                    case partialJson = "partial_json"
+                }
+            }
+        }
+    }
+
+    struct ContentBlockStopEvent: Codable, Sendable {
+        let type: String
+        let index: Int
+    }
+
+    struct MessageDeltaEvent: Codable, Sendable {
+        let type: String
+        let delta: Delta
+
+        struct Delta: Codable, Sendable {
+            let stopReason: String?
+            let stopSequence: String?
+
+            enum CodingKeys: String, CodingKey {
+                case stopReason = "stop_reason"
+                case stopSequence = "stop_sequence"
+            }
+        }
+    }
 }

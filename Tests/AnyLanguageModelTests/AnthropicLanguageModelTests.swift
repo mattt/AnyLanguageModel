@@ -47,6 +47,20 @@ struct AnthropicLanguageModelTests {
         #expect(!chunks.isEmpty)
     }
 
+    @Test func streamingString() async throws {
+        let session = LanguageModelSession(model: model)
+
+        let stream = session.streamResponse(to: "Say 'Hello' slowly")
+
+        var snapshots: [LanguageModelSession.ResponseStream<String>.Snapshot] = []
+        for try await snapshot in stream {
+            snapshots.append(snapshot)
+        }
+
+        #expect(!snapshots.isEmpty)
+        #expect(!snapshots.last!.rawContent.jsonString.isEmpty)
+    }
+
     @Test func withGenerationOptions() async throws {
         let session = LanguageModelSession(model: model)
 

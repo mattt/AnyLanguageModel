@@ -97,14 +97,68 @@ public struct OllamaLanguageModel: LanguageModel {
             fatalError("OllamaLanguageModel only supports generating String content")
         }
 
-        // For OllamaLanguageModel, we'll simulate streaming by yielding the response immediately
-        // In a real implementation, this would make a streaming request to Ollama's API
-        // and yield chunks as they arrive
-        // Since we can't make this function async, we'll create a placeholder stream
-        let placeholderText = "Ollama streaming response"
-        let generatedContent = GeneratedContent(placeholderText)
+        let messages = [
+            OllamaMessage(role: .user, content: prompt.description)
+        ]
+        let ollamaOptions = convertOptions(options)
+        let ollamaTools = try? session.tools.map { tool in
+            try convertToolToOllamaFormat(tool)
+        }
 
-        return LanguageModelSession.ResponseStream(content: placeholderText as! Content, rawContent: generatedContent)
+        let params = try? createChatParams(
+            model: model,
+            messages: messages,
+            tools: (ollamaTools?.isEmpty == false) ? ollamaTools : nil,
+            options: ollamaOptions,
+            stream: true
+        )
+
+        let url = baseURL.appendingPathComponent("api/chat")
+        let body = (try? JSONEncoder().encode(params)) ?? Data()
+
+        // Transform the newline-delimited JSON stream from Ollama into ResponseStream snapshots
+        let stream: AsyncThrowingStream<LanguageModelSession.ResponseStream<Content>.Snapshot, any Error> =
+            AsyncThrowingStream { continuation in
+                let task = Task {
+                    do {
+                        // Reuse ChatResponse as each streamed line shares the same shape
+                        let chunks =
+                            urlSession.fetchStream(
+                                .post,
+                                url: url,
+                                body: body,
+                                dateDecodingStrategy: .iso8601WithFractionalSeconds
+                            ) as AsyncThrowingStream<ChatResponse, any Error>
+
+                        var partialText = ""
+
+                        for try await chunk in chunks {
+                            if let piece = chunk.message.content {
+                                partialText += piece
+                                let snapshot = LanguageModelSession.ResponseStream<Content>.Snapshot(
+                                    content: (partialText as! Content).asPartiallyGenerated(),
+                                    rawContent: GeneratedContent(partialText)
+                                )
+                                continuation.yield(snapshot)
+                            }
+
+                            if chunk.done {
+                                break
+                            }
+                        }
+
+                        continuation.finish()
+                    } catch {
+                        continuation.finish(throwing: error)
+                    }
+                }
+
+                continuation.onTermination = { _ in
+                    task.cancel()
+                }
+            }
+
+        return LanguageModelSession.ResponseStream(stream: stream)
     }
 }
 
