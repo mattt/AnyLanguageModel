@@ -35,13 +35,22 @@ public struct CoreMLLanguageModel: AnyLanguageModel.LanguageModel {
         // Convert AnyLanguageModel GenerationOptions to swift-transformers GenerationConfig
         let generationConfig = toGenerationConfig(options)
 
+        // User prompt
+        let chat: [Message] = [["role" : "user", "content" : prompt.description]]
+        let inputIds = try await tokenizer.applyChatTemplate(messages: chat)
+
+        // TODO: we need either one of these (or possibly both):
+        // - A version of applyChatTemplate that does not tokenize
+        // - A version of Core ML `model.generate` that accepts input ids
+        let lmInput = try await tokenizer.decode(tokens: inputIds, skipSpecialTokens: false)
+
         // Reset model state for new generation
         await model.resetState()
 
         // Generate response using swift-transformers
         let response = try await model.generate(
             config: generationConfig,
-            prompt: prompt.description
+            prompt: lmInput
         ) { _ in
             // No streaming callback needed for non-streaming response
         }
