@@ -134,7 +134,23 @@ private func compileModel(at url: URL) throws -> URL {
         if url.pathExtension == "mlmodelc" {
             return url
         }
+
+        let modelName = url.deletingPathExtension().lastPathComponent
+        let cacheBase = try FileManager.default.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+        let cacheRoot = cacheBase.appendingPathComponent("co.huggingface.AnyLanguageModel", isDirectory: true)
+        let cached = cacheRoot.appendingPathComponent("\(modelName).mlmodelc", isDirectory: true)
+
+        if FileManager.default.fileExists(atPath: cached.path) {
+            return cached
+        }
+
         print("Compiling model \(url)")
-        return try MLModel.compileModel(at: url)
+        let compiled = try MLModel.compileModel(at: url)
+
+        try FileManager.default.createDirectory(at: cacheRoot, withIntermediateDirectories: true)
+        try? FileManager.default.removeItem(at: cached)
+        try FileManager.default.copyItem(at: compiled, to: cached)
+        try? FileManager.default.removeItem(at: compiled)
+        return cached
     #endif
 }
