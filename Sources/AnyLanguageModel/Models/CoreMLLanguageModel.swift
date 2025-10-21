@@ -35,25 +35,29 @@ public struct CoreMLLanguageModel: AnyLanguageModel.LanguageModel {
         // Convert AnyLanguageModel GenerationOptions to swift-transformers GenerationConfig
         let generationConfig = toGenerationConfig(options)
 
-        // User prompt
-        let chat: [Message] = [["role" : "user", "content" : prompt.description]]
-        let inputIds = try await tokenizer.applyChatTemplate(messages: chat)
+        // Build chat with optional system instructions
+        var chat: [Message] = []
+        if let instructions = session.instructions?.description, !instructions.isEmpty {
+            chat.append(["role": "system", "content": instructions])
+        }
+        chat.append(["role": "user", "content": prompt.description])
 
-        // TODO: we need either one of these (or possibly both):
-        // - A version of applyChatTemplate that does not tokenize
-        // - A version of Core ML `model.generate` that accepts input ids
-        let lmInput = try await tokenizer.decode(tokens: inputIds, skipSpecialTokens: false)
+        // Convert tools to Tokenizers.ToolSpec when available
+        let toolSpecs: [ToolSpec]? =
+            session.tools.isEmpty
+            ? nil
+            : session.tools.map { tool in toToolSpec(tool) }
+
+        let tokens = try tokenizer.applyChatTemplate(messages: chat, tools: toolSpecs)
 
         // Reset model state for new generation
         await model.resetState()
 
-        // Generate response using swift-transformers
-        let response = try await model.generate(
+        let response = await model.generate(
             config: generationConfig,
-            prompt: lmInput
-        ) { _ in
-            // No streaming callback needed for non-streaming response
-        }
+            tokens: tokens,
+            model: model.callAsFunction
+        )
 
         return LanguageModelSession.Response(
             content: response as! Content,
@@ -77,28 +81,85 @@ public struct CoreMLLanguageModel: AnyLanguageModel.LanguageModel {
         // Convert AnyLanguageModel GenerationOptions to swift-transformers GenerationConfig
         let generationConfig = toGenerationConfig(options)
 
-        // For streaming, we'll collect the response and return it as a single chunk
-        // This is a simplified implementation - a full streaming implementation would
-        // require more complex async handling
-        _ = Task {
-            await model.resetState()
-            return try await model.generate(
-                config: generationConfig,
-                prompt: prompt.description
-            ) { _ in
-                // No streaming callback needed for this implementation
+        // Transform the generation into ResponseStream snapshots
+        let stream: AsyncThrowingStream<LanguageModelSession.ResponseStream<Content>.Snapshot, any Error> = .init {
+            @Sendable continuation in
+            let task = Task {
+                do {
+                    // Build chat with optional system instructions
+                    var chat: [Message] = []
+                    if let instructions = session.instructions?.description, !instructions.isEmpty {
+                        chat.append(["role": "system", "content": instructions])
+                    }
+                    chat.append(["role": "user", "content": prompt.description])
+
+                    // Convert tools to Tokenizers.ToolSpec when available
+                    let toolSpecs: [ToolSpec]? =
+                        session.tools.isEmpty
+                        ? nil
+                        : session.tools.map { tool in toToolSpec(tool) }
+
+                    let tokens = try tokenizer.applyChatTemplate(messages: chat, tools: toolSpecs)
+
+                    await model.resetState()
+
+                    // Decode the rendered prompt once to strip it from streamed output
+                    let promptTextPrefix = tokenizer.decode(tokens: tokens)
+                    var accumulatedText = ""
+
+                    _ = await model.generate(
+                        config: generationConfig,
+                        tokens: tokens,
+                        model: model.callAsFunction
+                    ) { tokenIds in
+                        // Decode full text and strip the prompt prefix
+                        let fullText = tokenizer.decode(tokens: tokenIds)
+                        let assistantText: String
+                        if fullText.hasPrefix(promptTextPrefix) {
+                            let startIdx = fullText.index(fullText.startIndex, offsetBy: promptTextPrefix.count)
+                            assistantText = String(fullText[startIdx...])
+                        } else {
+                            assistantText = fullText
+                        }
+
+                        // Compute delta vs accumulated text and yield
+                        if assistantText.count >= accumulatedText.count,
+                            assistantText.hasPrefix(accumulatedText)
+                        {
+                            let startIdx = assistantText.index(
+                                assistantText.startIndex,
+                                offsetBy: accumulatedText.count
+                            )
+                            let delta = String(assistantText[startIdx...])
+                            accumulatedText += delta
+                        } else {
+                            accumulatedText = assistantText
+                        }
+
+                        continuation.yield(
+                            .init(
+                                content: (accumulatedText as! Content).asPartiallyGenerated(),
+                                rawContent: GeneratedContent(accumulatedText)
+                            )
+                        )
+                    }
+
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+
+            continuation.onTermination = { _ in
+                task.cancel()
             }
         }
 
-        // Return a stream that yields the complete response
-        return LanguageModelSession.ResponseStream(
-            content: "" as! Content,
-            rawContent: GeneratedContent("")
-        )
+        return LanguageModelSession.ResponseStream(stream: stream)
     }
 }
 
-// MARK: - Options Mapping
+// MARK: -
 
 private func toGenerationConfig(_ options: GenerationOptions) -> GenerationConfig {
     var config = GenerationConfig(maxNewTokens: options.maximumResponseTokens ?? 2048)
@@ -125,7 +186,43 @@ private func toGenerationConfig(_ options: GenerationOptions) -> GenerationConfi
     return config
 }
 
-// MARK: - Model Compilation
+// Convert AnyLanguageModel Tool into a Tokenizers.ToolSpec dictionary understood by chat templates
+private func toToolSpec(_ tool: any Tool) -> ToolSpec {
+    // Convert AnyLanguageModel's GenerationSchema to JSON-compatible dictionary
+    let parametersDict: [String: Any]
+    do {
+        let encoder = JSONEncoder()
+        let data = try encoder.encode(tool.parameters)
+        if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            // Resolve $ref if present
+            if let ref = json["$ref"] as? String,
+                let defs = json["$defs"] as? [String: Any]
+            {
+                let defName = ref.replacingOccurrences(of: "#/$defs/", with: "")
+                if let resolvedDef = defs[defName] as? [String: Any] {
+                    parametersDict = resolvedDef
+                } else {
+                    parametersDict = ["type": "object", "properties": [:], "required": []]
+                }
+            } else {
+                parametersDict = json
+            }
+        } else {
+            parametersDict = ["type": "object", "properties": [:], "required": []]
+        }
+    } catch {
+        parametersDict = ["type": "object", "properties": [:], "required": []]
+    }
+
+    return [
+        "type": "function",
+        "function": [
+            "name": tool.name,
+            "description": tool.description,
+            "parameters": parametersDict,
+        ],
+    ]
+}
 
 private func compileModel(at url: URL) throws -> URL {
     #if os(watchOS)
@@ -136,7 +233,12 @@ private func compileModel(at url: URL) throws -> URL {
         }
 
         let modelName = url.deletingPathExtension().lastPathComponent
-        let cacheBase = try FileManager.default.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+        let cacheBase = try FileManager.default.url(
+            for: .cachesDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )
         let cacheRoot = cacheBase.appendingPathComponent("co.huggingface.AnyLanguageModel", isDirectory: true)
         let cached = cacheRoot.appendingPathComponent("\(modelName).mlmodelc", isDirectory: true)
 
