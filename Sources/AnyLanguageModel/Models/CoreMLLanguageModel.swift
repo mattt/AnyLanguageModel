@@ -4,6 +4,18 @@ import Tokenizers
 @preconcurrency import Generation
 @preconcurrency import Models
 
+/// A language model that runs locally using Core ML.
+///
+/// Use this model to run language models on-device with Core ML.
+/// The model must be compiled to `.mlmodelc` format before use.
+///
+/// ```swift
+/// let modelURL = Bundle.main.url(
+///     forResource: "MyModel",
+///     withExtension: "mlmodelc"
+/// )!
+/// let model = try await CoreMLLanguageModel(url: modelURL)
+/// ```
 @available(macOS 15.0, iOS 18.0, tvOS 18.0, visionOS 2.0, watchOS 11.0, *)
 public struct CoreMLLanguageModel: AnyLanguageModel.LanguageModel {
     private let model: Models.LanguageModel
@@ -11,6 +23,15 @@ public struct CoreMLLanguageModel: AnyLanguageModel.LanguageModel {
     private let chatTemplateHandler: (@Sendable (Instructions?, Prompt) -> [Message])?
     private let toolsHandler: (@Sendable ([any Tool]) -> [ToolSpec])?
 
+    /// Creates a Core ML language model.
+    ///
+    /// - Parameters:
+    ///   - url: The URL to a compiled Core ML model (`.mlmodelc`).
+    ///   - computeUnits: The compute units to use for inference.
+    ///   - chatTemplateHandler: An optional handler to format chat messages.
+    ///   - toolsHandler: An optional handler to convert tools to the model's expected format.
+    ///
+    /// - Throws: An error if the model can't be loaded or if the URL doesn't point to a compiled model.
     public init(
         url: URL,
         computeUnits: MLComputeUnits = .all,
@@ -163,8 +184,10 @@ public struct CoreMLLanguageModel: AnyLanguageModel.LanguageModel {
     }
 }
 
+/// Errors that can occur when working with Core ML language models.
 @available(macOS 15.0, iOS 18.0, tvOS 18.0, visionOS 2.0, watchOS 11.0, *)
 public enum CoreMLLanguageModelError: LocalizedError {
+    /// The provided model isn't a compiled Core ML model.
     case compiledModelRequired
 
     public var errorDescription: String? {
