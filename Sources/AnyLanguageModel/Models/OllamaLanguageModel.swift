@@ -6,13 +6,31 @@ import OrderedCollections
     import FoundationNetworking
 #endif
 
+/// A language model that connects to Ollama.
+///
+/// Use this model to generate text using models running locally with Ollama.
+///
+/// ```swift
+/// let model = OllamaLanguageModel(model: "qwen2.5")
+/// ```
 public struct OllamaLanguageModel: LanguageModel {
+    /// The default base URL for Ollama.
     public static let defaultBaseURL = URL(string: "http://localhost:11434")!
 
+    /// The base URL for the Ollama server.
     public let baseURL: URL
+
+    /// The model identifier to use for generation.
     public let model: String
+
     private let urlSession: URLSession
 
+    /// Creates an Ollama language model.
+    ///
+    /// - Parameters:
+    ///   - baseURL: The base URL for the Ollama server. Defaults to `http://localhost:11434`.
+    ///   - model: The model identifier (for example, "qwen2.5" or "llama3.3").
+    ///   - session: The URL session to use for network requests.
     public init(
         baseURL: URL = defaultBaseURL,
         model: String,

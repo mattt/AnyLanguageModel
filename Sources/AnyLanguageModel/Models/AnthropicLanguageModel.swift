@@ -7,15 +7,41 @@ import OrderedCollections
     import FoundationNetworking
 #endif
 
+/// A language model that connects to Anthropic's Claude API.
+///
+/// Use this model to generate text using Claude models from Anthropic.
+///
+/// ```swift
+/// let model = AnthropicLanguageModel(
+///     apiKey: "your-api-key",
+///     model: "claude-3-5-sonnet-20241022"
+/// )
+/// ```
 public struct AnthropicLanguageModel: LanguageModel {
+    /// The default base URL for Anthropic's API.
     public static let defaultBaseURL = URL(string: "https://api.anthropic.com")!
+
+    /// The default API version for Anthropic's API.
     public static let defaultAPIVersion = "2023-06-01"
 
+    /// The base URL for the API endpoint.
     public let baseURL: URL
+
+    /// The API key for authentication.
     public let apiKey: String
+
+    /// The model identifier to use for generation.
     public let model: String
+
     private let urlSession: URLSession
 
+    /// Creates an Anthropic language model.
+    ///
+    /// - Parameters:
+    ///   - baseURL: The base URL for the API endpoint. Defaults to Anthropic's official API.
+    ///   - apiKey: Your Anthropic API key.
+    ///   - model: The model identifier (for example, "claude-3-5-sonnet-20241022").
+    ///   - session: The URL session to use for network requests.
     public init(
         baseURL: URL = defaultBaseURL,
         apiKey: String,

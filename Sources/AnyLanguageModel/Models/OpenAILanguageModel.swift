@@ -5,9 +5,22 @@ import JSONSchema
     import FoundationNetworking
 #endif
 
+/// A language model that connects to OpenAI-compatible APIs.
+///
+/// Use this model to generate text using OpenAI's Chat Completions or Responses APIs.
+/// You can specify a custom base URL to work with OpenAI-compatible services.
+///
+/// ```swift
+/// let model = OpenAILanguageModel(
+///     apiKey: "your-api-key",
+///     model: "gpt-4"
+/// )
+/// ```
 public struct OpenAILanguageModel: LanguageModel {
+    /// The default base URL for OpenAI's API.
     public static let defaultBaseURL = URL(string: "https://api.openai.com/v1/")!
 
+    /// The OpenAI API variant to use.
     public enum APIVariant: Sendable {
         /// When selected, use the Chat Completions API.
         /// https://platform.openai.com/docs/api-reference/chat/create
@@ -17,12 +30,28 @@ public struct OpenAILanguageModel: LanguageModel {
         case responses
     }
 
+    /// The base URL for the API endpoint.
     public let baseURL: URL
+
+    /// The API key for authentication.
     public let apiKey: String
+
+    /// The model identifier to use for generation.
     public let model: String
+
+    /// The API variant to use.
     public let apiVariant: APIVariant
+
     private let urlSession: URLSession
 
+    /// Creates an OpenAI language model.
+    ///
+    /// - Parameters:
+    ///   - baseURL: The base URL for the API endpoint. Defaults to OpenAI's official API.
+    ///   - apiKey: Your OpenAI API key.
+    ///   - model: The model identifier (for example, "gpt-4" or "gpt-3.5-turbo").
+    ///   - apiVariant: The API variant to use. Defaults to `.chatCompletions`.
+    ///   - session: The URL session to use for network requests.
     public init(
         baseURL: URL = defaultBaseURL,
         apiKey: String,
