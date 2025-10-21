@@ -2,9 +2,21 @@ import Foundation
 import MLXLMCommon
 import Tokenizers
 
+/// A language model that runs locally using MLX.
+///
+/// Use this model to run language models on Apple silicon using the MLX framework.
+/// Models are automatically downloaded and cached when first used.
+///
+/// ```swift
+/// let model = MLXLanguageModel(modelId: "mlx-community/Llama-3.2-3B-Instruct-4bit")
+/// ```
 public struct MLXLanguageModel: LanguageModel {
+    /// The model identifier from the MLX community on Hugging Face.
     public let modelId: String
 
+    /// Creates an MLX language model.
+    ///
+    /// - Parameter modelId: The Hugging Face model identifier (for example, "mlx-community/Llama-3.2-3B-Instruct-4bit").
     public init(modelId: String) {
         self.modelId = modelId
     }

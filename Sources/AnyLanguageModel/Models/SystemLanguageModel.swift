@@ -3,6 +3,14 @@
     import Foundation
     import PartialJSONDecoder
 
+    /// A language model that uses Apple Intelligence.
+    ///
+    /// Use this model to generate text using on-device language models provided by Apple.
+    /// This model runs entirely on-device and doesn't send data to external servers.
+    ///
+    /// ```swift
+    /// let model = SystemLanguageModel()
+    /// ```
     @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
     public struct SystemLanguageModel {
         let systemModel: FoundationModels.SystemLanguageModel
@@ -13,6 +21,10 @@
         }
 
         /// Creates a system language model for a specific use case.
+        ///
+        /// - Parameters:
+        ///   - useCase: The intended use case for generation.
+        ///   - guardrails: Safety guardrails to apply during generation.
         public init(
             useCase: FoundationModels.SystemLanguageModel.UseCase = .general,
             guardrails: FoundationModels.SystemLanguageModel.Guardrails = FoundationModels.SystemLanguageModel
@@ -21,7 +33,11 @@
             self.systemModel = FoundationModels.SystemLanguageModel(useCase: useCase, guardrails: guardrails)
         }
 
-        /// Creates the base version of the model with an adapter.
+        /// Creates a system language model with a custom adapter.
+        ///
+        /// - Parameters:
+        ///   - adapter: The adapter to use with the base model.
+        ///   - guardrails: Safety guardrails to apply during generation.
         public init(
             adapter: FoundationModels.SystemLanguageModel.Adapter,
             guardrails: FoundationModels.SystemLanguageModel.Guardrails = .default
@@ -258,5 +274,4 @@
     private enum SystemLanguageModelError: Error {
         case streamingFailed
     }
-
 #endif
