@@ -45,7 +45,7 @@ import MLX
 
 let models = [(any LanguageModel)] = [
     SystemLanguageModel(), // Apple Foundation Models
-    CoreMLLanguageModel(url: "path/to/some.mlpackage"),
+    CoreMLLanguageModel(url: "path/to/some.mlmodelc"), // Compiled Core ML model
     MLXLanguageModel(modelId: "mlx-community/Qwen3-0.6B-4bit"),
     OllamaLanguageModel(model: "qwen3") // `ollama pull qwen3:0.6b`
     AnthropicLanguageModel(

@@ -10,11 +10,13 @@ public struct CoreMLLanguageModel: AnyLanguageModel.LanguageModel {
     private let tokenizer: Tokenizer
 
     public init(url: URL, computeUnits: MLComputeUnits = .all) async throws {
-        // Load the CoreML model from the specified path and compile it, if needed
-        let compiledURL = try compileModel(at: url)
+        // Ensure the model is already compiled
+        guard url.pathExtension == "mlmodelc" else {
+            throw CoreMLLanguageModelError.compiledModelRequired
+        }
 
         // Load the model with the specified compute units
-        self.model = try Models.LanguageModel.loadCompiled(url: compiledURL, computeUnits: computeUnits)
+        self.model = try Models.LanguageModel.loadCompiled(url: url, computeUnits: computeUnits)
 
         // Load the tokenizer
         self.tokenizer = try await model.tokenizer
@@ -159,6 +161,19 @@ public struct CoreMLLanguageModel: AnyLanguageModel.LanguageModel {
     }
 }
 
+@available(macOS 15.0, iOS 18.0, tvOS 18.0, visionOS 2.0, watchOS 11.0, *)
+public enum CoreMLLanguageModelError: LocalizedError {
+    case compiledModelRequired
+
+    public var errorDescription: String? {
+        switch self {
+        case .compiledModelRequired:
+            return
+                "A compiled Core ML model (.mlmodelc) is required. Please compile your model first using MLModel.compileModel(at:)."
+        }
+    }
+}
+
 // MARK: -
 
 private func toGenerationConfig(_ options: GenerationOptions) -> GenerationConfig {
@@ -222,37 +237,4 @@ private func toToolSpec(_ tool: any Tool) -> ToolSpec {
             "parameters": parametersDict,
         ],
     ]
-}
-
-private func compileModel(at url: URL) throws -> URL {
-    #if os(watchOS)
-        fatalError("Model compilation is not supported on watchOS")
-    #else
-        if url.pathExtension == "mlmodelc" {
-            return url
-        }
-
-        let modelName = url.deletingPathExtension().lastPathComponent
-        let cacheBase = try FileManager.default.url(
-            for: .cachesDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: true
-        )
-        let cacheRoot = cacheBase.appendingPathComponent("co.huggingface.AnyLanguageModel", isDirectory: true)
-        let cached = cacheRoot.appendingPathComponent("\(modelName).mlmodelc", isDirectory: true)
-
-        if FileManager.default.fileExists(atPath: cached.path) {
-            return cached
-        }
-
-        print("Compiling model \(url)")
-        let compiled = try MLModel.compileModel(at: url)
-
-        try FileManager.default.createDirectory(at: cacheRoot, withIntermediateDirectories: true)
-        try? FileManager.default.removeItem(at: cached)
-        try FileManager.default.copyItem(at: compiled, to: cached)
-        try? FileManager.default.removeItem(at: compiled)
-        return cached
-    #endif
 }
