@@ -31,7 +31,7 @@ public struct CoreMLLanguageModel: AnyLanguageModel.LanguageModel {
     ///   - chatTemplateHandler: An optional handler to format chat messages.
     ///   - toolsHandler: An optional handler to convert tools to the model's expected format.
     ///
-    /// - Throws: An error if the model can't be loaded or if the URL doesn't point to a compiled model.
+    /// - Throws: A `CoreMLLanguageModelError` if the model can't be loaded, the file doesn't exist, or the model is invalid.
     public init(
         url: URL,
         computeUnits: MLComputeUnits = .all,
@@ -43,8 +43,18 @@ public struct CoreMLLanguageModel: AnyLanguageModel.LanguageModel {
             throw CoreMLLanguageModelError.compiledModelRequired
         }
 
-        // Load the model with the specified compute units
-        self.model = try Models.LanguageModel.loadCompiled(url: url, computeUnits: computeUnits)
+        // Check if the file exists first
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            throw CoreMLLanguageModelError.modelNotFound(url)
+        }
+
+        do {
+            // Load the model with the specified compute units
+            self.model = try Models.LanguageModel.loadCompiled(url: url, computeUnits: computeUnits)
+        } catch {
+            // Map CoreML errors to our specific error cases
+            throw CoreMLLanguageModelError.modelInvalid(url, underlyingError: error)
+        }
 
         // Load the tokenizer
         self.tokenizer = try await model.tokenizer
@@ -190,11 +200,22 @@ public enum CoreMLLanguageModelError: LocalizedError {
     /// The provided model isn't a compiled Core ML model.
     case compiledModelRequired
 
+    /// The model file was not found at the specified URL.
+    case modelNotFound(URL)
+
+    /// The model file was found but is corrupted, incompatible, or otherwise invalid.
+    case modelInvalid(URL, underlyingError: Error)
+
     public var errorDescription: String? {
         switch self {
         case .compiledModelRequired:
             return
                 "A compiled Core ML model (.mlmodelc) is required. Please compile your model first using MLModel.compileModel(at:)."
+        case .modelNotFound(let url):
+            return "Core ML model not found at: \(url.path). Please verify the file exists and the path is correct."
+        case .modelInvalid(let url, let underlyingError):
+            return
+                "Core ML model at \(url.path) is invalid or corrupted: \(underlyingError.localizedDescription). Please verify the model file is valid and compatible with the current Core ML version."
         }
     }
 }
