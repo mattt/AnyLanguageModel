@@ -8,8 +8,15 @@ import Tokenizers
 public struct CoreMLLanguageModel: AnyLanguageModel.LanguageModel {
     private let model: Models.LanguageModel
     private let tokenizer: Tokenizer
+    private let chatTemplateHandler: (@Sendable (Instructions?, Prompt) -> [Message])?
+    private let toolsHandler: (@Sendable ([any Tool]) -> [ToolSpec])?
 
-    public init(url: URL, computeUnits: MLComputeUnits = .all) async throws {
+    public init(
+        url: URL,
+        computeUnits: MLComputeUnits = .all,
+        chatTemplateHandler: (@Sendable (Instructions?, Prompt) -> [Message])? = nil,
+        toolsHandler: (@Sendable ([any Tool]) -> [ToolSpec])? = nil
+    ) async throws {
         // Ensure the model is already compiled
         guard url.pathExtension == "mlmodelc" else {
             throw CoreMLLanguageModelError.compiledModelRequired
@@ -20,6 +27,9 @@ public struct CoreMLLanguageModel: AnyLanguageModel.LanguageModel {
 
         // Load the tokenizer
         self.tokenizer = try await model.tokenizer
+
+        self.chatTemplateHandler = chatTemplateHandler
+        self.toolsHandler = toolsHandler
     }
 
     public func respond<Content>(
@@ -37,20 +47,16 @@ public struct CoreMLLanguageModel: AnyLanguageModel.LanguageModel {
         // Convert AnyLanguageModel GenerationOptions to swift-transformers GenerationConfig
         let generationConfig = toGenerationConfig(options)
 
-        // Build chat with optional system instructions
-        var chat: [Message] = []
-        if let instructions = session.instructions?.description, !instructions.isEmpty {
-            chat.append(["role": "system", "content": instructions])
+        let tokens: [Int]
+        if let chatTemplateHandler = chatTemplateHandler {
+            // Use chat template handler with optional tools
+            let chat = chatTemplateHandler(session.instructions, prompt)
+            let toolSpecs: [ToolSpec]? = toolsHandler?(session.tools)
+            tokens = try tokenizer.applyChatTemplate(messages: chat, tools: toolSpecs)
+        } else {
+            // Fall back to direct tokenizer encoding
+            tokens = tokenizer.encode(text: prompt.description)
         }
-        chat.append(["role": "user", "content": prompt.description])
-
-        // Convert tools to Tokenizers.ToolSpec when available
-        let toolSpecs: [ToolSpec]? =
-            session.tools.isEmpty
-            ? nil
-            : session.tools.map { tool in toToolSpec(tool) }
-
-        let tokens = try tokenizer.applyChatTemplate(messages: chat, tools: toolSpecs)
 
         // Reset model state for new generation
         await model.resetState()
@@ -88,20 +94,16 @@ public struct CoreMLLanguageModel: AnyLanguageModel.LanguageModel {
             @Sendable continuation in
             let task = Task {
                 do {
-                    // Build chat with optional system instructions
-                    var chat: [Message] = []
-                    if let instructions = session.instructions?.description, !instructions.isEmpty {
-                        chat.append(["role": "system", "content": instructions])
+                    let tokens: [Int]
+                    if let chatTemplateHandler = chatTemplateHandler {
+                        // Use chat template handler with optional tools
+                        let chat = chatTemplateHandler(session.instructions, prompt)
+                        let toolSpecs: [ToolSpec]? = toolsHandler?(session.tools)
+                        tokens = try tokenizer.applyChatTemplate(messages: chat, tools: toolSpecs)
+                    } else {
+                        // Fall back to direct tokenizer encoding
+                        tokens = tokenizer.encode(text: prompt.description)
                     }
-                    chat.append(["role": "user", "content": prompt.description])
-
-                    // Convert tools to Tokenizers.ToolSpec when available
-                    let toolSpecs: [ToolSpec]? =
-                        session.tools.isEmpty
-                        ? nil
-                        : session.tools.map { tool in toToolSpec(tool) }
-
-                    let tokens = try tokenizer.applyChatTemplate(messages: chat, tools: toolSpecs)
 
                     await model.resetState()
 
@@ -199,42 +201,4 @@ private func toGenerationConfig(_ options: GenerationOptions) -> GenerationConfi
     }
 
     return config
-}
-
-// Convert AnyLanguageModel Tool into a Tokenizers.ToolSpec dictionary understood by chat templates
-private func toToolSpec(_ tool: any Tool) -> ToolSpec {
-    // Convert AnyLanguageModel's GenerationSchema to JSON-compatible dictionary
-    let parametersDict: [String: Any]
-    do {
-        let encoder = JSONEncoder()
-        let data = try encoder.encode(tool.parameters)
-        if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            // Resolve $ref if present
-            if let ref = json["$ref"] as? String,
-                let defs = json["$defs"] as? [String: Any]
-            {
-                let defName = ref.replacingOccurrences(of: "#/$defs/", with: "")
-                if let resolvedDef = defs[defName] as? [String: Any] {
-                    parametersDict = resolvedDef
-                } else {
-                    parametersDict = ["type": "object", "properties": [:], "required": []]
-                }
-            } else {
-                parametersDict = json
-            }
-        } else {
-            parametersDict = ["type": "object", "properties": [:], "required": []]
-        }
-    } catch {
-        parametersDict = ["type": "object", "properties": [:], "required": []]
-    }
-
-    return [
-        "type": "function",
-        "function": [
-            "name": tool.name,
-            "description": tool.description,
-            "parameters": parametersDict,
-        ],
-    ]
 }
