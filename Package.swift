@@ -1,4 +1,4 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 6.1
 // The swift-tools-version declares the minimum version of Swift required to build this package.
 
 import CompilerPluginSupport
@@ -21,6 +21,12 @@ let package = Package(
             targets: ["AnyLanguageModel"]
         )
     ],
+    traits: [
+        .trait(name: "CoreML"),
+        .trait(name: "MLX"),
+        .trait(name: "Llama"),
+        .default(enabledTraits: []),
+    ],
     dependencies: [
         .package(url: "https://github.com/swiftlang/swift-syntax.git", from: "600.0.0"),
         .package(url: "https://github.com/mattt/JSONSchema.git", from: "1.3.0"),
@@ -38,10 +44,26 @@ let package = Package(
                 .product(name: "EventSource", package: "EventSource"),
                 .product(name: "JSONSchema", package: "JSONSchema"),
                 .product(name: "PartialJSONDecoder", package: "PartialJSONDecoder"),
-                .product(name: "MLXLLM", package: "mlx-swift-examples"),
-                .product(name: "MLXLMCommon", package: "mlx-swift-examples"),
-                .product(name: "Transformers", package: "swift-transformers"),
-                .product(name: "Llama", package: "llama.swift"),
+                .product(
+                    name: "MLXLLM",
+                    package: "mlx-swift-examples",
+                    condition: .when(traits: ["MLX"])
+                ),
+                .product(
+                    name: "MLXLMCommon",
+                    package: "mlx-swift-examples",
+                    condition: .when(traits: ["MLX"])
+                ),
+                .product(
+                    name: "Transformers",
+                    package: "swift-transformers",
+                    condition: .when(traits: ["CoreML"])
+                ),
+                .product(
+                    name: "Llama",
+                    package: "llama.swift",
+                    condition: .when(traits: ["Llama"])
+                ),
             ]
         ),
         .macro(

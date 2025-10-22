@@ -1,10 +1,10 @@
 import Foundation
-import Hub
 import Testing
 
 @testable import AnyLanguageModel
 
-#if canImport(CoreML)
+#if CoreML
+    import Hub
     import CoreML
 
     private let shouldRunCoreMLTests: Bool = {
@@ -134,4 +134,4 @@ import Testing
             // but we can verify the response is not empty
         }
     }
-#endif
+#endif  // CoreML
