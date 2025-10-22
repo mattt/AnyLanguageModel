@@ -13,6 +13,7 @@ This lets developers use `LanguageModelSession` APIs with models other than syst
 - [x] Apple Foundation Models
 - [x] Core ML models
 - [x] Swift MLX models
+- [x] llama.cpp (GGUF models)
 - [x] Ollama [HTTP API](https://github.com/ollama/ollama/blob/main/docs/api.md)
 - [x] Anthropic [Messages API](https://docs.claude.com/en/api/messages)
 - [x] OpenAI [Responses API](https://platform.openai.com/docs/api-reference/responses)
@@ -47,7 +48,8 @@ let models = [(any LanguageModel)] = [
     SystemLanguageModel(), // Apple Foundation Models
     CoreMLLanguageModel(url: "path/to/some.mlpackage"),
     MLXLanguageModel(modelId: "mlx-community/Qwen3-0.6B-4bit"),
-    OllamaLanguageModel(model: "qwen3") // `ollama pull qwen3:0.6b`
+    LlamaLanguageModel(modelPath: "/path/to/model.gguf"), // llama.cpp GGUF models
+    OllamaLanguageModel(model: "qwen3"), // `ollama pull qwen3:0.6b`
     AnthropicLanguageModel(
         apiKey: ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"]!,
         model: "claude-sonnet-4-5-20250929"
