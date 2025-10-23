@@ -120,17 +120,32 @@ for model in models {
 
 ## Testing
 
-Tests for trait-specific functionality are conditionally compiled and will only run when the corresponding traits are enabled. Since traits are specified in the package manifest, tests will automatically include the appropriate functionality based on your package configuration.
+Run the test suite to verify everything works correctly:
 
 ```bash
-# Run tests (traits are determined by your Package.swift configuration)
 swift test
 ```
 
-### Environment Variables for Testing
+Tests for different language model backends have varying requirements:
 
-Some tests require additional setup:
+- **CoreML tests**: `swift test --enable-trait CoreML` + `ENABLE_COREML_TESTS=1` + `HF_TOKEN` (downloads model from HuggingFace)
+- **MLX tests**: `swift test --enable-trait MLX` + `ENABLE_MLX_TESTS=1` + `HF_TOKEN` (uses pre-defined model)
+- **Llama tests**: `swift test --enable-trait Llama` + `LLAMA_MODEL_PATH` (points to local GGUF file)
+- **Anthropic tests**: `ANTHROPIC_API_KEY` (no traits needed)
+- **OpenAI tests**: `OPENAI_API_KEY` (no traits needed)
+- **Ollama tests**: No setup needed (skips in CI)
 
-- **CoreML tests**: Set `ENABLE_COREML_TESTS=1` and `HF_TOKEN` for model downloads
-- **MLX tests**: Set `ENABLE_MLX_TESTS=1` and `HF_TOKEN` for model downloads
-- **Llama tests**: Set `LLAMA_MODEL_PATH` to point to a GGUF model file
+Example setup for all backends:
+
+```bash
+# Environment variables
+export ENABLE_COREML_TESTS=1
+export ENABLE_MLX_TESTS=1
+export HF_TOKEN=your_huggingface_token
+export LLAMA_MODEL_PATH=/path/to/model.gguf
+export ANTHROPIC_API_KEY=your_anthropic_key
+export OPENAI_API_KEY=your_openai_key
+
+# Run all tests with traits enabled
+swift test --enable-trait CoreML --enable-trait MLX --enable-trait Llama
+```
