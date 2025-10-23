@@ -5,20 +5,63 @@
     @preconcurrency import Generation
     @preconcurrency import Models
 
+    /// A language model that runs locally using Core ML.
+    ///
+    /// Use this model to run language models on-device with Core ML.
+    /// The model must be compiled to `.mlmodelc` format before use.
+    ///
+    /// ```swift
+    /// let modelURL = Bundle.main.url(
+    ///     forResource: "MyModel",
+    ///     withExtension: "mlmodelc"
+    /// )!
+    /// let model = try await CoreMLLanguageModel(url: modelURL)
+    /// ```
     @available(macOS 15.0, iOS 18.0, tvOS 18.0, visionOS 2.0, watchOS 11.0, *)
     public struct CoreMLLanguageModel: AnyLanguageModel.LanguageModel {
         private let model: Models.LanguageModel
-        private let tokenizer: Tokenizer
+        private let tokenizer: any Tokenizer
+        private let chatTemplateHandler: (@Sendable (Instructions?, Prompt) -> [Message])?
+        private let toolsHandler: (@Sendable ([any Tool]) -> [ToolSpec])?
 
-        public init(url: URL, computeUnits: MLComputeUnits = .all) async throws {
-            // Load the CoreML model from the specified path and compile it, if needed
-            let compiledURL = try compileModel(at: url)
+        /// Creates a Core ML language model.
+        ///
+        /// - Parameters:
+        ///   - url: The URL to a compiled Core ML model (`.mlmodelc`).
+        ///   - computeUnits: The compute units to use for inference.
+        ///   - chatTemplateHandler: An optional handler to format chat messages.
+        ///   - toolsHandler: An optional handler to convert tools to the model's expected format.
+        ///
+        /// - Throws: A `CoreMLLanguageModelError` if the model can't be loaded, the file doesn't exist, or the model is invalid.
+        public init(
+            url: URL,
+            computeUnits: MLComputeUnits = .all,
+            chatTemplateHandler: (@Sendable (Instructions?, Prompt) -> [Message])? = nil,
+            toolsHandler: (@Sendable ([any Tool]) -> [ToolSpec])? = nil
+        ) async throws {
+            // Ensure the model is already compiled
+            guard url.pathExtension == "mlmodelc" else {
+                throw CoreMLLanguageModelError.compiledModelRequired
+            }
 
-            // Load the model with the specified compute units
-            self.model = try Models.LanguageModel.loadCompiled(url: compiledURL, computeUnits: computeUnits)
+            // Check if the file exists first
+            guard FileManager.default.fileExists(atPath: url.path) else {
+                throw CoreMLLanguageModelError.modelNotFound(url)
+            }
+
+            do {
+                // Load the model with the specified compute units
+                self.model = try Models.LanguageModel.loadCompiled(url: url, computeUnits: computeUnits)
+            } catch {
+                // Map CoreML errors to our specific error cases
+                throw CoreMLLanguageModelError.modelInvalid(url, underlyingError: error)
+            }
 
             // Load the tokenizer
             self.tokenizer = try await model.tokenizer
+
+            self.chatTemplateHandler = chatTemplateHandler
+            self.toolsHandler = toolsHandler
         }
 
         public func respond<Content>(
@@ -36,16 +79,25 @@
             // Convert AnyLanguageModel GenerationOptions to swift-transformers GenerationConfig
             let generationConfig = toGenerationConfig(options)
 
+            let tokens: [Int]
+            if let chatTemplateHandler = chatTemplateHandler {
+                // Use chat template handler with optional tools
+                let messages = chatTemplateHandler(session.instructions, prompt)
+                let toolSpecs: [ToolSpec]? = toolsHandler?(session.tools)
+                tokens = try tokenizer.applyChatTemplate(messages: messages, tools: toolSpecs)
+            } else {
+                // Fall back to direct tokenizer encoding
+                tokens = tokenizer.encode(text: prompt.description)
+            }
+
             // Reset model state for new generation
             await model.resetState()
 
-            // Generate response using swift-transformers
-            let response = try await model.generate(
+            let response = await model.generate(
                 config: generationConfig,
-                prompt: prompt.description
-            ) { _ in
-                // No streaming callback needed for non-streaming response
-            }
+                tokens: tokens,
+                model: model.callAsFunction
+            )
 
             return LanguageModelSession.Response(
                 content: response as! Content,
@@ -69,28 +121,107 @@
             // Convert AnyLanguageModel GenerationOptions to swift-transformers GenerationConfig
             let generationConfig = toGenerationConfig(options)
 
-            // For streaming, we'll collect the response and return it as a single chunk
-            // This is a simplified implementation - a full streaming implementation would
-            // require more complex async handling
-            _ = Task {
-                await model.resetState()
-                return try await model.generate(
-                    config: generationConfig,
-                    prompt: prompt.description
-                ) { _ in
-                    // No streaming callback needed for this implementation
+            // Transform the generation into ResponseStream snapshots
+            let stream: AsyncThrowingStream<LanguageModelSession.ResponseStream<Content>.Snapshot, any Error> = .init {
+                @Sendable continuation in
+                let task = Task {
+                    do {
+                        let tokens: [Int]
+                        if let chatTemplateHandler = chatTemplateHandler {
+                            // Use chat template handler with optional tools
+                            let messages = chatTemplateHandler(session.instructions, prompt)
+                            let toolSpecs: [ToolSpec]? = toolsHandler?(session.tools)
+                            tokens = try tokenizer.applyChatTemplate(messages: messages, tools: toolSpecs)
+                        } else {
+                            // Fall back to direct tokenizer encoding
+                            tokens = tokenizer.encode(text: prompt.description)
+                        }
+
+                        await model.resetState()
+
+                        // Decode the rendered prompt once to strip it from streamed output
+                        let promptTextPrefix = tokenizer.decode(tokens: tokens)
+                        var accumulatedText = ""
+
+                        _ = await model.generate(
+                            config: generationConfig,
+                            tokens: tokens,
+                            model: model.callAsFunction
+                        ) { tokenIds in
+                            // Decode full text and strip the prompt prefix
+                            let fullText = tokenizer.decode(tokens: tokenIds)
+                            let assistantText: String
+                            if fullText.hasPrefix(promptTextPrefix) {
+                                let startIdx = fullText.index(fullText.startIndex, offsetBy: promptTextPrefix.count)
+                                assistantText = String(fullText[startIdx...])
+                            } else {
+                                assistantText = fullText
+                            }
+
+                            // Compute delta vs accumulated text and yield
+                            if assistantText.count >= accumulatedText.count,
+                                assistantText.hasPrefix(accumulatedText)
+                            {
+                                let startIdx = assistantText.index(
+                                    assistantText.startIndex,
+                                    offsetBy: accumulatedText.count
+                                )
+                                let delta = String(assistantText[startIdx...])
+                                accumulatedText += delta
+                            } else {
+                                accumulatedText = assistantText
+                            }
+
+                            continuation.yield(
+                                .init(
+                                    content: (accumulatedText as! Content).asPartiallyGenerated(),
+                                    rawContent: GeneratedContent(accumulatedText)
+                                )
+                            )
+                        }
+
+                        continuation.finish()
+                    } catch {
+                        continuation.finish(throwing: error)
+                    }
+                }
+
+                continuation.onTermination = { _ in
+                    task.cancel()
                 }
             }
 
-            // Return a stream that yields the complete response
-            return LanguageModelSession.ResponseStream(
-                content: "" as! Content,
-                rawContent: GeneratedContent("")
-            )
+            return LanguageModelSession.ResponseStream(stream: stream)
         }
     }
 
-    // MARK: - Options Mapping
+    /// Errors that can occur when working with Core ML language models.
+    @available(macOS 15.0, iOS 18.0, tvOS 18.0, visionOS 2.0, watchOS 11.0, *)
+    public enum CoreMLLanguageModelError: LocalizedError {
+        /// The provided model isn't a compiled Core ML model.
+        case compiledModelRequired
+
+        /// The model file was not found at the specified URL.
+        case modelNotFound(URL)
+
+        /// The model file was found but is corrupted, incompatible, or otherwise invalid.
+        case modelInvalid(URL, underlyingError: Error)
+
+        public var errorDescription: String? {
+            switch self {
+            case .compiledModelRequired:
+                return
+                    "A compiled Core ML model (.mlmodelc) is required. Please compile your model first using MLModel.compileModel(at:)."
+            case .modelNotFound(let url):
+                return "Core ML model not found at: \(url.path). Please verify the file exists and the path is correct."
+            case .modelInvalid(let url, let underlyingError):
+                return
+                    "Core ML model at \(url.path) is invalid or corrupted: \(underlyingError.localizedDescription). Please verify the model file is valid and compatible with the current Core ML version."
+            }
+        }
+    }
+
+    // MARK: -
 
     private func toGenerationConfig(_ options: GenerationOptions) -> GenerationConfig {
         var config = GenerationConfig(maxNewTokens: options.maximumResponseTokens ?? 2048)
@@ -115,19 +246,5 @@
         }
 
         return config
-    }
-
-    // MARK: - Model Compilation
-
-    private func compileModel(at url: URL) throws -> URL {
-        #if os(watchOS)
-            fatalError("Model compilation is not supported on watchOS")
-        #else
-            if url.pathExtension == "mlmodelc" {
-                return url
-            }
-            print("Compiling model \(url)")
-            return try MLModel.compileModel(at: url)
-        #endif
     }
 #endif  // CoreML

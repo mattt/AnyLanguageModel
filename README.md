@@ -70,9 +70,9 @@ dependencies: [
 import AnyLanguageModel
 
 // Core functionality (always available)
-let models: [(any LanguageModel)] = [
+var models: [(any LanguageModel)] = [
     SystemLanguageModel(), // Apple Foundation Models
-    OllamaLanguageModel(model: "qwen3"), // `ollama pull qwen3:0.6b`
+    OllamaLanguageModel(model: "qwen3") // `ollama pull qwen3:0.6b`
     AnthropicLanguageModel(
         apiKey: ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"]!,
         model: "claude-sonnet-4-5-20250929"
@@ -85,7 +85,7 @@ let models: [(any LanguageModel)] = [
 
 // Conditional models (require traits to be enabled)
 #if CoreML
-models.append(CoreMLLanguageModel(url: "path/to/some.mlpackage"))
+models.append(CoreMLLanguageModel(url: "path/to/some.mlmodelc")) // Compiled Core ML model
 #endif
 
 #if MLX
