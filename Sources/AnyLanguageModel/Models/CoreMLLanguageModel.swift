@@ -19,7 +19,7 @@ import Tokenizers
 @available(macOS 15.0, iOS 18.0, tvOS 18.0, visionOS 2.0, watchOS 11.0, *)
 public struct CoreMLLanguageModel: AnyLanguageModel.LanguageModel {
     private let model: Models.LanguageModel
-    private let tokenizer: Tokenizer
+    private let tokenizer: any Tokenizer
     private let chatTemplateHandler: (@Sendable (Instructions?, Prompt) -> [Message])?
     private let toolsHandler: (@Sendable ([any Tool]) -> [ToolSpec])?
 
