@@ -5,9 +5,22 @@ import JSONSchema
     import FoundationNetworking
 #endif
 
+/// A language model that connects to OpenAI-compatible APIs.
+///
+/// Use this model to generate text using OpenAI's Chat Completions or Responses APIs.
+/// You can specify a custom base URL to work with OpenAI-compatible services.
+///
+/// ```swift
+/// let model = OpenAILanguageModel(
+///     apiKey: "your-api-key",
+///     model: "gpt-4"
+/// )
+/// ```
 public struct OpenAILanguageModel: LanguageModel {
+    /// The default base URL for OpenAI's API.
     public static let defaultBaseURL = URL(string: "https://api.openai.com/v1/")!
 
+    /// The OpenAI API variant to use.
     public enum APIVariant: Sendable {
         /// When selected, use the Chat Completions API.
         /// https://platform.openai.com/docs/api-reference/chat/create
@@ -17,12 +30,28 @@ public struct OpenAILanguageModel: LanguageModel {
         case responses
     }
 
+    /// The base URL for the API endpoint.
     public let baseURL: URL
+
+    /// The API key for authentication.
     public let apiKey: String
+
+    /// The model identifier to use for generation.
     public let model: String
+
+    /// The API variant to use.
     public let apiVariant: APIVariant
+
     private let urlSession: URLSession
 
+    /// Creates an OpenAI language model.
+    ///
+    /// - Parameters:
+    ///   - baseURL: The base URL for the API endpoint. Defaults to OpenAI's official API.
+    ///   - apiKey: Your OpenAI API key.
+    ///   - model: The model identifier (for example, "gpt-4" or "gpt-3.5-turbo").
+    ///   - apiVariant: The API variant to use. Defaults to `.chatCompletions`.
+    ///   - session: The URL session to use for network requests.
     public init(
         baseURL: URL = defaultBaseURL,
         apiKey: String,
@@ -212,106 +241,126 @@ public struct OpenAILanguageModel: LanguageModel {
             return converted
         }()
 
-        // Build request for Responses API with streaming enabled
-        let params = Responses.createRequestBody(
-            model: model,
-            messages: messages,
-            tools: openAITools,
-            options: options,
-            stream: true
-        )
+        switch apiVariant {
+        case .responses:
+            let params = Responses.createRequestBody(
+                model: model,
+                messages: messages,
+                tools: openAITools,
+                options: options,
+                stream: true
+            )
 
-        let url = baseURL.appendingPathComponent("responses")
+            let url = baseURL.appendingPathComponent("responses")
 
-        let stream: AsyncThrowingStream<LanguageModelSession.ResponseStream<Content>.Snapshot, any Error> = .init {
-            continuation in
-            let task = Task { @Sendable in
-                do {
-                    let body = try JSONEncoder().encode(params)
+            let stream: AsyncThrowingStream<LanguageModelSession.ResponseStream<Content>.Snapshot, any Error> = .init {
+                continuation in
+                let task = Task { @Sendable in
+                    do {
+                        let body = try JSONEncoder().encode(params)
 
-                    // Stream server-sent events from OpenAI Responses API
-                    let events: AsyncThrowingStream<ResponsesServerEvent, any Error> =
-                        urlSession
-                        .fetchEventStream(
-                            .post,
-                            url: url,
-                            headers: [
-                                "Authorization": "Bearer \(apiKey)"
-                            ],
-                            body: body
-                        )
+                        let events: AsyncThrowingStream<OpenAIResponsesServerEvent, any Error> =
+                            urlSession.fetchEventStream(
+                                .post,
+                                url: url,
+                                headers: [
+                                    "Authorization": "Bearer \(apiKey)"
+                                ],
+                                body: body
+                            )
 
-                    var accumulatedText = ""
-                    var toolCallsById: [String: AccumulatedToolCall] = [:]
+                        var accumulatedText = ""
 
-                    for try await event in events {
-                        switch event {
-                        case .outputTextDelta(let delta):
-                            accumulatedText += delta
+                        for try await event in events {
+                            switch event {
+                            case .outputTextDelta(let delta):
+                                accumulatedText += delta
 
-                            // Yield snapshot with partially generated content
-                            let raw = GeneratedContent(accumulatedText)
-                            let content: Content.PartiallyGenerated = (accumulatedText as! Content)
-                                .asPartiallyGenerated()
-                            continuation.yield(.init(content: content, rawContent: raw))
+                                // Yield snapshot with partially generated content
+                                let raw = GeneratedContent(accumulatedText)
+                                let content: Content.PartiallyGenerated = (accumulatedText as! Content)
+                                    .asPartiallyGenerated()
+                                continuation.yield(.init(content: content, rawContent: raw))
 
-                        case .toolCallCreated(let toolCall):
-                            // Initialize a new tool call accumulator
-                            if let id = toolCall.id {
-                                toolCallsById[id] = AccumulatedToolCall(
-                                    id: id,
-                                    type: toolCall.type ?? "function",
-                                    functionName: toolCall.function?.name ?? "",
-                                    arguments: ""
-                                )
+                            case .toolCallCreated(_):
+                                // Minimal streaming implementation ignores tool call events
+                                break
+                            case .toolCallDelta(_):
+                                // Minimal streaming implementation ignores tool call deltas
+                                break
+                            case .completed(_):
+                                continuation.finish()
+                            case .ignored:
+                                break
                             }
-                        case .toolCallDelta(let delta):
-                            // Accumulate arguments for the tool call
-                            if let id = delta.id, var accumulated = toolCallsById[id] {
-                                if let arguments = delta.function?.arguments {
-                                    accumulated.arguments += arguments
-                                    toolCallsById[id] = accumulated
-                                }
-                                if let name = delta.function?.name {
-                                    accumulated.functionName = name
-                                    toolCallsById[id] = accumulated
-                                }
-                            }
-                        case .completed(_):
-                            // Execute accumulated tool calls before finishing
-                            if !toolCallsById.isEmpty {
-                                let toolCalls = toolCallsById.values.map { accumulated in
-                                    OpenAIToolCall(
-                                        id: accumulated.id,
-                                        type: accumulated.type,
-                                        function: OpenAIToolFunction(
-                                            name: accumulated.functionName,
-                                            arguments: accumulated.arguments
-                                        )
-                                    )
-                                }
-
-                                // Execute tools and yield final result with tool outputs
-                                _ = try? await resolveToolCalls(toolCalls, session: session)
-                                // Since we can't add transcript entries mid-stream,
-                                // we just finish. The non-streaming API should be used
-                                // for full tool execution support.
-                            }
-                            continuation.finish()
-                        case .ignored:
-                            break
                         }
+
+                        continuation.finish()
+                    } catch {
+                        continuation.finish(throwing: error)
                     }
-
-                    continuation.finish()
-                } catch {
-                    continuation.finish(throwing: error)
                 }
+                continuation.onTermination = { _ in task.cancel() }
             }
-            continuation.onTermination = { _ in task.cancel() }
-        }
 
-        return LanguageModelSession.ResponseStream(stream: stream)
+            return LanguageModelSession.ResponseStream(stream: stream)
+
+        case .chatCompletions:
+            let params = ChatCompletions.createRequestBody(
+                model: model,
+                messages: messages,
+                tools: openAITools,
+                options: options,
+                stream: true
+            )
+
+            let url = baseURL.appendingPathComponent("chat/completions")
+
+            let stream: AsyncThrowingStream<LanguageModelSession.ResponseStream<Content>.Snapshot, any Error> = .init {
+                continuation in
+                let task = Task { @Sendable in
+                    do {
+                        let body = try JSONEncoder().encode(params)
+
+                        let events: AsyncThrowingStream<OpenAIChatCompletionsChunk, any Error> =
+                            urlSession.fetchEventStream(
+                                .post,
+                                url: url,
+                                headers: [
+                                    "Authorization": "Bearer \(apiKey)"
+                                ],
+                                body: body
+                            )
+
+                        var accumulatedText = ""
+
+                        for try await chunk in events {
+                            if let choice = chunk.choices.first {
+                                if let piece = choice.delta.content, !piece.isEmpty {
+                                    accumulatedText += piece
+
+                                    let raw = GeneratedContent(accumulatedText)
+                                    let content: Content.PartiallyGenerated = (accumulatedText as! Content)
+                                        .asPartiallyGenerated()
+                                    continuation.yield(.init(content: content, rawContent: raw))
+                                }
+
+                                if choice.finishReason != nil {
+                                    continuation.finish()
+                                }
+                            }
+                        }
+
+                        continuation.finish()
+                    } catch {
+                        continuation.finish(throwing: error)
+                    }
+                }
+                continuation.onTermination = { _ in task.cancel() }
+            }
+
+            return LanguageModelSession.ResponseStream(stream: stream)
+        }
     }
 }
 
@@ -522,16 +571,58 @@ private struct OpenAIToolFunction: Decodable, Sendable {
     let arguments: String?
 }
 
-private struct AccumulatedToolCall {
-    var id: String
-    var type: String
-    var functionName: String
-    var arguments: String
+private enum OpenAIResponsesServerEvent: Decodable, Sendable {
+    case outputTextDelta(String)
+    case toolCallCreated(OpenAIToolCall)
+    case toolCallDelta(OpenAIToolCall)
+    case completed(String)
+    case ignored
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let type = try container.decodeIfPresent(String.self, forKey: .type)
+        switch type {
+        case "response.output_text.delta":
+            self = .outputTextDelta(try container.decode(String.self, forKey: .text))
+        case "response.tool_call.created":
+            self = .toolCallCreated(try container.decode(OpenAIToolCall.self, forKey: .toolCall))
+        case "response.tool_call.delta":
+            self = .toolCallDelta(try container.decode(OpenAIToolCall.self, forKey: .toolCall))
+        case "response.completed":
+            self = .completed(try container.decode(String.self, forKey: .finishReason))
+        default:
+            self = .ignored
+        }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case text
+        case toolCall = "tool_call"
+        case finishReason = "finish_reason"
+    }
 }
 
-// MARK: - Tool Invocation Handling
+private struct OpenAIChatCompletionsChunk: Decodable, Sendable {
+    struct Choice: Decodable, Sendable {
+        struct Delta: Decodable, Sendable {
+            let role: String?
+            let content: String?
+        }
+        let delta: Delta
+        let finishReason: String?
 
-private struct ToolInvocationResult {
+        private enum CodingKeys: String, CodingKey {
+            case delta
+            case finishReason = "finish_reason"
+        }
+    }
+
+    let id: String
+    let choices: [Choice]
+}
+
+private struct OpenAIToolInvocationResult {
     let call: Transcript.ToolCall
     let output: Transcript.ToolOutput
 }
@@ -539,7 +630,7 @@ private struct ToolInvocationResult {
 private func resolveToolCalls(
     _ toolCalls: [OpenAIToolCall],
     session: LanguageModelSession
-) async throws -> [ToolInvocationResult] {
+) async throws -> [OpenAIToolInvocationResult] {
     if toolCalls.isEmpty { return [] }
 
     var toolsByName: [String: any Tool] = [:]
@@ -549,7 +640,7 @@ private func resolveToolCalls(
         }
     }
 
-    var results: [ToolInvocationResult] = []
+    var results: [OpenAIToolInvocationResult] = []
     results.reserveCapacity(toolCalls.count)
 
     for call in toolCalls {
@@ -569,7 +660,7 @@ private func resolveToolCalls(
                 toolName: function.name,
                 segments: [message]
             )
-            results.append(ToolInvocationResult(call: transcriptCall, output: output))
+            results.append(OpenAIToolInvocationResult(call: transcriptCall, output: output))
             continue
         }
 
@@ -580,7 +671,7 @@ private func resolveToolCalls(
                 toolName: tool.name,
                 segments: segments
             )
-            results.append(ToolInvocationResult(call: transcriptCall, output: output))
+            results.append(OpenAIToolInvocationResult(call: transcriptCall, output: output))
         } catch {
             throw LanguageModelSession.ToolCallError(tool: tool, underlyingError: error)
         }
@@ -613,36 +704,4 @@ private func convertToolToOpenAIFormat(_ tool: any Tool) -> OpenAITool {
 private func toGeneratedContent(_ jsonString: String?) throws -> GeneratedContent {
     guard let jsonString, !jsonString.isEmpty else { return GeneratedContent(properties: [:]) }
     return try GeneratedContent(json: jsonString)
-}
-
-private enum ResponsesServerEvent: Decodable, Sendable {
-    case outputTextDelta(String)
-    case toolCallCreated(OpenAIToolCall)
-    case toolCallDelta(OpenAIToolCall)
-    case completed(String)
-    case ignored
-
-    init(from decoder: any Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        let type = try container.decodeIfPresent(String.self, forKey: .type)
-        switch type {
-        case "response.output_text.delta":
-            self = .outputTextDelta(try container.decode(String.self, forKey: .text))
-        case "response.tool_call.created":
-            self = .toolCallCreated(try container.decode(OpenAIToolCall.self, forKey: .toolCall))
-        case "response.tool_call.delta":
-            self = .toolCallDelta(try container.decode(OpenAIToolCall.self, forKey: .toolCall))
-        case "response.completed":
-            self = .completed(try container.decode(String.self, forKey: .finishReason))
-        default:
-            self = .ignored
-        }
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case type
-        case text
-        case toolCall = "tool_call"
-        case finishReason = "finish_reason"
-    }
 }
