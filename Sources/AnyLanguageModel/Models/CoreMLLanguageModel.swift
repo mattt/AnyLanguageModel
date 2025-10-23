@@ -81,9 +81,9 @@ public struct CoreMLLanguageModel: AnyLanguageModel.LanguageModel {
         let tokens: [Int]
         if let chatTemplateHandler = chatTemplateHandler {
             // Use chat template handler with optional tools
-            let chat = chatTemplateHandler(session.instructions, prompt)
+            let messages = chatTemplateHandler(session.instructions, prompt)
             let toolSpecs: [ToolSpec]? = toolsHandler?(session.tools)
-            tokens = try tokenizer.applyChatTemplate(messages: chat, tools: toolSpecs)
+            tokens = try tokenizer.applyChatTemplate(messages: messages, tools: toolSpecs)
         } else {
             // Fall back to direct tokenizer encoding
             tokens = tokenizer.encode(text: prompt.description)
@@ -128,9 +128,9 @@ public struct CoreMLLanguageModel: AnyLanguageModel.LanguageModel {
                     let tokens: [Int]
                     if let chatTemplateHandler = chatTemplateHandler {
                         // Use chat template handler with optional tools
-                        let chat = chatTemplateHandler(session.instructions, prompt)
+                        let messages = chatTemplateHandler(session.instructions, prompt)
                         let toolSpecs: [ToolSpec]? = toolsHandler?(session.tools)
-                        tokens = try tokenizer.applyChatTemplate(messages: chat, tools: toolSpecs)
+                        tokens = try tokenizer.applyChatTemplate(messages: messages, tools: toolSpecs)
                     } else {
                         // Fall back to direct tokenizer encoding
                         tokens = tokenizer.encode(text: prompt.description)
