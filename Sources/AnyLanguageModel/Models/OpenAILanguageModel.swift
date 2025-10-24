@@ -686,10 +686,12 @@ private func convertToolToOpenAIFormat(_ tool: any Tool) -> OpenAITool {
     // Prefer passing through a JSONSchema value built from GenerationSchema
     // where possible; fallback to minimal type/required map.
     let rawParameters: JSONValue?
-    if let raw = try? JSONValue(tool.parameters) {
-        rawParameters = raw
+
+    // Handle the case where the schema has a root reference
+    if let resolvedSchema = tool.parameters.withResolvedRoot() {
+        rawParameters = try? JSONValue(resolvedSchema)
     } else {
-        rawParameters = nil
+        rawParameters = try? JSONValue(tool.parameters)
     }
 
     let fn = OpenAIFunction(

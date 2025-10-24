@@ -564,6 +564,17 @@ public struct GenerationSchema: Sendable, Codable, CustomDebugStringConvertible 
         self.root = root
         self.defs = defs
     }
+
+    /// Creates a new schema with the resolved definition as root.
+    /// This is useful when the root is a reference that needs to be resolved.
+    public func withResolvedRoot() -> GenerationSchema? {
+        if case .ref(let refName) = root,
+            let defNode = defs[refName]
+        {
+            return GenerationSchema(root: defNode, defs: defs)
+        }
+        return nil
+    }
 }
 
 // MARK: - GenerationSchema.Property

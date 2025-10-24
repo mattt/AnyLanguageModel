@@ -5,7 +5,7 @@ import Testing
 
 private let openaiAPIKey: String? = ProcessInfo.processInfo.environment["OPENAI_API_KEY"]
 
-@Suite("OpenAILanguageModel", .enabled(if: openaiAPIKey?.isEmpty == false))
+@Suite("OpenAILanguageModel", .enabled(if: openaiAPIKey?.isEmpty == false), .serialized)
 struct OpenAILanguageModelTests {
     let model = OpenAILanguageModel(apiKey: openaiAPIKey!, model: "gpt-4o-mini")
 
@@ -92,7 +92,7 @@ struct OpenAILanguageModelTests {
 
         var foundToolOutput = false
         for case let .toolOutput(toolOutput) in response.transcriptEntries {
-            #expect(toolOutput.id == "get_weather")
+            #expect(toolOutput.id == "getWeather")
             foundToolOutput = true
         }
         #expect(foundToolOutput)
