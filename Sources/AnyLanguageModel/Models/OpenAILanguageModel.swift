@@ -196,7 +196,8 @@ public struct OpenAILanguageModel: LanguageModel {
 
         var entries: [Transcript.Entry] = []
 
-        if let toolCalls = resp.toolCalls, !toolCalls.isEmpty {
+        let toolCalls = extractToolCallsFromOutput(resp.output)
+        if !toolCalls.isEmpty {
             let invocations = try await resolveToolCalls(toolCalls, session: session)
             if !invocations.isEmpty {
                 entries.append(.toolCalls(Transcript.ToolCalls(invocations.map { $0.call })))
@@ -206,7 +207,7 @@ public struct OpenAILanguageModel: LanguageModel {
             }
         }
 
-        let text = resp.outputText ?? ""
+        let text = resp.outputText ?? extractTextFromOutput(resp.output) ?? ""
         return LanguageModelSession.Response(
             content: text as! Content,
             rawContent: GeneratedContent(text),
@@ -381,7 +382,7 @@ private enum ChatCompletions {
         ]
 
         if let tools {
-            body["tools"] = .array(tools.map { $0.jsonValue })
+            body["tools"] = .array(tools.map { $0.jsonValue(for: .chatCompletions) })
         }
 
         if let temperature = options.temperature {
@@ -430,15 +431,18 @@ private enum Responses {
         options: GenerationOptions,
         stream: Bool
     ) -> JSONValue {
+        // Extract the user message content for the input parameter
+        let userMessage = messages.first { $0.role == .user }
+        let inputText = if case .text(let text) = userMessage?.content { text } else { "" }
+
         var body: [String: JSONValue] = [
             "model": .string(model),
-            "input": .object(["type": .string("input_text"), "text": .string("")]),
-            "messages": .array(messages.map { $0.jsonValue(for: .responses) }),
+            "input": .string(inputText),
             "stream": .bool(stream),
         ]
 
         if let tools {
-            body["tools"] = .array(tools.map { $0.jsonValue })
+            body["tools"] = .array(tools.map { $0.jsonValue(for: .responses) })
         }
 
         if let temperature = options.temperature {
@@ -453,15 +457,15 @@ private enum Responses {
 
     struct Response: Decodable, Sendable {
         let id: String
+        let output: [JSONValue]?
         let outputText: String?
         let finishReason: String?
-        let toolCalls: [OpenAIToolCall]?
 
         private enum CodingKeys: String, CodingKey {
             case id
+            case output
             case outputText = "output_text"
             case finishReason = "finish_reason"
-            case toolCalls = "tool_calls"
         }
     }
 }
@@ -503,11 +507,27 @@ private struct OpenAITool: Hashable, Codable, Sendable {
     let type: String
     let function: OpenAIFunction
 
-    var jsonValue: JSONValue {
-        return .object([
-            "type": .string(type),
-            "function": function.jsonValue,
-        ])
+    func jsonValue(for apiVariant: OpenAILanguageModel.APIVariant) -> JSONValue {
+        switch apiVariant {
+        case .chatCompletions:
+            return .object([
+                "type": .string(type),
+                "function": function.jsonValue,
+            ])
+        case .responses:
+            // Responses API expects name, description, and parameters at the top level
+            var obj: [String: JSONValue] = [
+                "type": .string(type),
+                "name": .string(function.name),
+                "description": .string(function.description),
+            ]
+            if let rawParameters = function.rawParameters {
+                obj["parameters"] = rawParameters
+            } else if let parameters = function.parameters {
+                obj["parameters"] = parameters.jsonValue
+            }
+            return .object(obj)
+        }
     }
 }
 
@@ -583,13 +603,13 @@ private enum OpenAIResponsesServerEvent: Decodable, Sendable {
         let type = try container.decodeIfPresent(String.self, forKey: .type)
         switch type {
         case "response.output_text.delta":
-            self = .outputTextDelta(try container.decode(String.self, forKey: .text))
+            self = .outputTextDelta(try container.decode(String.self, forKey: .delta))
         case "response.tool_call.created":
             self = .toolCallCreated(try container.decode(OpenAIToolCall.self, forKey: .toolCall))
         case "response.tool_call.delta":
             self = .toolCallDelta(try container.decode(OpenAIToolCall.self, forKey: .toolCall))
         case "response.completed":
-            self = .completed(try container.decode(String.self, forKey: .finishReason))
+            self = .completed((try? container.decode(String.self, forKey: .finishReason)) ?? "stop")
         default:
             self = .ignored
         }
@@ -597,7 +617,7 @@ private enum OpenAIResponsesServerEvent: Decodable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case type
-        case text
+        case delta
         case toolCall = "tool_call"
         case finishReason = "finish_reason"
     }
@@ -706,4 +726,64 @@ private func convertToolToOpenAIFormat(_ tool: any Tool) -> OpenAITool {
 private func toGeneratedContent(_ jsonString: String?) throws -> GeneratedContent {
     guard let jsonString, !jsonString.isEmpty else { return GeneratedContent(properties: [:]) }
     return try GeneratedContent(json: jsonString)
+}
+
+private func extractTextFromOutput(_ output: [JSONValue]?) -> String? {
+    guard let output else { return nil }
+
+    var textParts: [String] = []
+    for block in output {
+        if case let .object(obj) = block,
+            case let .string(type)? = obj["type"],
+            type == "message",
+            case let .array(contentBlocks)? = obj["content"]
+        {
+            for contentBlock in contentBlocks {
+                if case let .object(contentObj) = contentBlock,
+                    case let .string(contentType)? = contentObj["type"],
+                    contentType == "output_text",
+                    case let .string(text)? = contentObj["text"]
+                {
+                    textParts.append(text)
+                }
+            }
+        }
+    }
+
+    return textParts.isEmpty ? nil : textParts.joined()
+}
+
+private func extractToolCallsFromOutput(_ output: [JSONValue]?) -> [OpenAIToolCall] {
+    guard let output else { return [] }
+
+    var toolCalls: [OpenAIToolCall] = []
+    for block in output {
+        if case let .object(obj) = block,
+            case let .string(type)? = obj["type"],
+            type == "message",
+            case let .array(contentBlocks)? = obj["content"]
+        {
+            for contentBlock in contentBlocks {
+                if case let .object(contentObj) = contentBlock,
+                    case let .string(contentType)? = contentObj["type"],
+                    contentType == "tool_call",
+                    case let .string(id)? = contentObj["id"],
+                    case let .string(name)? = contentObj["name"],
+                    case let .object(args)? = contentObj["arguments"]
+                {
+                    let argsData = try? JSONEncoder().encode(JSONValue.object(args))
+                    let argsString = argsData.flatMap { String(data: $0, encoding: .utf8) }
+
+                    let toolCall = OpenAIToolCall(
+                        id: id,
+                        type: "function",
+                        function: OpenAIToolFunction(name: name, arguments: argsString)
+                    )
+                    toolCalls.append(toolCall)
+                }
+            }
+        }
+    }
+
+    return toolCalls
 }
