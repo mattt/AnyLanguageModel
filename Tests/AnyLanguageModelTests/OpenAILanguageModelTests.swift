@@ -23,7 +23,7 @@ struct OpenAILanguageModelTests {
         }
     }
 
-    @Suite("OpenAILanguageModel Chat Completions API", .enabled(if: openaiAPIKey?.isEmpty == false), .serialized)
+    @Suite("OpenAILanguageModel Chat Completions API", .enabled(if: openaiAPIKey?.isEmpty == false))
     struct ChatCompletionsTests {
         private let apiKey = openaiAPIKey!
 
@@ -115,7 +115,7 @@ struct OpenAILanguageModelTests {
         }
     }
 
-    @Suite("OpenAILanguageModel Responses API", .enabled(if: openaiAPIKey?.isEmpty == false), .serialized)
+    @Suite("OpenAILanguageModel Responses API", .enabled(if: openaiAPIKey?.isEmpty == false))
     struct ResponsesTests {
         private let apiKey = openaiAPIKey!
 
