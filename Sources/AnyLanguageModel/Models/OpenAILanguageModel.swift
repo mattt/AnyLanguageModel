@@ -759,27 +759,76 @@ private func extractToolCallsFromOutput(_ output: [JSONValue]?) -> [OpenAIToolCa
     var toolCalls: [OpenAIToolCall] = []
     for block in output {
         if case let .object(obj) = block,
-            case let .string(type)? = obj["type"],
-            type == "message",
-            case let .array(contentBlocks)? = obj["content"]
+            case let .string(type)? = obj["type"]
         {
-            for contentBlock in contentBlocks {
-                if case let .object(contentObj) = contentBlock,
-                    case let .string(contentType)? = contentObj["type"],
-                    contentType == "tool_call",
-                    case let .string(id)? = contentObj["id"],
-                    case let .string(name)? = contentObj["name"],
-                    case let .object(args)? = contentObj["arguments"]
-                {
-                    let argsData = try? JSONEncoder().encode(JSONValue.object(args))
-                    let argsString = argsData.flatMap { String(data: $0, encoding: .utf8) }
+            // Handle direct function_call at top level
+            if type == "function_call" {
+                guard let id = obj["id"].flatMap({ if case .string(let s) = $0 { return s } else { return nil } }),
+                      let name = obj["name"].flatMap({ if case .string(let s) = $0 { return s } else { return nil } })
+                else { continue }
+                
+                let argsString: String?
+                if let args = obj["arguments"] {
+                    if case let .object(argObj) = args {
+                        let argsData = try? JSONEncoder().encode(JSONValue.object(argObj))
+                        argsString = argsData.flatMap { String(data: $0, encoding: .utf8) }
+                    } else if case let .string(str) = args {
+                        argsString = str
+                    } else {
+                        argsString = nil
+                    }
+                } else {
+                    argsString = nil
+                }
+                
+                let toolCall = OpenAIToolCall(
+                    id: id,
+                    type: "function",
+                    function: OpenAIToolFunction(name: name, arguments: argsString)
+                )
+                toolCalls.append(toolCall)
+            }
+            // Handle message with nested content blocks
+            else if type == "message", case let .array(contentBlocks)? = obj["content"] {
+                for contentBlock in contentBlocks {
+                    if case let .object(contentObj) = contentBlock,
+                        case let .string(contentType)? = contentObj["type"],
+                        (contentType == "tool_call" || contentType == "tool_use")
+                    {
+                        guard let id = contentObj["id"].flatMap({ if case .string(let s) = $0 { return s } else { return nil } }),
+                              let name = contentObj["name"].flatMap({ if case .string(let s) = $0 { return s } else { return nil } })
+                        else { continue }
+                        
+                        let argsString: String?
+                        if let args = contentObj["arguments"] {
+                            if case let .object(argObj) = args {
+                                let argsData = try? JSONEncoder().encode(JSONValue.object(argObj))
+                                argsString = argsData.flatMap { String(data: $0, encoding: .utf8) }
+                            } else if case let .string(str) = args {
+                                argsString = str
+                            } else {
+                                argsString = nil
+                            }
+                        } else if let input = contentObj["input"] {
+                            if case let .object(argObj) = input {
+                                let argsData = try? JSONEncoder().encode(JSONValue.object(argObj))
+                                argsString = argsData.flatMap { String(data: $0, encoding: .utf8) }
+                            } else if case let .string(str) = input {
+                                argsString = str
+                            } else {
+                                argsString = nil
+                            }
+                        } else {
+                            argsString = nil
+                        }
 
-                    let toolCall = OpenAIToolCall(
-                        id: id,
-                        type: "function",
-                        function: OpenAIToolFunction(name: name, arguments: argsString)
-                    )
-                    toolCalls.append(toolCall)
+                        let toolCall = OpenAIToolCall(
+                            id: id,
+                            type: "function",
+                            function: OpenAIToolFunction(name: name, arguments: argsString)
+                        )
+                        toolCalls.append(toolCall)
+                    }
                 }
             }
         }
