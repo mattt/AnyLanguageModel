@@ -246,11 +246,39 @@ private func resolveToolCalls(
 private func convertOptions(_ options: GenerationOptions) -> [String: JSONValue]? {
     var ollamaOptions: [String: JSONValue] = [:]
 
+    // Handle temperature
     if let temperature = options.temperature {
         ollamaOptions["temperature"] = .double(temperature)
     }
+
+    // Greedy sampling uses temperature = 0 for deterministic output
+    if case .greedy? = options.sampling?.mode {
+        ollamaOptions["temperature"] = .double(0.0)
+    }
+
+    // Handle maximum response tokens
     if let maxTokens = options.maximumResponseTokens {
         ollamaOptions["num_predict"] = .int(maxTokens)
+    }
+
+    // Handle sampling mode specific parameters
+    if let sampling = options.sampling {
+        switch sampling.mode {
+        case .greedy:
+            break
+
+        case .topK(let k, let seed):
+            ollamaOptions["top_k"] = .int(k)
+            if let seed = seed {
+                ollamaOptions["seed"] = .int(Int(seed))
+            }
+
+        case .nucleus(let probabilityThreshold, let seed):
+            ollamaOptions["top_p"] = .double(probabilityThreshold)
+            if let seed = seed {
+                ollamaOptions["seed"] = .int(Int(seed))
+            }
+        }
     }
 
     return ollamaOptions.isEmpty ? nil : ollamaOptions
