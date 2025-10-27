@@ -94,7 +94,7 @@ struct AnthropicLanguageModelTests {
 
         var foundToolOutput = false
         for case let .toolOutput(toolOutput) in response.transcriptEntries {
-            #expect(toolOutput.id == "get_weather")
+            #expect(toolOutput.id == "getWeather")
             foundToolOutput = true
         }
         #expect(foundToolOutput)

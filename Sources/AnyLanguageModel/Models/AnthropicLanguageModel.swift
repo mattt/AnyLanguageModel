@@ -306,8 +306,11 @@ private func resolveToolUses(
 
 // Convert our GenerationSchema into Anthropic's expected JSON Schema payload
 private func convertToolToAnthropicFormat(_ tool: any Tool) throws -> AnthropicTool {
+    // Resolve the schema root to ensure it has a type field (Anthropic requirement)
+    let resolvedSchema = tool.parameters.withResolvedRoot() ?? tool.parameters
+    
     // Encode our internal schema then decode to JSONSchema type
-    let data = try JSONEncoder().encode(tool.parameters)
+    let data = try JSONEncoder().encode(resolvedSchema)
     let schema = try JSONDecoder().decode(JSONSchema.self, from: data)
     return AnthropicTool(name: tool.name, description: tool.description, inputSchema: schema)
 }
