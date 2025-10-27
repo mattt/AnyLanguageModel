@@ -764,9 +764,9 @@ private func extractToolCallsFromOutput(_ output: [JSONValue]?) -> [OpenAIToolCa
             // Handle direct function_call at top level
             if type == "function_call" {
                 guard let id = obj["id"].flatMap({ if case .string(let s) = $0 { return s } else { return nil } }),
-                      let name = obj["name"].flatMap({ if case .string(let s) = $0 { return s } else { return nil } })
+                    let name = obj["name"].flatMap({ if case .string(let s) = $0 { return s } else { return nil } })
                 else { continue }
-                
+
                 let argsString: String?
                 if let args = obj["arguments"] {
                     if case let .object(argObj) = args {
@@ -780,7 +780,7 @@ private func extractToolCallsFromOutput(_ output: [JSONValue]?) -> [OpenAIToolCa
                 } else {
                     argsString = nil
                 }
-                
+
                 let toolCall = OpenAIToolCall(
                     id: id,
                     type: "function",
@@ -795,10 +795,15 @@ private func extractToolCallsFromOutput(_ output: [JSONValue]?) -> [OpenAIToolCa
                         case let .string(contentType)? = contentObj["type"],
                         (contentType == "tool_call" || contentType == "tool_use")
                     {
-                        guard let id = contentObj["id"].flatMap({ if case .string(let s) = $0 { return s } else { return nil } }),
-                              let name = contentObj["name"].flatMap({ if case .string(let s) = $0 { return s } else { return nil } })
+                        guard
+                            let id = contentObj["id"].flatMap({
+                                if case .string(let s) = $0 { return s } else { return nil }
+                            }),
+                            let name = contentObj["name"].flatMap({
+                                if case .string(let s) = $0 { return s } else { return nil }
+                            })
                         else { continue }
-                        
+
                         let argsString: String?
                         if let args = contentObj["arguments"] {
                             if case let .object(argObj) = args {
