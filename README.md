@@ -27,7 +27,7 @@ Add this package to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/mattt/AnyLanguageModel.git", branch: "main")
+    .package(url: "https://github.com/mattt/AnyLanguageModel.git", from: "0.1.0")
 ]
 ```
 
