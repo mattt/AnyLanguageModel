@@ -162,29 +162,15 @@ import Foundation
 
     // MARK: - Tool Conversion
 
-    // TODO: Improve JSON handling by using JSONValue from JSONSchema package
-    // instead of [String: Any] for better type safety
     private func convertToolToMLXSpec(_ tool: any Tool) -> ToolSpec {
         // Convert AnyLanguageModel's GenerationSchema to JSON-compatible dictionary
         let parametersDict: [String: Any]
         do {
+            let resolvedSchema = tool.parameters.withResolvedRoot() ?? tool.parameters
             let encoder = JSONEncoder()
-            let data = try encoder.encode(tool.parameters)
+            let data = try encoder.encode(resolvedSchema)
             if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                // Resolve $ref if present
-                if let ref = json["$ref"] as? String,
-                    let defs = json["$defs"] as? [String: Any]
-                {
-                    // Extract the definition name from the $ref (e.g., "#/$defs/TypeName" -> "TypeName")
-                    let defName = ref.replacingOccurrences(of: "#/$defs/", with: "")
-                    if let resolvedDef = defs[defName] as? [String: Any] {
-                        parametersDict = resolvedDef
-                    } else {
-                        parametersDict = ["type": "object", "properties": [:], "required": []]
-                    }
-                } else {
-                    parametersDict = json
-                }
+                parametersDict = json
             } else {
                 parametersDict = ["type": "object", "properties": [:], "required": []]
             }
