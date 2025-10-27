@@ -60,14 +60,13 @@ struct OllamaLanguageModelTests {
     @Test func withGenerationOptions() async throws {
         let session = LanguageModelSession(model: model)
 
-        // let options = GenerationOptions(
-        //     temperature: 0.7,
-        //     maximumResponseTokens: 50
-        // )
+        let options = GenerationOptions(
+            temperature: 0.7,
+        )
 
         let response = try await session.respond(
             to: "Tell me a fact",
-            // options: options
+            options: options
         )
         #expect(!response.content.isEmpty)
     }
