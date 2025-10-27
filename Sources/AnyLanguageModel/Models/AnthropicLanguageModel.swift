@@ -17,6 +17,16 @@ import OrderedCollections
 ///     model: "claude-3-5-sonnet-20241022"
 /// )
 /// ```
+///
+/// You can also specify beta headers to access experimental features:
+///
+/// ```swift
+/// let model = AnthropicLanguageModel(
+///     apiKey: "your-api-key",
+///     model: "claude-3-5-sonnet-20241022",
+///     betas: ["beta1", "beta2"]
+/// )
+/// ```
 public struct AnthropicLanguageModel: LanguageModel {
     /// The default base URL for Anthropic's API.
     public static let defaultBaseURL = URL(string: "https://api.anthropic.com")!
@@ -30,21 +40,32 @@ public struct AnthropicLanguageModel: LanguageModel {
     /// The API key for authentication.
     public let apiKey: String
 
+    /// The API version to use for requests.
+    public let apiVersion: String
+
+    /// Optional beta version(s) of the API to use.
+    public let betas: [String]?
+
     /// The model identifier to use for generation.
     public let model: String
 
     private let urlSession: URLSession
+    private let headers: [String: String]
 
     /// Creates an Anthropic language model.
     ///
     /// - Parameters:
     ///   - baseURL: The base URL for the API endpoint. Defaults to Anthropic's official API.
     ///   - apiKey: Your Anthropic API key.
+    ///   - apiVersion: The API version to use for requests. Defaults to `2023-06-01`.
+    ///   - betas: Optional beta version(s) of the API to use.
     ///   - model: The model identifier (for example, "claude-3-5-sonnet-20241022").
     ///   - session: The URL session to use for network requests.
     public init(
         baseURL: URL = defaultBaseURL,
         apiKey: String,
+        apiVersion: String = defaultAPIVersion,
+        betas: [String]? = nil,
         model: String,
         session: URLSession = URLSession(configuration: .default)
     ) {
@@ -55,8 +76,21 @@ public struct AnthropicLanguageModel: LanguageModel {
 
         self.baseURL = baseURL
         self.apiKey = apiKey
+        self.apiVersion = apiVersion
+        self.betas = betas
         self.model = model
         self.urlSession = session
+
+        var headers: [String: String] = [
+            "x-api-key": apiKey,
+            "anthropic-version": apiVersion,
+        ]
+
+        if let betas = betas, !betas.isEmpty {
+            headers["anthropic-beta"] = betas.joined(separator: ",")
+        }
+
+        self.headers = headers
     }
 
     public func respond<Content>(
@@ -93,10 +127,7 @@ public struct AnthropicLanguageModel: LanguageModel {
         let message: AnthropicMessageResponse = try await urlSession.fetch(
             .post,
             url: url,
-            headers: [
-                "x-api-key": apiKey,
-                "anthropic-version": Self.defaultAPIVersion,
-            ],
+            headers: headers,
             body: body
         )
 
@@ -176,10 +207,7 @@ public struct AnthropicLanguageModel: LanguageModel {
                         .fetchEventStream(
                             .post,
                             url: url,
-                            headers: [
-                                "x-api-key": apiKey,
-                                "anthropic-version": Self.defaultAPIVersion,
-                            ],
+                            headers: headers,
                             body: body
                         )
 
@@ -308,7 +336,7 @@ private func resolveToolUses(
 private func convertToolToAnthropicFormat(_ tool: any Tool) throws -> AnthropicTool {
     // Resolve the schema root to ensure it has a type field (Anthropic requirement)
     let resolvedSchema = tool.parameters.withResolvedRoot() ?? tool.parameters
-    
+
     // Encode our internal schema then decode to JSONSchema type
     let data = try JSONEncoder().encode(resolvedSchema)
     let schema = try JSONDecoder().decode(JSONSchema.self, from: data)
