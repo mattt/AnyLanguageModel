@@ -257,12 +257,13 @@ private func convertOptions(_ options: GenerationOptions) -> [String: JSONValue]
 }
 
 private func convertToolToOllamaFormat(_ tool: any Tool) throws -> [String: JSONValue] {
+    let resolvedSchema = tool.parameters.withResolvedRoot() ?? tool.parameters
     return [
         "type": .string("function"),
         "function": .object([
             "name": .string(tool.name),
             "description": .string(tool.description),
-            "parameters": try JSONValue(tool.parameters),
+            "parameters": try JSONValue(resolvedSchema),
         ]),
     ]
 }
