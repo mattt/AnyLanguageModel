@@ -1,10 +1,8 @@
 # AnyLanguageModel
 
-A Swift package providing an API-compatible drop-in replacement adapter for Apple's Foundation Models framework.
-This lets developers use `LanguageModelSession` APIs with models other than system-provided ones.
-
-> [!WARNING]
-> This package is under active development and may be unstable. Use at your own risk.
+A Swift package that provides an API-compatible, drop-in replacement for 
+[Apple's Foundation Models framework](https://developer.apple.com/documentation/FoundationModels)
+with support for custom language model providers.
 
 ## Features
 
@@ -49,8 +47,7 @@ This results in smaller binary sizes and faster build times.
 - `Llama`: Enables llama.cpp support
   (requires `mattt/llama.swift`)
 
-By default, no traits are enabled,
-providing a lightweight package with only core functionality.
+By default, no traits are enabled.
 To enable specific traits, specify them in your package's dependencies:
 
 ```swift
