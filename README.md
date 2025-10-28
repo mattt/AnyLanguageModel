@@ -1,6 +1,6 @@
 # AnyLanguageModel
 
-A Swift package that provides an API-compatible, drop-in replacement for 
+A Swift package that provides an API-compatible replacement for 
 [Apple's Foundation Models framework](https://developer.apple.com/documentation/FoundationModels)
 with support for custom language model providers.
 
@@ -63,12 +63,45 @@ dependencies: [
 
 ## Usage
 
+AnyLanguageModel is a drop-in replacement for Apple's Foundation Models framework.
+All you need to do is change your import statement:
+
+```diff
+- import FoundationModels
++ import AnyLanguageModel
+
+struct WeatherTool: Tool {
+    let name = "getWeather"
+    let description = "Retrieve the latest weather information for a city"
+
+    @Generable
+    struct Arguments {
+        @Guide(description: "The city to fetch the weather for")
+        var city: String
+    }
+
+    func call(arguments: Arguments) async throws -> String {
+        "The weather in \(arguments.city) is sunny and 72°F / 23°C"
+    }
+}
+
+let model = SystemLanguageModel.default
+let session = LanguageModelSession(model: model, tools: [WeatherTool()])
+
+let response = try await session.respond {
+    Prompt("What's the weather in Cupertino?")
+}
+print(response.content)
+```
+
+Here's an example using all of the available language model providers:
+
 ```swift
 import AnyLanguageModel
 
 // Core functionality (always available)
 var models: [(any LanguageModel)] = [
-    SystemLanguageModel(), // Apple Foundation Models
+    SystemLanguageModel.default,
     OllamaLanguageModel(model: "qwen3") // `ollama pull qwen3:0.6b`
     AnthropicLanguageModel(
         apiKey: ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"]!,
@@ -92,21 +125,6 @@ models.append(MLXLanguageModel(modelId: "mlx-community/Qwen3-0.6B-4bit"))
 #if Llama
 models.append(LlamaLanguageModel(modelPath: "/path/to/model.gguf"))
 #endif
-
-struct WeatherTool: Tool {
-    let name = "getWeather"
-    let description = "Retrieve the latest weather information for a city"
-
-    @Generable
-    struct Arguments {
-        @Guide(description: "The city to fetch the weather for")
-        var city: String
-    }
-
-    func call(arguments: Arguments) async throws -> String {
-        "The weather in \(arguments.city) is sunny and 72°F / 23°C"
-    }
-}
 
 for model in models {
     let session = LanguageModelSession(model: model, tools: [WeatherTool()])
