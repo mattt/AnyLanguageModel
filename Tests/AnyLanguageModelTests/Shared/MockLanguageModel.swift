@@ -1,14 +1,24 @@
 @testable import AnyLanguageModel
 
 struct MockLanguageModel: LanguageModel {
+    enum UnavailableReason: Hashable, Sendable {
+        case custom(String)
+    }
+
+    var availabilityProvider: @Sendable () -> Availability<UnavailableReason>
     var responseProvider: @Sendable (Prompt, GenerationOptions) async throws -> String
 
     init(
-        responseProvider:
+        _ responseProvider:
             @escaping @Sendable (Prompt, GenerationOptions) async throws ->
             String = { _, _ in "Mock response" }
     ) {
+        self.availabilityProvider = { .available }
         self.responseProvider = responseProvider
+    }
+
+    var availability: Availability<UnavailableReason> {
+        return availabilityProvider()
     }
 
     func respond<Content>(
@@ -67,5 +77,11 @@ extension MockLanguageModel {
 
     static func fixed(_ response: String) -> Self {
         MockLanguageModel { _, _ in response }
+    }
+
+    static var unavailable: Self {
+        var model = MockLanguageModel.echo
+        model.availabilityProvider = { .unavailable(.custom("MockLanguageModel is unavailable")) }
+        return model
     }
 }

@@ -19,6 +19,10 @@
     /// ```
     @available(macOS 15.0, iOS 18.0, tvOS 18.0, visionOS 2.0, watchOS 11.0, *)
     public struct CoreMLLanguageModel: AnyLanguageModel.LanguageModel {
+        /// The reason the model is unavailable.
+        /// This model is always available.
+        public typealias UnavailableReason = Never
+
         private let model: Models.LanguageModel
         private let tokenizer: any Tokenizer
         private let chatTemplateHandler: (@Sendable (Instructions?, Prompt) -> [Message])?

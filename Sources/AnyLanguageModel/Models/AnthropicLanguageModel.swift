@@ -28,6 +28,10 @@ import OrderedCollections
 /// )
 /// ```
 public struct AnthropicLanguageModel: LanguageModel {
+    /// The reason the model is unavailable.
+    /// This model is always available.
+    public typealias UnavailableReason = Never
+
     /// The default base URL for Anthropic's API.
     public static let defaultBaseURL = URL(string: "https://api.anthropic.com")!
 

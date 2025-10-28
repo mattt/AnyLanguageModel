@@ -48,4 +48,11 @@ struct MockLanguageModelTests {
             #expect(response.content == expected)
         }
     }
+
+    @Test func unavailable() async throws {
+        let model = MockLanguageModel.unavailable
+
+        #expect(model.availability == .unavailable(.custom("MockLanguageModel is unavailable")))
+        #expect(model.isAvailable == false)
+    }
 }
