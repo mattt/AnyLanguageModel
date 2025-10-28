@@ -111,72 +111,6 @@ let response = try await session.respond {
 }
 ```
 
-### OpenAI
-
-Supports both
-[Chat Completions](https://platform.openai.com/docs/api-reference/chat) and
-[Responses](https://platform.openai.com/docs/api-reference/responses) APIs:
-
-```swift
-let model = OpenAILanguageModel(
-    apiKey: ProcessInfo.processInfo.environment["OPENAI_API_KEY"]!,
-    model: "gpt-4o-mini"
-)
-
-let session = LanguageModelSession(model: model)
-let response = try await session.respond {
-    Prompt("Write a haiku about Swift")
-}
-```
-
-For structured outputs, use the Responses API:
-
-```swift
-let model = OpenAILanguageModel(
-    apiKey: apiKey,
-    model: "gpt-4o-mini",
-    useResponsesAPI: true
-)
-```
-
-### Anthropic
-
-Uses the [Messages API](https://docs.claude.com/en/api/messages) with Claude models:
-
-```swift
-let model = AnthropicLanguageModel(
-    apiKey: ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"]!,
-    model: "claude-sonnet-4-5-20250929"
-)
-
-let session = LanguageModelSession(model: model, tools: [WeatherTool()])
-let response = try await session.respond {
-    Prompt("What's the weather like in San Francisco?")
-}
-```
-
-### Ollama
-
-Run models locally via Ollama's [HTTP API](https://github.com/ollama/ollama/blob/main/docs/api.md):
-
-```swift
-// Default: connects to http://localhost:11434
-let model = OllamaLanguageModel(model: "qwen3")
-
-// Custom endpoint
-let model = OllamaLanguageModel(
-    endpoint: URL(string: "http://remote-server:11434")!,
-    model: "llama3.2"
-)
-
-let session = LanguageModelSession(model: model)
-let response = try await session.respond {
-    Prompt("Tell me a joke")
-}
-```
-
-First, pull the model: `ollama pull qwen3:0.6b`
-
 ### Core ML
 
 Run [Core ML](https://developer.apple.com/documentation/coreml) models
@@ -248,6 +182,72 @@ Enable the trait in Package.swift:
     traits: ["Llama"]
 )
 ```
+
+### OpenAI
+
+Supports both
+[Chat Completions](https://platform.openai.com/docs/api-reference/chat) and
+[Responses](https://platform.openai.com/docs/api-reference/responses) APIs:
+
+```swift
+let model = OpenAILanguageModel(
+    apiKey: ProcessInfo.processInfo.environment["OPENAI_API_KEY"]!,
+    model: "gpt-4o-mini"
+)
+
+let session = LanguageModelSession(model: model)
+let response = try await session.respond {
+    Prompt("Write a haiku about Swift")
+}
+```
+
+For structured outputs, use the Responses API:
+
+```swift
+let model = OpenAILanguageModel(
+    apiKey: apiKey,
+    model: "gpt-4o-mini",
+    useResponsesAPI: true
+)
+```
+
+### Anthropic
+
+Uses the [Messages API](https://docs.claude.com/en/api/messages) with Claude models:
+
+```swift
+let model = AnthropicLanguageModel(
+    apiKey: ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"]!,
+    model: "claude-sonnet-4-5-20250929"
+)
+
+let session = LanguageModelSession(model: model, tools: [WeatherTool()])
+let response = try await session.respond {
+    Prompt("What's the weather like in San Francisco?")
+}
+```
+
+### Ollama
+
+Run models locally via Ollama's [HTTP API](https://github.com/ollama/ollama/blob/main/docs/api.md):
+
+```swift
+// Default: connects to http://localhost:11434
+let model = OllamaLanguageModel(model: "qwen3")
+
+// Custom endpoint
+let model = OllamaLanguageModel(
+    endpoint: URL(string: "http://remote-server:11434")!,
+    model: "llama3.2"
+)
+
+let session = LanguageModelSession(model: model)
+let response = try await session.respond {
+    Prompt("Tell me a joke")
+}
+```
+
+First, pull the model: `ollama pull qwen3:0.6b`
 
 ## Testing
 
