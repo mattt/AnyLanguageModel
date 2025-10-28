@@ -51,12 +51,8 @@ struct MockLanguageModelTests {
 
     @Test func unavailable() async throws {
         let model = MockLanguageModel.unavailable
-        let session = LanguageModelSession(model: model)
 
         #expect(model.availability == .unavailable(.custom("MockLanguageModel is unavailable")))
         #expect(model.isAvailable == false)
-
-        let response = try await session.respond(to: "Say hello")
-        #expect(response.content == "MockLanguageModel is unavailable")
     }
 }

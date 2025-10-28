@@ -80,7 +80,7 @@ extension MockLanguageModel {
     }
 
     static var unavailable: Self {
-        var model = MockLanguageModel()
+        var model = MockLanguageModel.echo
         model.availabilityProvider = { .unavailable(.custom("MockLanguageModel is unavailable")) }
         return model
     }
