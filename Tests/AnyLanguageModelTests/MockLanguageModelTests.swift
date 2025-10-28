@@ -103,4 +103,77 @@ struct MockLanguageModelTests {
         try await Task.sleep(for: .milliseconds(10))
         #expect(session.isResponding == false)
     }
+
+    @Test func transcriptStartsEmpty() async throws {
+        let model = MockLanguageModel.fixed("Hello")
+        let session = LanguageModelSession(model: model)
+
+        #expect(session.transcript.count == 0)
+    }
+
+    @Test func transcriptRecordsPromptAndResponse() async throws {
+        let model = MockLanguageModel.fixed("Hello, World!")
+        let session = LanguageModelSession(model: model)
+
+        #expect(session.transcript.count == 0)
+
+        let response = try await session.respond(to: "Say hello")
+
+        let entries = Array(session.transcript)
+        #expect(entries.count > 0)
+        #expect(response.transcriptEntries.count > 0)
+
+        #expect(response.content == "Hello, World!")
+    }
+
+    @Test func transcriptGrowsWithMultipleInteractions() async throws {
+        let model = MockLanguageModel.echo
+        let session = LanguageModelSession(model: model)
+
+        #expect(session.transcript.count == 0)
+
+        try await session.respond(to: "First prompt")
+        let countAfterFirst = session.transcript.count
+        #expect(countAfterFirst > 0)
+
+        try await session.respond(to: "Second prompt")
+        let countAfterSecond = session.transcript.count
+        #expect(countAfterSecond > countAfterFirst)
+
+        try await session.respond(to: "Third prompt")
+        let countAfterThird = session.transcript.count
+        #expect(countAfterThird > countAfterSecond)
+    }
+
+    @Test func transcriptIncludesInstructions() async throws {
+        let model = MockLanguageModel.fixed("Response")
+        let instructions = Instructions("Be helpful")
+        let session = LanguageModelSession(
+            model: model,
+            instructions: instructions
+        )
+
+        let entries = Array(session.transcript)
+        #expect(entries.count > 0)
+
+        if case .instructions(let transcriptInstructions) = entries.first {
+            #expect(transcriptInstructions.segments.count > 0)
+        } else {
+            Issue.record("First transcript entry should be instructions")
+        }
+    }
+
+    @Test func transcriptEntriesAreIdentifiable() async throws {
+        let model = MockLanguageModel.fixed("Response")
+        let session = LanguageModelSession(model: model)
+
+        try await session.respond(to: "Test")
+
+        let entries = Array(session.transcript)
+        #expect(entries.count > 0)
+
+        for entry in entries {
+            #expect(!entry.id.isEmpty)
+        }
+    }
 }

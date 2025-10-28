@@ -12,6 +12,16 @@ public struct Transcript: Sendable, Equatable, Codable {
         self.entries = Array(entries)
     }
 
+    /// Appends a single entry to the transcript.
+    mutating func append(_ entry: Entry) {
+        entries.append(entry)
+    }
+
+    /// Appends multiple entries to the transcript.
+    mutating func append<S>(contentsOf newEntries: S) where S: Sequence, S.Element == Entry {
+        entries.append(contentsOf: newEntries)
+    }
+
     /// An entry in a transcript.
     public enum Entry: Sendable, Identifiable, Equatable, Codable {
         /// Instructions, typically provided by you, the developer.

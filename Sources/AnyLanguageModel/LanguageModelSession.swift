@@ -53,7 +53,28 @@ public final class LanguageModelSession: @unchecked Sendable {
         self.model = model
         self.tools = tools
         self.instructions = instructions
-        self.transcript = transcript
+
+        // Build transcript with instructions if provided and not already in transcript
+        var finalTranscript = transcript
+        if let instructions = instructions {
+            // Only add instructions if transcript doesn't already start with instructions
+            let hasInstructions =
+                finalTranscript.first.map { entry in
+                    if case .instructions = entry { return true } else { return false }
+                } ?? false
+
+            if !hasInstructions {
+                let instructionsEntry = Transcript.Entry.instructions(
+                    Transcript.Instructions(
+                        segments: [.text(.init(content: instructions.description))],
+                        toolDefinitions: tools.map { Transcript.ToolDefinition(tool: $0) }
+                    )
+                )
+                finalTranscript.append(instructionsEntry)
+            }
+        }
+
+        self.transcript = finalTranscript
     }
 
     public func prewarm(promptPrefix: Prompt? = nil) {
@@ -121,15 +142,12 @@ public final class LanguageModelSession: @unchecked Sendable {
         to prompt: Prompt,
         options: GenerationOptions = GenerationOptions()
     ) async throws -> Response<String> {
-        try await wrapRespond {
-            try await model.respond(
-                within: self,
-                to: prompt,
-                generating: String.self,
-                includeSchemaInPrompt: true,
-                options: options
-            )
-        }
+        try await respond(
+            to: prompt,
+            generating: String.self,
+            includeSchemaInPrompt: true,
+            options: options
+        )
     }
 
     @discardableResult
@@ -155,15 +173,12 @@ public final class LanguageModelSession: @unchecked Sendable {
         includeSchemaInPrompt: Bool = true,
         options: GenerationOptions = GenerationOptions()
     ) async throws -> Response<GeneratedContent> {
-        try await wrapRespond {
-            try await model.respond(
-                within: self,
-                to: prompt,
-                generating: GeneratedContent.self,
-                includeSchemaInPrompt: includeSchemaInPrompt,
-                options: options
-            )
-        }
+        try await respond(
+            to: prompt,
+            generating: GeneratedContent.self,
+            includeSchemaInPrompt: includeSchemaInPrompt,
+            options: options
+        )
     }
 
     @discardableResult
@@ -204,13 +219,32 @@ public final class LanguageModelSession: @unchecked Sendable {
         options: GenerationOptions = GenerationOptions()
     ) async throws -> Response<Content> where Content: Generable {
         try await wrapRespond {
-            try await model.respond(
+            // Add prompt to transcript
+            let promptEntry = Transcript.Entry.prompt(
+                Transcript.Prompt(
+                    segments: [.text(.init(content: prompt.description))],
+                    options: options,
+                    responseFormat: nil
+                )
+            )
+            await MainActor.run {
+                self.transcript.append(promptEntry)
+            }
+
+            let response = try await model.respond(
                 within: self,
                 to: prompt,
                 generating: type,
                 includeSchemaInPrompt: includeSchemaInPrompt,
                 options: options
             )
+
+            // Add response entries to transcript
+            await MainActor.run {
+                self.transcript.append(contentsOf: response.transcriptEntries)
+            }
+
+            return response
         }
     }
 
