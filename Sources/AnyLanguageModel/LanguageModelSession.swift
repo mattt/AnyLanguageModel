@@ -2,13 +2,15 @@ import Foundation
 import Observation
 
 @Observable
-public final class LanguageModelSession {
+public final class LanguageModelSession: @unchecked Sendable {
     public private(set) var isResponding: Bool = false
     public private(set) var transcript: Transcript
 
     private let model: any LanguageModel
     public let tools: [any Tool]
     public let instructions: Instructions?
+
+    @ObservationIgnored private let respondingState = RespondingState()
 
     public convenience init(
         model: any LanguageModel,
@@ -58,28 +60,78 @@ public final class LanguageModelSession {
         model.prewarm(for: self, promptPrefix: promptPrefix)
     }
 
-    public struct Response<Content> where Content: Generable {
+    nonisolated private func beginResponding() {
+        Task {
+            let count = await respondingState.increment()
+            let active = count > 0
+            await MainActor.run {
+                self.isResponding = active
+            }
+        }
+    }
+
+    nonisolated private func endResponding() {
+        Task {
+            let count = await respondingState.decrement()
+            let active = count > 0
+            await MainActor.run {
+                self.isResponding = active
+            }
+        }
+    }
+
+    nonisolated private func wrapRespond<T>(_ operation: () async throws -> T) async throws -> T {
+        beginResponding()
+        defer { endResponding() }
+        return try await operation()
+    }
+
+    nonisolated private consuming func wrapStream<Content>(
+        _ upstream: sending ResponseStream<Content>
+    ) -> ResponseStream<Content> where Content: Generable, Content.PartiallyGenerated: Sendable {
+        beginResponding()
+        let session = self
+        let relay = AsyncThrowingStream<ResponseStream<Content>.Snapshot, any Error> { continuation in
+            let stream = upstream
+            Task {
+                do {
+                    for try await snapshot in stream {
+                        continuation.yield(snapshot)
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+                session.endResponding()
+            }
+        }
+        return ResponseStream(stream: relay)
+    }
+
+    public struct Response<Content>: Sendable where Content: Generable, Content: Sendable {
         public let content: Content
         public let rawContent: GeneratedContent
         public let transcriptEntries: ArraySlice<Transcript.Entry>
     }
 
     @discardableResult
-    nonisolated public func respond(
+    public func respond(
         to prompt: Prompt,
         options: GenerationOptions = GenerationOptions()
     ) async throws -> Response<String> {
-        try await model.respond(
-            within: self,
-            to: prompt,
-            generating: String.self,
-            includeSchemaInPrompt: true,
-            options: options
-        )
+        try await wrapRespond {
+            try await model.respond(
+                within: self,
+                to: prompt,
+                generating: String.self,
+                includeSchemaInPrompt: true,
+                options: options
+            )
+        }
     }
 
     @discardableResult
-    nonisolated public func respond(
+    public func respond(
         to prompt: String,
         options: GenerationOptions = GenerationOptions()
     ) async throws -> Response<String> {
@@ -87,7 +139,7 @@ public final class LanguageModelSession {
     }
 
     @discardableResult
-    nonisolated public func respond(
+    public func respond(
         options: GenerationOptions = GenerationOptions(),
         @PromptBuilder prompt: () throws -> Prompt
     ) async throws -> Response<String> {
@@ -95,23 +147,25 @@ public final class LanguageModelSession {
     }
 
     @discardableResult
-    nonisolated public func respond(
+    public func respond(
         to prompt: Prompt,
         schema: GenerationSchema,
         includeSchemaInPrompt: Bool = true,
         options: GenerationOptions = GenerationOptions()
     ) async throws -> Response<GeneratedContent> {
-        try await model.respond(
-            within: self,
-            to: prompt,
-            generating: GeneratedContent.self,
-            includeSchemaInPrompt: includeSchemaInPrompt,
-            options: options
-        )
+        try await wrapRespond {
+            try await model.respond(
+                within: self,
+                to: prompt,
+                generating: GeneratedContent.self,
+                includeSchemaInPrompt: includeSchemaInPrompt,
+                options: options
+            )
+        }
     }
 
     @discardableResult
-    nonisolated public func respond(
+    public func respond(
         to prompt: String,
         schema: GenerationSchema,
         includeSchemaInPrompt: Bool = true,
@@ -126,7 +180,7 @@ public final class LanguageModelSession {
     }
 
     @discardableResult
-    nonisolated public func respond(
+    public func respond(
         schema: GenerationSchema,
         includeSchemaInPrompt: Bool = true,
         options: GenerationOptions = GenerationOptions(),
@@ -141,23 +195,25 @@ public final class LanguageModelSession {
     }
 
     @discardableResult
-    nonisolated public func respond<Content>(
+    public func respond<Content>(
         to prompt: Prompt,
         generating type: Content.Type = Content.self,
         includeSchemaInPrompt: Bool = true,
         options: GenerationOptions = GenerationOptions()
     ) async throws -> Response<Content> where Content: Generable {
-        try await model.respond(
-            within: self,
-            to: prompt,
-            generating: type,
-            includeSchemaInPrompt: includeSchemaInPrompt,
-            options: options
-        )
+        try await wrapRespond {
+            try await model.respond(
+                within: self,
+                to: prompt,
+                generating: type,
+                includeSchemaInPrompt: includeSchemaInPrompt,
+                options: options
+            )
+        }
     }
 
     @discardableResult
-    nonisolated public func respond<Content>(
+    public func respond<Content>(
         to prompt: String,
         generating type: Content.Type = Content.self,
         includeSchemaInPrompt: Bool = true,
@@ -172,7 +228,7 @@ public final class LanguageModelSession {
     }
 
     @discardableResult
-    nonisolated public func respond<Content>(
+    public func respond<Content>(
         generating type: Content.Type = Content.self,
         includeSchemaInPrompt: Bool = true,
         options: GenerationOptions = GenerationOptions(),
@@ -192,12 +248,14 @@ public final class LanguageModelSession {
         includeSchemaInPrompt: Bool = true,
         options: GenerationOptions = GenerationOptions()
     ) -> sending ResponseStream<GeneratedContent> {
-        model.streamResponse(
-            within: self,
-            to: prompt,
-            generating: GeneratedContent.self,
-            includeSchemaInPrompt: includeSchemaInPrompt,
-            options: options
+        wrapStream(
+            model.streamResponse(
+                within: self,
+                to: prompt,
+                generating: GeneratedContent.self,
+                includeSchemaInPrompt: includeSchemaInPrompt,
+                options: options
+            )
         )
     }
 
@@ -230,12 +288,14 @@ public final class LanguageModelSession {
         includeSchemaInPrompt: Bool = true,
         options: GenerationOptions = GenerationOptions()
     ) -> sending ResponseStream<Content> where Content: Generable {
-        model.streamResponse(
-            within: self,
-            to: prompt,
-            generating: type,
-            includeSchemaInPrompt: includeSchemaInPrompt,
-            options: options
+        wrapStream(
+            model.streamResponse(
+                within: self,
+                to: prompt,
+                generating: type,
+                includeSchemaInPrompt: includeSchemaInPrompt,
+                options: options
+            )
         )
     }
 
@@ -271,12 +331,14 @@ public final class LanguageModelSession {
         to prompt: Prompt,
         options: GenerationOptions = GenerationOptions()
     ) -> sending ResponseStream<String> {
-        model.streamResponse(
-            within: self,
-            to: prompt,
-            generating: String.self,
-            includeSchemaInPrompt: true,
-            options: options
+        wrapStream(
+            model.streamResponse(
+                within: self,
+                to: prompt,
+                generating: String.self,
+                includeSchemaInPrompt: true,
+                options: options
+            )
         )
     }
 
@@ -309,7 +371,19 @@ public final class LanguageModelSession {
     }
 }
 
-extension LanguageModelSession: @unchecked Sendable, Observable {}
+private actor RespondingState {
+    private var count = 0
+
+    func increment() -> Int {
+        count += 1
+        return count
+    }
+
+    func decrement() -> Int {
+        count = max(0, count - 1)
+        return count
+    }
+}
 
 extension LanguageModelSession {
     public enum GenerationError: Error, LocalizedError {
@@ -401,7 +475,7 @@ extension LanguageModelSession {
 }
 
 extension LanguageModelSession {
-    public struct ResponseStream<Content> where Content: Generable {
+    public struct ResponseStream<Content>: Sendable where Content: Generable, Content.PartiallyGenerated: Sendable {
         private let content: Content
         private let rawContent: GeneratedContent
         private let streaming: AsyncThrowingStream<Snapshot, any Error>?
@@ -420,7 +494,7 @@ extension LanguageModelSession {
             self.streaming = stream
         }
 
-        public struct Snapshot {
+        public struct Snapshot: Sendable where Content.PartiallyGenerated: Sendable {
             public var content: Content.PartiallyGenerated
             public var rawContent: GeneratedContent
         }

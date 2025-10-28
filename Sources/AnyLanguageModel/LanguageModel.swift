@@ -5,6 +5,8 @@ public protocol LanguageModel: Sendable {
 
     var availability: Availability<UnavailableReason> { get }
 
+    var isResponding: Bool { get }
+
     func prewarm(
         for session: LanguageModelSession,
         promptPrefix: Prompt?
@@ -43,6 +45,10 @@ extension LanguageModel {
         } else {
             return false
         }
+    }
+
+    public var isResponding: Bool {
+        return false
     }
 
     public func prewarm(

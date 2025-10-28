@@ -12,7 +12,7 @@
     /// let model = SystemLanguageModel()
     /// ```
     @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
-    public struct SystemLanguageModel: LanguageModel {
+    public actor SystemLanguageModel: LanguageModel {
         /// The reason the model is unavailable.
         public typealias UnavailableReason = FoundationModels.SystemLanguageModel.Availability.UnavailableReason
 
@@ -54,7 +54,7 @@
         }
 
         /// The availability status for the system language model.
-        public var availability: Availability<UnavailableReason> {
+        nonisolated public var availability: Availability<UnavailableReason> {
             switch systemModel.availability {
             case .available:
                 .available
@@ -63,7 +63,7 @@
             }
         }
 
-        public func respond<Content>(
+        nonisolated public func respond<Content>(
             within session: LanguageModelSession,
             to prompt: Prompt,
             generating type: Content.Type,
@@ -100,7 +100,7 @@
             }
         }
 
-        public func streamResponse<Content>(
+        nonisolated public func streamResponse<Content>(
             within session: LanguageModelSession,
             to prompt: Prompt,
             generating type: Content.Type,
@@ -180,7 +180,7 @@
             return LanguageModelSession.ResponseStream(stream: stream)
         }
 
-        public func logFeedbackAttachment(
+        nonisolated public func logFeedbackAttachment(
             within session: LanguageModelSession,
             sentiment: LanguageModelFeedback.Sentiment?,
             issues: [LanguageModelFeedback.Issue],
