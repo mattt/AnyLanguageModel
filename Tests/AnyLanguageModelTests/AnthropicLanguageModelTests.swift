@@ -90,7 +90,7 @@ struct AnthropicLanguageModelTests {
         let weatherTool = WeatherTool()
         let session = LanguageModelSession(model: model, tools: [weatherTool])
 
-        let response = try await session.respond(to: "What's the weather in San Francisco?")
+        let response = try await session.respond(to: "How's the weather in San Francisco?")
 
         var foundToolOutput = false
         for case let .toolOutput(toolOutput) in response.transcriptEntries {
