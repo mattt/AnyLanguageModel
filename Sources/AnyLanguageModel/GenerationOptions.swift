@@ -84,7 +84,7 @@ extension GenerationOptions {
     /// vocabulary. The sampling mode controls how a token is selected from that
     /// distribution.
     public struct SamplingMode: Sendable, Equatable, Codable {
-        enum Mode: Equatable {
+        enum Mode: Equatable, Codable {
             case greedy
             case topK(Int, seed: UInt64?)
             case nucleus(Double, seed: UInt64?)
@@ -149,53 +149,4 @@ extension GenerationOptions {
     }
 }
 
-// MARK: - Codable
 
-extension GenerationOptions.SamplingMode {
-    private enum CodingKeys: String, CodingKey {
-        case type
-        case value
-        case seed
-    }
-
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        let type = try container.decode(String.self, forKey: .type)
-
-        switch type {
-        case "greedy":
-            self.mode = .greedy
-        case "topK":
-            let k = try container.decode(Int.self, forKey: .value)
-            let seed = try container.decodeIfPresent(UInt64.self, forKey: .seed)
-            self.mode = .topK(k, seed: seed)
-        case "nucleus":
-            let threshold = try container.decode(Double.self, forKey: .value)
-            let seed = try container.decodeIfPresent(UInt64.self, forKey: .seed)
-            self.mode = .nucleus(threshold, seed: seed)
-        default:
-            throw DecodingError.dataCorruptedError(
-                forKey: .type,
-                in: container,
-                debugDescription: "Unknown sampling mode: \(type)"
-            )
-        }
-    }
-
-    public func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-
-        switch mode {
-        case .greedy:
-            try container.encode("greedy", forKey: .type)
-        case .topK(let k, let seed):
-            try container.encode("topK", forKey: .type)
-            try container.encode(k, forKey: .value)
-            try container.encodeIfPresent(seed, forKey: .seed)
-        case .nucleus(let threshold, let seed):
-            try container.encode("nucleus", forKey: .type)
-            try container.encode(threshold, forKey: .value)
-            try container.encodeIfPresent(seed, forKey: .seed)
-        }
-    }
-}
