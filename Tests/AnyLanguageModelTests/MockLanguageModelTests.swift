@@ -84,18 +84,22 @@ struct MockLanguageModelTests {
         #expect(session.isResponding == false)
 
         let stream = session.streamResponse(to: "Test")
-
-        try await Task.sleep(for: .milliseconds(50))
-        #expect(session.isResponding == true)
-
-        var count = 0
-        for try await _ in stream {
-            count += 1
-            if count == 1 {
-                #expect(session.isResponding == true)
+        
+        // Start consuming the stream in a task
+        let task = Task {
+            for try await _ in stream {
+                // Just consume the stream
             }
         }
 
+        // Give the streaming task time to start and call beginResponding
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(session.isResponding == true)
+
+        // Wait for stream to complete
+        _ = try await task.value
+        
+        // Give time for endResponding to complete
         try await Task.sleep(for: .milliseconds(10))
         #expect(session.isResponding == false)
     }
