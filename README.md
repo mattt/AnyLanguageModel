@@ -1,8 +1,41 @@
 # AnyLanguageModel
 
-A Swift package that provides an API-compatible replacement for 
+A Swift package that provides a drop-in replacement for
 [Apple's Foundation Models framework](https://developer.apple.com/documentation/FoundationModels)
 with support for custom language model providers.
+All you need to do is change your import statement:
+
+```diff
+- import FoundationModels
++ import AnyLanguageModel
+```
+
+```swift
+import AnyLanguageModel
+
+struct WeatherTool: Tool {
+    let name = "getWeather"
+    let description = "Retrieve the latest weather information for a city"
+
+    @Generable
+    struct Arguments {
+        @Guide(description: "The city to fetch the weather for")
+        var city: String
+    }
+
+    func call(arguments: Arguments) async throws -> String {
+        "The weather in \(arguments.city) is sunny and 72°F / 23°C"
+    }
+}
+
+let model = SystemLanguageModel.default
+let session = LanguageModelSession(model: model, tools: [WeatherTool()])
+
+let response = try await session.respond {
+    Prompt("How's the weather in Cupertino?")
+}
+print(response.content)
+```
 
 ## Features
 
@@ -64,76 +97,156 @@ dependencies: [
 
 ## Usage
 
-AnyLanguageModel is a drop-in replacement for Apple's Foundation Models framework.
-All you need to do is change your import statement:
+### Apple Foundation Models
 
-```diff
-- import FoundationModels
-+ import AnyLanguageModel
-```
+Uses Apple's [system language model](https://developer.apple.com/documentation/FoundationModels)
+(requires macOS 26 / iOS 26 / visionOS 26 or later).
 
 ```swift
-struct WeatherTool: Tool {
-    let name = "getWeather"
-    let description = "Retrieve the latest weather information for a city"
-
-    @Generable
-    struct Arguments {
-        @Guide(description: "The city to fetch the weather for")
-        var city: String
-    }
-
-    func call(arguments: Arguments) async throws -> String {
-        "The weather in \(arguments.city) is sunny and 72°F / 23°C"
-    }
-}
-
 let model = SystemLanguageModel.default
-let session = LanguageModelSession(model: model, tools: [WeatherTool()])
+let session = LanguageModelSession(model: model)
 
 let response = try await session.respond {
-    Prompt("How's the weather in Cupertino?")
+    Prompt("Explain quantum computing in one sentence")
 }
-print(response.content)
 ```
 
-Here's an example using all of the available language model providers:
+### OpenAI
+
+Supports both
+[Chat Completions](https://platform.openai.com/docs/api-reference/chat) and
+[Responses](https://platform.openai.com/docs/api-reference/responses) APIs:
 
 ```swift
-import AnyLanguageModel
+let model = OpenAILanguageModel(
+    apiKey: ProcessInfo.processInfo.environment["OPENAI_API_KEY"]!,
+    model: "gpt-4o-mini"
+)
 
-// Core functionality (always available)
-var models: [(any LanguageModel)] = [
-    SystemLanguageModel.default,
-    OllamaLanguageModel(model: "qwen3") // `ollama pull qwen3:0.6b`
-    AnthropicLanguageModel(
-        apiKey: ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"]!,
-        model: "claude-sonnet-4-5-20250929"
-    ),
-    OpenAILanguageModel(
-        apiKey: ProcessInfo.processInfo.environment["OPENAI_API_KEY"]!,
-        model: "gpt-4o-mini"
-    ),
-]
-
-// Conditional models (require traits to be enabled)
-#if CoreML
-models.append(CoreMLLanguageModel(url: "path/to/some.mlmodelc")) // Compiled Core ML model
-#endif
-
-#if MLX
-models.append(MLXLanguageModel(modelId: "mlx-community/Qwen3-0.6B-4bit"))
-#endif
-
-#if Llama
-models.append(LlamaLanguageModel(modelPath: "/path/to/model.gguf"))
-#endif
-
-for model in models {
-    let session = LanguageModelSession(model: model, tools: [WeatherTool()])
-    let response = try await session.respond(to: "How's the weather in Cupertino?")
-    print(response.text) // "It's sunny and 72°F in Cupertino"
+let session = LanguageModelSession(model: model)
+let response = try await session.respond {
+    Prompt("Write a haiku about Swift")
 }
+```
+
+For structured outputs, use the Responses API:
+
+```swift
+let model = OpenAILanguageModel(
+    apiKey: apiKey,
+    model: "gpt-4o-mini",
+    useResponsesAPI: true
+)
+```
+
+### Anthropic
+
+Uses the [Messages API](https://docs.claude.com/en/api/messages) with Claude models:
+
+```swift
+let model = AnthropicLanguageModel(
+    apiKey: ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"]!,
+    model: "claude-sonnet-4-5-20250929"
+)
+
+let session = LanguageModelSession(model: model, tools: [WeatherTool()])
+let response = try await session.respond {
+    Prompt("What's the weather like in San Francisco?")
+}
+```
+
+### Ollama
+
+Run models locally via Ollama's [HTTP API](https://github.com/ollama/ollama/blob/main/docs/api.md):
+
+```swift
+// Default: connects to http://localhost:11434
+let model = OllamaLanguageModel(model: "qwen3")
+
+// Custom endpoint
+let model = OllamaLanguageModel(
+    endpoint: URL(string: "http://remote-server:11434")!,
+    model: "llama3.2"
+)
+
+let session = LanguageModelSession(model: model)
+let response = try await session.respond {
+    Prompt("Tell me a joke")
+}
+```
+
+First, pull the model: `ollama pull qwen3:0.6b`
+
+### Core ML
+
+Run [Core ML](https://developer.apple.com/documentation/coreml) models
+(requires `CoreML` trait):
+
+```swift
+let model = CoreMLLanguageModel(url: URL(fileURLWithPath: "path/to/model.mlmodelc"))
+
+let session = LanguageModelSession(model: model)
+let response = try await session.respond {
+    Prompt("Summarize this text")
+}
+```
+
+Enable the trait in Package.swift:
+
+```swift
+.package(
+    url: "https://github.com/mattt/AnyLanguageModel.git",
+    branch: "main",
+    traits: ["CoreML"]
+)
+```
+
+### MLX
+
+Run [MLX](https://github.com/ml-explore/mlx-swift) models on Apple Silicon
+(requires `MLX` trait):
+
+```swift
+let model = MLXLanguageModel(modelId: "mlx-community/Qwen3-0.6B-4bit")
+
+let session = LanguageModelSession(model: model)
+let response = try await session.respond {
+    Prompt("What is the capital of France?")
+}
+```
+
+Enable the trait in Package.swift:
+
+```swift
+.package(
+    url: "https://github.com/mattt/AnyLanguageModel.git",
+    branch: "main",
+    traits: ["MLX"]
+)
+```
+
+### llama.cpp (GGUF)
+
+Run GGUF quantized models via [llama.cpp](https://github.com/ggml-org/llama.cpp)
+(requires `Llama` trait):
+
+```swift
+let model = LlamaLanguageModel(modelPath: "/path/to/model.gguf")
+
+let session = LanguageModelSession(model: model)
+let response = try await session.respond {
+    Prompt("Translate 'hello world' to Spanish")
+}
+```
+
+Enable the trait in Package.swift:
+
+```swift
+.package(
+    url: "https://github.com/mattt/AnyLanguageModel.git",
+    branch: "main",
+    traits: ["Llama"]
+)
 ```
 
 ## Testing
