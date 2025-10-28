@@ -53,7 +53,28 @@ public final class LanguageModelSession: @unchecked Sendable {
         self.model = model
         self.tools = tools
         self.instructions = instructions
-        self.transcript = transcript
+
+        // Build transcript with instructions if provided and not already in transcript
+        var finalTranscript = transcript
+        if let instructions = instructions {
+            // Only add instructions if transcript doesn't already start with instructions
+            let hasInstructions =
+                finalTranscript.first.map { entry in
+                    if case .instructions = entry { return true } else { return false }
+                } ?? false
+
+            if !hasInstructions {
+                let instructionsEntry = Transcript.Entry.instructions(
+                    Transcript.Instructions(
+                        segments: [.text(.init(content: instructions.description))],
+                        toolDefinitions: tools.map { Transcript.ToolDefinition(tool: $0) }
+                    )
+                )
+                finalTranscript.append(instructionsEntry)
+            }
+        }
+
+        self.transcript = finalTranscript
     }
 
     public func prewarm(promptPrefix: Prompt? = nil) {
@@ -89,18 +110,47 @@ public final class LanguageModelSession: @unchecked Sendable {
     }
 
     nonisolated private func wrapStream<Content>(
-        _ upstream: sending ResponseStream<Content>
+        _ upstream: sending ResponseStream<Content>,
+        promptEntry: Transcript.Entry
     ) -> ResponseStream<Content> where Content: Generable, Content.PartiallyGenerated: Sendable {
         let session = self
         let relay = AsyncThrowingStream<ResponseStream<Content>.Snapshot, any Error> { continuation in
             let stream = upstream
             Task {
+                // Add prompt to transcript when stream starts
+                await MainActor.run {
+                    session.transcript.append(promptEntry)
+                }
+
                 await session.beginResponding()
+                var lastSnapshot: ResponseStream<Content>.Snapshot?
                 do {
                     for try await snapshot in stream {
+                        lastSnapshot = snapshot
                         continuation.yield(snapshot)
                     }
                     continuation.finish()
+
+                    // Add response to transcript after stream completes
+                    if let lastSnapshot {
+                        // Extract text content from the generated content
+                        let textContent: String
+                        if case .string(let str) = lastSnapshot.rawContent.kind {
+                            textContent = str
+                        } else {
+                            textContent = lastSnapshot.rawContent.jsonString
+                        }
+
+                        let responseEntry = Transcript.Entry.response(
+                            Transcript.Response(
+                                assetIDs: [],
+                                segments: [.text(.init(content: textContent))]
+                            )
+                        )
+                        await MainActor.run {
+                            session.transcript.append(responseEntry)
+                        }
+                    }
                 } catch {
                     continuation.finish(throwing: error)
                 }
@@ -121,15 +171,12 @@ public final class LanguageModelSession: @unchecked Sendable {
         to prompt: Prompt,
         options: GenerationOptions = GenerationOptions()
     ) async throws -> Response<String> {
-        try await wrapRespond {
-            try await model.respond(
-                within: self,
-                to: prompt,
-                generating: String.self,
-                includeSchemaInPrompt: true,
-                options: options
-            )
-        }
+        try await respond(
+            to: prompt,
+            generating: String.self,
+            includeSchemaInPrompt: true,
+            options: options
+        )
     }
 
     @discardableResult
@@ -155,15 +202,12 @@ public final class LanguageModelSession: @unchecked Sendable {
         includeSchemaInPrompt: Bool = true,
         options: GenerationOptions = GenerationOptions()
     ) async throws -> Response<GeneratedContent> {
-        try await wrapRespond {
-            try await model.respond(
-                within: self,
-                to: prompt,
-                generating: GeneratedContent.self,
-                includeSchemaInPrompt: includeSchemaInPrompt,
-                options: options
-            )
-        }
+        try await respond(
+            to: prompt,
+            generating: GeneratedContent.self,
+            includeSchemaInPrompt: includeSchemaInPrompt,
+            options: options
+        )
     }
 
     @discardableResult
@@ -204,13 +248,32 @@ public final class LanguageModelSession: @unchecked Sendable {
         options: GenerationOptions = GenerationOptions()
     ) async throws -> Response<Content> where Content: Generable {
         try await wrapRespond {
-            try await model.respond(
+            // Add prompt to transcript
+            let promptEntry = Transcript.Entry.prompt(
+                Transcript.Prompt(
+                    segments: [.text(.init(content: prompt.description))],
+                    options: options,
+                    responseFormat: nil
+                )
+            )
+            await MainActor.run {
+                self.transcript.append(promptEntry)
+            }
+
+            let response = try await model.respond(
                 within: self,
                 to: prompt,
                 generating: type,
                 includeSchemaInPrompt: includeSchemaInPrompt,
                 options: options
             )
+
+            // Add response entries to transcript
+            await MainActor.run {
+                self.transcript.append(contentsOf: response.transcriptEntries)
+            }
+
+            return response
         }
     }
 
@@ -250,14 +313,11 @@ public final class LanguageModelSession: @unchecked Sendable {
         includeSchemaInPrompt: Bool = true,
         options: GenerationOptions = GenerationOptions()
     ) -> sending ResponseStream<GeneratedContent> {
-        wrapStream(
-            model.streamResponse(
-                within: self,
-                to: prompt,
-                generating: GeneratedContent.self,
-                includeSchemaInPrompt: includeSchemaInPrompt,
-                options: options
-            )
+        streamResponse(
+            to: prompt,
+            generating: GeneratedContent.self,
+            includeSchemaInPrompt: includeSchemaInPrompt,
+            options: options
         )
     }
 
@@ -290,14 +350,24 @@ public final class LanguageModelSession: @unchecked Sendable {
         includeSchemaInPrompt: Bool = true,
         options: GenerationOptions = GenerationOptions()
     ) -> sending ResponseStream<Content> where Content: Generable {
-        wrapStream(
+        // Create prompt entry that will be added when stream starts
+        let promptEntry = Transcript.Entry.prompt(
+            Transcript.Prompt(
+                segments: [.text(.init(content: prompt.description))],
+                options: options,
+                responseFormat: nil
+            )
+        )
+
+        return wrapStream(
             model.streamResponse(
                 within: self,
                 to: prompt,
                 generating: type,
                 includeSchemaInPrompt: includeSchemaInPrompt,
                 options: options
-            )
+            ),
+            promptEntry: promptEntry
         )
     }
 
@@ -333,14 +403,11 @@ public final class LanguageModelSession: @unchecked Sendable {
         to prompt: Prompt,
         options: GenerationOptions = GenerationOptions()
     ) -> sending ResponseStream<String> {
-        wrapStream(
-            model.streamResponse(
-                within: self,
-                to: prompt,
-                generating: String.self,
-                includeSchemaInPrompt: true,
-                options: options
-            )
+        streamResponse(
+            to: prompt,
+            generating: String.self,
+            includeSchemaInPrompt: true,
+            options: options
         )
     }
 

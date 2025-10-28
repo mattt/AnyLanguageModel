@@ -36,10 +36,17 @@ struct MockLanguageModel: LanguageModel {
         let promptWithInstructions = Prompt("Instructions: \(session.instructions?.description ?? "N/A")\n\(prompt)")
         let text = try await responseProvider(promptWithInstructions, options)
 
+        let responseEntry = Transcript.Entry.response(
+            Transcript.Response(
+                assetIDs: [],
+                segments: [.text(.init(content: text))]
+            )
+        )
+
         return LanguageModelSession.Response(
             content: text as! Content,
             rawContent: GeneratedContent(text),
-            transcriptEntries: []
+            transcriptEntries: [responseEntry]
         )
     }
 

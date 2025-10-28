@@ -41,7 +41,7 @@ import struct Foundation.UUID
 ///     }
 /// }
 /// ```
-public struct GenerationID: Sendable, Hashable {
+public struct GenerationID: Sendable, Hashable, Codable {
     private let uuid: UUID
 
     /// Create a new, unique `GenerationID`.
