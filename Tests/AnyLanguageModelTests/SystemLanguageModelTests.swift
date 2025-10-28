@@ -1,11 +1,10 @@
 import Testing
-
-@testable import AnyLanguageModel
+import AnyLanguageModel
 
 #if canImport(FoundationModels)
     private let isSystemLanguageModelAvailable = {
         if #available(macOS 26.0, *) {
-            return SystemLanguageModel().systemModel.isAvailable
+            return SystemLanguageModel.default.isAvailable
         } else {
             return false
         }

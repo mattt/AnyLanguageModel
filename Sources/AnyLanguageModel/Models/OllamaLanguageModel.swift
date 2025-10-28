@@ -14,6 +14,10 @@ import OrderedCollections
 /// let model = OllamaLanguageModel(model: "qwen2.5")
 /// ```
 public struct OllamaLanguageModel: LanguageModel {
+    /// The reason the model is unavailable.
+    /// This model is always available.
+    public typealias UnavailableReason = Never
+
     /// The default base URL for Ollama.
     public static let defaultBaseURL = URL(string: "http://localhost:11434")!
 

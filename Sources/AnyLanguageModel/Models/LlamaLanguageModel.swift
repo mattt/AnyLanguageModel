@@ -13,6 +13,10 @@ import Foundation
     /// )
     /// ```
     public final class LlamaLanguageModel: LanguageModel, @unchecked Sendable {
+        /// The reason the model is unavailable.
+        /// This model is always available.
+        public typealias UnavailableReason = Never
+
         /// The path to the GGUF model file.
         public let modelPath: String
 

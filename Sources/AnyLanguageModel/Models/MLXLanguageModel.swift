@@ -12,6 +12,10 @@ import Foundation
     /// let model = MLXLanguageModel(modelId: "mlx-community/Llama-3.2-3B-Instruct-4bit")
     /// ```
     public struct MLXLanguageModel: LanguageModel {
+        /// The reason the model is unavailable.
+        /// This model is always available.
+        public typealias UnavailableReason = Never
+
         /// The model identifier from the MLX community on Hugging Face.
         public let modelId: String
 

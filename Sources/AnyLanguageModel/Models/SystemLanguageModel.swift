@@ -12,8 +12,16 @@
     /// let model = SystemLanguageModel()
     /// ```
     @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
-    public struct SystemLanguageModel {
+    public struct SystemLanguageModel: LanguageModel {
+        /// The reason the model is unavailable.
+        public typealias UnavailableReason = FoundationModels.SystemLanguageModel.Availability.UnavailableReason
+
         let systemModel: FoundationModels.SystemLanguageModel
+
+        /// The default system language model.
+        public static var `default`: SystemLanguageModel {
+            SystemLanguageModel()
+        }
 
         /// Creates the default system language model.
         public init() {
@@ -44,31 +52,15 @@
         ) {
             self.systemModel = FoundationModels.SystemLanguageModel(adapter: adapter, guardrails: guardrails)
         }
-    }
 
-    @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
-    extension SystemLanguageModel: LanguageModel {
-        public func logFeedbackAttachment(
-            within session: LanguageModelSession,
-            sentiment: LanguageModelFeedback.Sentiment?,
-            issues: [LanguageModelFeedback.Issue],
-            desiredOutput: Transcript.Entry?
-        ) -> Data {
-            let fmSession = FoundationModels.LanguageModelSession(
-                model: systemModel,
-                tools: session.tools.toFoundationModels(),
-                instructions: session.instructions?.toFoundationModels()
-            )
-
-            let fmSentiment = sentiment?.toFoundationModels()
-            let fmIssues = issues.map { $0.toFoundationModels() }
-            let fmDesiredOutput: FoundationModels.Transcript.Entry? = nil
-
-            return fmSession.logFeedbackAttachment(
-                sentiment: fmSentiment,
-                issues: fmIssues,
-                desiredOutput: fmDesiredOutput
-            )
+        /// The availability status for the system language model.
+        public var availability: Availability<UnavailableReason> {
+            switch systemModel.availability {
+            case .available:
+                .available
+            case .unavailable(let reason):
+                .unavailable(reason)
+            }
         }
 
         public func respond<Content>(
@@ -187,6 +179,30 @@
 
             return LanguageModelSession.ResponseStream(stream: stream)
         }
+
+        public func logFeedbackAttachment(
+            within session: LanguageModelSession,
+            sentiment: LanguageModelFeedback.Sentiment?,
+            issues: [LanguageModelFeedback.Issue],
+            desiredOutput: Transcript.Entry?
+        ) -> Data {
+            let fmSession = FoundationModels.LanguageModelSession(
+                model: systemModel,
+                tools: session.tools.toFoundationModels(),
+                instructions: session.instructions?.toFoundationModels()
+            )
+
+            let fmSentiment = sentiment?.toFoundationModels()
+            let fmIssues = issues.map { $0.toFoundationModels() }
+            let fmDesiredOutput: FoundationModels.Transcript.Entry? = nil
+
+            return fmSession.logFeedbackAttachment(
+                sentiment: fmSentiment,
+                issues: fmIssues,
+                desiredOutput: fmDesiredOutput
+            )
+        }
+
     }
 
     // MARK: - Helpers
