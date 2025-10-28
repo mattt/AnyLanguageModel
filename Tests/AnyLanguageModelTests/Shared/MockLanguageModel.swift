@@ -33,7 +33,7 @@ struct MockLanguageModel: LanguageModel {
             fatalError("MockLanguageModel only supports generating String content")
         }
 
-        let promptWithInstructions = Prompt("Instructions: \(session.instructions?.description ?? "N/A")\n\(prompt))")
+        let promptWithInstructions = Prompt("Instructions: \(session.instructions?.description ?? "N/A")\n\(prompt)")
         let text = try await responseProvider(promptWithInstructions, options)
 
         return LanguageModelSession.Response(
@@ -55,7 +55,7 @@ struct MockLanguageModel: LanguageModel {
             fatalError("MockLanguageModel only supports generating String content")
         }
 
-        let promptWithInstructions = Prompt("Instructions: \(session.instructions?.description ?? "N/A")\n\(prompt))")
+        let promptWithInstructions = Prompt("Instructions: \(session.instructions?.description ?? "N/A")\n\(prompt)")
 
         let stream = AsyncThrowingStream<LanguageModelSession.ResponseStream<Content>.Snapshot, any Error> {
             continuation in
