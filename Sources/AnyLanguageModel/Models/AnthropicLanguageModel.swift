@@ -97,6 +97,9 @@ public struct AnthropicLanguageModel: LanguageModel {
             fatalError("AnthropicLanguageModel only supports generating String content")
         }
 
+        let url = baseURL.appendingPathComponent("v1/messages")
+        let headers = buildHeaders()
+
         let messages = [
             AnthropicMessage(role: .user, content: [.text(.init(text: prompt.description))])
         ]
@@ -114,16 +117,7 @@ public struct AnthropicLanguageModel: LanguageModel {
             options: options
         )
 
-        let url = baseURL.appendingPathComponent("v1/messages")
         let body = try JSONEncoder().encode(params)
-
-        var headers: [String: String] = [
-            "x-api-key": tokenProvider(),
-            "anthropic-version": apiVersion,
-        ]
-        if let betas = betas, !betas.isEmpty {
-            headers["anthropic-beta"] = betas.joined(separator: ",")
-        }
 
         let message: AnthropicMessageResponse = try await urlSession.fetch(
             .post,
@@ -186,6 +180,8 @@ public struct AnthropicLanguageModel: LanguageModel {
             continuation in
             let task = Task { @Sendable in
                 do {
+                    let headers = buildHeaders()
+
                     // Convert available tools to Anthropic format
                     let anthropicTools: [AnthropicTool] = try session.tools.map { tool in
                         try convertToolToAnthropicFormat(tool)
@@ -201,14 +197,6 @@ public struct AnthropicLanguageModel: LanguageModel {
                     params["stream"] = .bool(true)
 
                     let body = try JSONEncoder().encode(params)
-
-                    var headers: [String: String] = [
-                        "x-api-key": tokenProvider(),
-                        "anthropic-version": apiVersion,
-                    ]
-                    if let betas = betas, !betas.isEmpty {
-                        headers["anthropic-beta"] = betas.joined(separator: ",")
-                    }
 
                     // Stream server-sent events from Anthropic API
                     let events: AsyncThrowingStream<AnthropicStreamEvent, any Error> =
@@ -251,6 +239,19 @@ public struct AnthropicLanguageModel: LanguageModel {
         }
 
         return LanguageModelSession.ResponseStream(stream: stream)
+    }
+
+    private func buildHeaders() -> [String: String] {
+        var headers: [String: String] = [
+            "x-api-key": tokenProvider(),
+            "anthropic-version": apiVersion,
+        ]
+
+        if let betas = betas, !betas.isEmpty {
+            headers["anthropic-beta"] = betas.joined(separator: ",")
+        }
+
+        return headers
     }
 }
 
