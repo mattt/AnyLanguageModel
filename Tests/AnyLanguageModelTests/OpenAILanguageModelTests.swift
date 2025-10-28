@@ -18,7 +18,6 @@ struct OpenAILanguageModelTests {
         for apiVariant in [OpenAILanguageModel.APIVariant.chatCompletions, .responses] {
             let model = OpenAILanguageModel(apiKey: "test-key", model: "test-model", apiVariant: apiVariant)
             #expect(model.apiVariant == apiVariant)
-            #expect(model.apiKey == "test-key")
             #expect(model.model == "test-model")
         }
     }

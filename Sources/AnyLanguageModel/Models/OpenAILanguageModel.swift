@@ -37,8 +37,8 @@ public struct OpenAILanguageModel: LanguageModel {
     /// The base URL for the API endpoint.
     public let baseURL: URL
 
-    /// The API key for authentication.
-    public let apiKey: String
+    /// The closure providing the API key for authentication.
+    private let tokenProvider: @Sendable () -> String
 
     /// The model identifier to use for generation.
     public let model: String
@@ -52,13 +52,13 @@ public struct OpenAILanguageModel: LanguageModel {
     ///
     /// - Parameters:
     ///   - baseURL: The base URL for the API endpoint. Defaults to OpenAI's official API.
-    ///   - apiKey: Your OpenAI API key.
+    ///   - apiKey: Your OpenAI API key or a closure that returns it.
     ///   - model: The model identifier (for example, "gpt-4" or "gpt-3.5-turbo").
     ///   - apiVariant: The API variant to use. Defaults to `.chatCompletions`.
     ///   - session: The URL session to use for network requests.
     public init(
         baseURL: URL = defaultBaseURL,
-        apiKey: String,
+        apiKey tokenProvider: @escaping @autoclosure @Sendable () -> String,
         model: String,
         apiVariant: APIVariant = .chatCompletions,
         session: URLSession = URLSession(configuration: .default)
@@ -69,7 +69,7 @@ public struct OpenAILanguageModel: LanguageModel {
         }
 
         self.baseURL = baseURL
-        self.apiKey = apiKey
+        self.tokenProvider = tokenProvider
         self.model = model
         self.apiVariant = apiVariant
         self.urlSession = session
@@ -140,7 +140,7 @@ public struct OpenAILanguageModel: LanguageModel {
             .post,
             url: url,
             headers: [
-                "Authorization": "Bearer \(apiKey)"
+                "Authorization": "Bearer \(tokenProvider())"
             ],
             body: body
         )
@@ -193,7 +193,7 @@ public struct OpenAILanguageModel: LanguageModel {
             .post,
             url: url,
             headers: [
-                "Authorization": "Bearer \(apiKey)"
+                "Authorization": "Bearer \(tokenProvider())"
             ],
             body: body
         )
@@ -269,7 +269,7 @@ public struct OpenAILanguageModel: LanguageModel {
                                 .post,
                                 url: url,
                                 headers: [
-                                    "Authorization": "Bearer \(apiKey)"
+                                    "Authorization": "Bearer \(tokenProvider())"
                                 ],
                                 body: body
                             )
@@ -332,7 +332,7 @@ public struct OpenAILanguageModel: LanguageModel {
                                 .post,
                                 url: url,
                                 headers: [
-                                    "Authorization": "Bearer \(apiKey)"
+                                    "Authorization": "Bearer \(tokenProvider())"
                                 ],
                                 body: body
                             )

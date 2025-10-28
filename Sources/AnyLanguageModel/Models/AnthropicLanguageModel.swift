@@ -41,8 +41,8 @@ public struct AnthropicLanguageModel: LanguageModel {
     /// The base URL for the API endpoint.
     public let baseURL: URL
 
-    /// The API key for authentication.
-    public let apiKey: String
+    /// The closure providing the API key for authentication.
+    private let tokenProvider: @Sendable () -> String
 
     /// The API version to use for requests.
     public let apiVersion: String
@@ -54,20 +54,19 @@ public struct AnthropicLanguageModel: LanguageModel {
     public let model: String
 
     private let urlSession: URLSession
-    private let headers: [String: String]
 
     /// Creates an Anthropic language model.
     ///
     /// - Parameters:
     ///   - baseURL: The base URL for the API endpoint. Defaults to Anthropic's official API.
-    ///   - apiKey: Your Anthropic API key.
+    ///   - apiKey: Your Anthropic API key or a closure that returns it.
     ///   - apiVersion: The API version to use for requests. Defaults to `2023-06-01`.
     ///   - betas: Optional beta version(s) of the API to use.
     ///   - model: The model identifier (for example, "claude-3-5-sonnet-20241022").
     ///   - session: The URL session to use for network requests.
     public init(
         baseURL: URL = defaultBaseURL,
-        apiKey: String,
+        apiKey tokenProvider: @escaping @autoclosure @Sendable () -> String,
         apiVersion: String = defaultAPIVersion,
         betas: [String]? = nil,
         model: String,
@@ -79,22 +78,11 @@ public struct AnthropicLanguageModel: LanguageModel {
         }
 
         self.baseURL = baseURL
-        self.apiKey = apiKey
+        self.tokenProvider = tokenProvider
         self.apiVersion = apiVersion
         self.betas = betas
         self.model = model
         self.urlSession = session
-
-        var headers: [String: String] = [
-            "x-api-key": apiKey,
-            "anthropic-version": apiVersion,
-        ]
-
-        if let betas = betas, !betas.isEmpty {
-            headers["anthropic-beta"] = betas.joined(separator: ",")
-        }
-
-        self.headers = headers
     }
 
     public func respond<Content>(
@@ -128,6 +116,15 @@ public struct AnthropicLanguageModel: LanguageModel {
 
         let url = baseURL.appendingPathComponent("v1/messages")
         let body = try JSONEncoder().encode(params)
+
+        var headers: [String: String] = [
+            "x-api-key": tokenProvider(),
+            "anthropic-version": apiVersion,
+        ]
+        if let betas = betas, !betas.isEmpty {
+            headers["anthropic-beta"] = betas.joined(separator: ",")
+        }
+
         let message: AnthropicMessageResponse = try await urlSession.fetch(
             .post,
             url: url,
@@ -204,6 +201,14 @@ public struct AnthropicLanguageModel: LanguageModel {
                     params["stream"] = .bool(true)
 
                     let body = try JSONEncoder().encode(params)
+
+                    var headers: [String: String] = [
+                        "x-api-key": tokenProvider(),
+                        "anthropic-version": apiVersion,
+                    ]
+                    if let betas = betas, !betas.isEmpty {
+                        headers["anthropic-beta"] = betas.joined(separator: ",")
+                    }
 
                     // Stream server-sent events from Anthropic API
                     let events: AsyncThrowingStream<AnthropicStreamEvent, any Error> =
