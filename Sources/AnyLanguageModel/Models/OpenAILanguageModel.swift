@@ -17,6 +17,10 @@ import JSONSchema
 /// )
 /// ```
 public struct OpenAILanguageModel: LanguageModel {
+    /// The reason the model is unavailable.
+    /// This model is always available.
+    public typealias UnavailableReason = Never
+
     /// The default base URL for OpenAI's API.
     public static let defaultBaseURL = URL(string: "https://api.openai.com/v1/")!
 

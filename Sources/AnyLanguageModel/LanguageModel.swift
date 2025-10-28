@@ -1,6 +1,10 @@
 import Foundation
 
 public protocol LanguageModel: Sendable {
+    associatedtype UnavailableReason
+
+    var availability: Availability<UnavailableReason> { get }
+
     func prewarm(
         for session: LanguageModelSession,
         promptPrefix: Prompt?
@@ -33,6 +37,14 @@ public protocol LanguageModel: Sendable {
 // MARK: - Default Implementation
 
 extension LanguageModel {
+    public var isAvailable: Bool {
+        if case .available = availability {
+            return true
+        } else {
+            return false
+        }
+    }
+
     public func prewarm(
         for session: LanguageModelSession,
         promptPrefix: Prompt? = nil
@@ -47,5 +59,11 @@ extension LanguageModel {
         desiredOutput: Transcript.Entry? = nil
     ) -> Data {
         return Data()
+    }
+}
+
+extension LanguageModel where UnavailableReason == Never {
+    public var availability: Availability<UnavailableReason> {
+        return .available
     }
 }
