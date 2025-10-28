@@ -60,40 +60,42 @@ public final class LanguageModelSession: @unchecked Sendable {
         model.prewarm(for: self, promptPrefix: promptPrefix)
     }
 
-    nonisolated private func beginResponding() {
-        Task {
-            let count = await respondingState.increment()
-            let active = count > 0
-            await MainActor.run {
-                self.isResponding = active
-            }
+    nonisolated private func beginResponding() async {
+        let count = await respondingState.increment()
+        let active = count > 0
+        await MainActor.run {
+            self.isResponding = active
         }
     }
 
-    nonisolated private func endResponding() {
-        Task {
-            let count = await respondingState.decrement()
-            let active = count > 0
-            await MainActor.run {
-                self.isResponding = active
-            }
+    nonisolated private func endResponding() async {
+        let count = await respondingState.decrement()
+        let active = count > 0
+        await MainActor.run {
+            self.isResponding = active
         }
     }
 
     nonisolated private func wrapRespond<T>(_ operation: () async throws -> T) async throws -> T {
-        beginResponding()
-        defer { endResponding() }
-        return try await operation()
+        await beginResponding()
+        do {
+            let result = try await operation()
+            await endResponding()
+            return result
+        } catch {
+            await endResponding()
+            throw error
+        }
     }
 
-    nonisolated private consuming func wrapStream<Content>(
+    nonisolated private func wrapStream<Content>(
         _ upstream: sending ResponseStream<Content>
     ) -> ResponseStream<Content> where Content: Generable, Content.PartiallyGenerated: Sendable {
-        beginResponding()
         let session = self
         let relay = AsyncThrowingStream<ResponseStream<Content>.Snapshot, any Error> { continuation in
             let stream = upstream
             Task {
+                await session.beginResponding()
                 do {
                     for try await snapshot in stream {
                         continuation.yield(snapshot)
@@ -102,7 +104,7 @@ public final class LanguageModelSession: @unchecked Sendable {
                 } catch {
                     continuation.finish(throwing: error)
                 }
-                session.endResponding()
+                await session.endResponding()
             }
         }
         return ResponseStream(stream: relay)
