@@ -27,7 +27,11 @@ public struct GeneratedContent: Sendable, Equatable, Generable, CustomDebugStrin
     /// because the framework didn't create them as part of a generation.
     public var id: GenerationID?
 
-    let _kind: Kind
+    /// The kind representation of this generated content.
+    ///
+    /// This property provides access to the content in a strongly-typed enum representation,
+    /// preserving the hierarchical structure of the data and the generation IDs.
+    public let kind: Kind
 
     /// Creates generated content from another value.
     ///
@@ -242,7 +246,7 @@ public struct GeneratedContent: Sendable, Equatable, Generable, CustomDebugStrin
     }
 
     private func toJSONValue() throws -> Any {
-        switch _kind {
+        switch kind {
         case .null:
             return NSNull()
         case .bool(let value):
@@ -275,7 +279,7 @@ public struct GeneratedContent: Sendable, Equatable, Generable, CustomDebugStrin
         _ type: Value.Type = Value.self,
         forProperty property: String
     ) throws -> Value where Value: ConvertibleFromGeneratedContent {
-        guard case .structure(let properties, _) = _kind,
+        guard case .structure(let properties, _) = kind,
             let value = properties[property]
         else {
             throw GeneratedContentError.propertyNotFound(property)
@@ -288,7 +292,7 @@ public struct GeneratedContent: Sendable, Equatable, Generable, CustomDebugStrin
         _ type: Value?.Type = Value?.self,
         forProperty property: String
     ) throws -> Value? where Value: ConvertibleFromGeneratedContent {
-        guard case .structure(let properties, _) = _kind else {
+        guard case .structure(let properties, _) = kind else {
             return nil
         }
         guard let value = properties[property] else {
@@ -299,13 +303,13 @@ public struct GeneratedContent: Sendable, Equatable, Generable, CustomDebugStrin
 
     /// A string representation for the debug description.
     public var debugDescription: String {
-        "GeneratedContent(\(_kind))"
+        "GeneratedContent(\(kind))"
     }
 
     /// A Boolean that indicates whether the generated content is completed.
     public var isComplete: Bool {
         // Check if the content is structurally complete
-        switch _kind {
+        switch kind {
         case .null, .bool, .number, .string:
             return true
         case .array(let elements):
@@ -316,7 +320,7 @@ public struct GeneratedContent: Sendable, Equatable, Generable, CustomDebugStrin
     }
 
     public static func == (a: GeneratedContent, b: GeneratedContent) -> Bool {
-        a._kind == b._kind && a.id == b.id
+        a.kind == b.kind && a.id == b.id
     }
 }
 
@@ -375,16 +379,8 @@ extension GeneratedContent {
     ///   - kind: The kind of content to create.
     ///   - id: An optional generation ID to associate with this content.
     public init(kind: GeneratedContent.Kind, id: GenerationID? = nil) {
-        self._kind = kind
+        self.kind = kind
         self.id = id
-    }
-
-    /// The kind representation of this generated content.
-    ///
-    /// This property provides access to the content in a strongly-typed enum representation,
-    /// preserving the hierarchical structure of the data and the generation IDs.
-    public var kind: GeneratedContent.Kind {
-        _kind
     }
 }
 
