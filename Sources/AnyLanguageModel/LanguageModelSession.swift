@@ -117,7 +117,7 @@ public final class LanguageModelSession: @unchecked Sendable {
     }
 
     @discardableResult
-    public func respond(
+    nonisolated public func respond(
         to prompt: Prompt,
         options: GenerationOptions = GenerationOptions()
     ) async throws -> Response<String> {
@@ -133,7 +133,7 @@ public final class LanguageModelSession: @unchecked Sendable {
     }
 
     @discardableResult
-    public func respond(
+    nonisolated public func respond(
         to prompt: String,
         options: GenerationOptions = GenerationOptions()
     ) async throws -> Response<String> {
@@ -141,7 +141,7 @@ public final class LanguageModelSession: @unchecked Sendable {
     }
 
     @discardableResult
-    public func respond(
+    nonisolated public func respond(
         options: GenerationOptions = GenerationOptions(),
         @PromptBuilder prompt: () throws -> Prompt
     ) async throws -> Response<String> {
@@ -149,7 +149,7 @@ public final class LanguageModelSession: @unchecked Sendable {
     }
 
     @discardableResult
-    public func respond(
+    nonisolated public func respond(
         to prompt: Prompt,
         schema: GenerationSchema,
         includeSchemaInPrompt: Bool = true,
@@ -167,7 +167,7 @@ public final class LanguageModelSession: @unchecked Sendable {
     }
 
     @discardableResult
-    public func respond(
+    nonisolated public func respond(
         to prompt: String,
         schema: GenerationSchema,
         includeSchemaInPrompt: Bool = true,
@@ -182,7 +182,7 @@ public final class LanguageModelSession: @unchecked Sendable {
     }
 
     @discardableResult
-    public func respond(
+    nonisolated public func respond(
         schema: GenerationSchema,
         includeSchemaInPrompt: Bool = true,
         options: GenerationOptions = GenerationOptions(),
@@ -197,7 +197,7 @@ public final class LanguageModelSession: @unchecked Sendable {
     }
 
     @discardableResult
-    public func respond<Content>(
+    nonisolated public func respond<Content>(
         to prompt: Prompt,
         generating type: Content.Type = Content.self,
         includeSchemaInPrompt: Bool = true,
@@ -215,7 +215,7 @@ public final class LanguageModelSession: @unchecked Sendable {
     }
 
     @discardableResult
-    public func respond<Content>(
+    nonisolated public func respond<Content>(
         to prompt: String,
         generating type: Content.Type = Content.self,
         includeSchemaInPrompt: Bool = true,
@@ -230,7 +230,7 @@ public final class LanguageModelSession: @unchecked Sendable {
     }
 
     @discardableResult
-    public func respond<Content>(
+    nonisolated public func respond<Content>(
         generating type: Content.Type = Content.self,
         includeSchemaInPrompt: Bool = true,
         options: GenerationOptions = GenerationOptions(),
@@ -244,7 +244,7 @@ public final class LanguageModelSession: @unchecked Sendable {
         )
     }
 
-    public func streamResponse(
+    nonisolated public func streamResponse(
         to prompt: Prompt,
         schema: GenerationSchema,
         includeSchemaInPrompt: Bool = true,
@@ -261,7 +261,7 @@ public final class LanguageModelSession: @unchecked Sendable {
         )
     }
 
-    public func streamResponse(
+    nonisolated public func streamResponse(
         to prompt: String,
         schema: GenerationSchema,
         includeSchemaInPrompt: Bool = true,
@@ -275,7 +275,7 @@ public final class LanguageModelSession: @unchecked Sendable {
         )
     }
 
-    public func streamResponse(
+    nonisolated public func streamResponse(
         schema: GenerationSchema,
         includeSchemaInPrompt: Bool = true,
         options: GenerationOptions = GenerationOptions(),
@@ -284,7 +284,7 @@ public final class LanguageModelSession: @unchecked Sendable {
         streamResponse(to: try prompt(), schema: schema, includeSchemaInPrompt: includeSchemaInPrompt, options: options)
     }
 
-    public func streamResponse<Content>(
+    nonisolated public func streamResponse<Content>(
         to prompt: Prompt,
         generating type: Content.Type = Content.self,
         includeSchemaInPrompt: Bool = true,
@@ -301,7 +301,7 @@ public final class LanguageModelSession: @unchecked Sendable {
         )
     }
 
-    public func streamResponse<Content>(
+    nonisolated public func streamResponse<Content>(
         to prompt: String,
         generating type: Content.Type = Content.self,
         includeSchemaInPrompt: Bool = true,
