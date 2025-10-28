@@ -55,4 +55,52 @@ struct MockLanguageModelTests {
         #expect(model.availability == .unavailable(.custom("MockLanguageModel is unavailable")))
         #expect(model.isAvailable == false)
     }
+
+    @Test func isRespondingDuringAsyncResponse() async throws {
+        let model = MockLanguageModel { _, _ in
+            try await Task.sleep(for: .milliseconds(100))
+            return "Response"
+        }
+        let session = LanguageModelSession(model: model)
+
+        #expect(session.isResponding == false)
+
+        let task = Task {
+            try await session.respond(to: "Test")
+        }
+
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(session.isResponding == true)
+
+        _ = try await task.value
+        try await Task.sleep(for: .milliseconds(10))
+        #expect(session.isResponding == false)
+    }
+
+    @Test func isRespondingDuringStreaming() async throws {
+        let model = MockLanguageModel.streamingMock()
+        let session = LanguageModelSession(model: model)
+
+        #expect(session.isResponding == false)
+
+        let stream = session.streamResponse(to: "Test")
+        
+        // Start consuming the stream in a task
+        let task = Task {
+            for try await _ in stream {
+                // Just consume the stream
+            }
+        }
+
+        // Give the streaming task time to start and call beginResponding
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(session.isResponding == true)
+
+        // Wait for stream to complete
+        _ = try await task.value
+        
+        // Give time for endResponding to complete
+        try await Task.sleep(for: .milliseconds(10))
+        #expect(session.isResponding == false)
+    }
 }

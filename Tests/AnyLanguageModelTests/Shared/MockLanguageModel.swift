@@ -33,7 +33,7 @@ struct MockLanguageModel: LanguageModel {
             fatalError("MockLanguageModel only supports generating String content")
         }
 
-        let promptWithInstructions = Prompt("Instructions: \(session.instructions?.description ?? "N/A")\n\(prompt))")
+        let promptWithInstructions = Prompt("Instructions: \(session.instructions?.description ?? "N/A")\n\(prompt)")
         let text = try await responseProvider(promptWithInstructions, options)
 
         return LanguageModelSession.Response(
@@ -55,14 +55,27 @@ struct MockLanguageModel: LanguageModel {
             fatalError("MockLanguageModel only supports generating String content")
         }
 
-        // For MockLanguageModel, we'll simulate streaming by yielding the response immediately
-        // In a real implementation, this would stream the response as it's generated
-        // Since we can't make this function async, we'll need to handle this differently
-        // For now, we'll create a stream that yields immediately with a placeholder
-        let placeholderText = "Mock streaming response"
-        let generatedContent = GeneratedContent(placeholderText)
+        let promptWithInstructions = Prompt("Instructions: \(session.instructions?.description ?? "N/A")\n\(prompt)")
 
-        return LanguageModelSession.ResponseStream(content: placeholderText as! Content, rawContent: generatedContent)
+        let stream = AsyncThrowingStream<LanguageModelSession.ResponseStream<Content>.Snapshot, any Error> {
+            continuation in
+            Task {
+                do {
+                    let text = try await responseProvider(promptWithInstructions, options)
+                    let generatedContent = GeneratedContent(text)
+                    let snapshot = LanguageModelSession.ResponseStream<Content>.Snapshot(
+                        content: (text as! Content).asPartiallyGenerated(),
+                        rawContent: generatedContent
+                    )
+                    continuation.yield(snapshot)
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+        }
+
+        return LanguageModelSession.ResponseStream(stream: stream)
     }
 }
 
@@ -83,5 +96,12 @@ extension MockLanguageModel {
         var model = MockLanguageModel.echo
         model.availabilityProvider = { .unavailable(.custom("MockLanguageModel is unavailable")) }
         return model
+    }
+
+    static func streamingMock() -> Self {
+        MockLanguageModel { _, _ in
+            try await Task.sleep(for: .milliseconds(100))
+            return "Streaming response"
+        }
     }
 }
