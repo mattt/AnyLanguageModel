@@ -176,4 +176,37 @@ struct MockLanguageModelTests {
             #expect(!entry.id.isEmpty)
         }
     }
+
+    @Test func streamingRecordsToTranscript() async throws {
+        let model = MockLanguageModel.fixed("Streamed response")
+        let session = LanguageModelSession(model: model)
+
+        #expect(session.transcript.count == 0)
+
+        let stream = session.streamResponse(to: "Stream this")
+
+        // Consume the stream
+        for try await _ in stream {}
+
+        // Give time for transcript update to complete
+        try await Task.sleep(for: .milliseconds(10))
+
+        // Verify transcript has both prompt and response
+        let entries = Array(session.transcript)
+        #expect(entries.count == 2)
+
+        // First entry should be prompt
+        if case .prompt(let prompt) = entries[0] {
+            #expect(prompt.segments.count > 0)
+        } else {
+            Issue.record("First entry should be prompt")
+        }
+
+        // Second entry should be response
+        if case .response(let response) = entries[1] {
+            #expect(response.segments.count > 0)
+        } else {
+            Issue.record("Second entry should be response")
+        }
+    }
 }
