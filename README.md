@@ -8,12 +8,13 @@ with support for custom language model providers.
 
 ### Supported Providers
 
-- [x] Apple Foundation Models
-- [x] Core ML models
-- [x] Swift MLX models
-- [x] llama.cpp (GGUF models)
+- [x] [Apple Foundation Models](https://developer.apple.com/documentation/FoundationModels)
+- [x] [Core ML](https://developer.apple.com/documentation/coreml) models
+- [x] [MLX](https://github.com/ml-explore/mlx-swift) models
+- [x] [llama.cpp](https://github.com/ggml-org/llama.cpp) (GGUF models)
 - [x] Ollama [HTTP API](https://github.com/ollama/ollama/blob/main/docs/api.md)
 - [x] Anthropic [Messages API](https://docs.claude.com/en/api/messages)
+- [x] OpenAI [Chat Completions API](https://platform.openai.com/docs/api-reference/chat)
 - [x] OpenAI [Responses API](https://platform.openai.com/docs/api-reference/responses)
 
 ## Requirements
