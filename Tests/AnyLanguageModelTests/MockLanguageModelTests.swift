@@ -55,4 +55,48 @@ struct MockLanguageModelTests {
         #expect(model.availability == .unavailable(.custom("MockLanguageModel is unavailable")))
         #expect(model.isAvailable == false)
     }
+
+    @Test func isRespondingDuringAsyncResponse() async throws {
+        let model = MockLanguageModel { _, _ in
+            try await Task.sleep(for: .milliseconds(100))
+            return "Response"
+        }
+        let session = LanguageModelSession(model: model)
+
+        #expect(session.isResponding == false)
+
+        let task = Task {
+            try await session.respond(to: "Test")
+        }
+
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(session.isResponding == true)
+
+        _ = try await task.value
+        try await Task.sleep(for: .milliseconds(10))
+        #expect(session.isResponding == false)
+    }
+
+    @Test func isRespondingDuringStreaming() async throws {
+        let model = MockLanguageModel.streamingMock()
+        let session = LanguageModelSession(model: model)
+
+        #expect(session.isResponding == false)
+
+        let stream = session.streamResponse(to: "Test")
+
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(session.isResponding == true)
+
+        var count = 0
+        for try await _ in stream {
+            count += 1
+            if count == 1 {
+                #expect(session.isResponding == true)
+            }
+        }
+
+        try await Task.sleep(for: .milliseconds(10))
+        #expect(session.isResponding == false)
+    }
 }
