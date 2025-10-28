@@ -5,7 +5,7 @@
 /// perform various adjustments on how the model chooses output tokens,
 /// to specify the penalties for repeating tokens or generating
 /// longer responses.
-public struct GenerationOptions: Sendable, Equatable {
+public struct GenerationOptions: Sendable, Equatable, Codable {
 
     /// A sampling strategy for how the model picks tokens when generating a
     /// response.
@@ -83,8 +83,8 @@ extension GenerationOptions {
     /// loop the model produces a probability distribution for all the tokens in its
     /// vocabulary. The sampling mode controls how a token is selected from that
     /// distribution.
-    public struct SamplingMode: Sendable, Equatable {
-        enum Mode: Equatable {
+    public struct SamplingMode: Sendable, Equatable, Codable {
+        enum Mode: Equatable, Codable {
             case greedy
             case topK(Int, seed: UInt64?)
             case nucleus(Double, seed: UInt64?)

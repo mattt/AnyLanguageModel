@@ -4,21 +4,30 @@ import Testing
 
 @Suite("MockLanguageModel")
 struct MockLanguageModelTests {
-    @Test func fixed() async throws {
+    @Test func fixedResponse() async throws {
         let model = MockLanguageModel.fixed("Hello, World!")
         let session = LanguageModelSession(model: model)
 
+        #expect(session.transcript.count == 0)
+
         let response = try await session.respond(to: "Say hello")
         #expect(response.content == "Hello, World!")
+
+        // Verify transcript was updated
+        #expect(session.transcript.count == 2)
+        #expect(response.transcriptEntries.count > 0)
     }
 
-    @Test func echo() async throws {
+    @Test func echoResponse() async throws {
         let model = MockLanguageModel.echo
         let session = LanguageModelSession(model: model)
 
         let prompt = Prompt("Echo this")
         let response = try await session.respond(to: prompt)
         #expect(response.content.contains(prompt.description))
+
+        // Verify transcript
+        #expect(session.transcript.count == 2)
     }
 
     @Test func withInstructions() async throws {
@@ -34,18 +43,30 @@ struct MockLanguageModelTests {
             return "😐"
         }
 
-        for (prompt, expected) in [
+        for (instructionText, expected) in [
             ("Be helpful", "😇"),
             ("Be evil", "😈"),
             ("Meh", "😐"),
         ] {
             let session = LanguageModelSession(
                 model: model,
-                instructions: Instructions(prompt)
+                instructions: Instructions(instructionText)
             )
+
+            // Verify instructions are in transcript
+            let entriesBeforeResponse = Array(session.transcript)
+            #expect(entriesBeforeResponse.count == 1)
+            if case .instructions(let transcriptInstructions) = entriesBeforeResponse.first {
+                #expect(transcriptInstructions.segments.count > 0)
+            } else {
+                Issue.record("First entry should be instructions")
+            }
 
             let response = try await session.respond(to: "Do what you want")
             #expect(response.content == expected)
+
+            // Verify transcript has instructions, prompt, and response
+            #expect(session.transcript.count == 3)
         }
     }
 
@@ -56,51 +77,73 @@ struct MockLanguageModelTests {
         #expect(model.isAvailable == false)
     }
 
-    @Test func isRespondingDuringAsyncResponse() async throws {
-        let model = MockLanguageModel { _, _ in
+    @Test func streamingResponse() async throws {
+        // Test async response with isResponding state
+        let asyncModel = MockLanguageModel { _, _ in
             try await Task.sleep(for: .milliseconds(100))
-            return "Response"
+            return "Async Response"
         }
-        let session = LanguageModelSession(model: model)
+        let asyncSession = LanguageModelSession(model: asyncModel)
 
-        #expect(session.isResponding == false)
+        #expect(asyncSession.isResponding == false)
+        #expect(asyncSession.transcript.count == 0)
 
-        let task = Task {
-            try await session.respond(to: "Test")
+        let asyncTask = Task {
+            try await asyncSession.respond(to: "Async test")
         }
 
         try await Task.sleep(for: .milliseconds(50))
-        #expect(session.isResponding == true)
+        #expect(asyncSession.isResponding == true)
 
-        _ = try await task.value
+        let response = try await asyncTask.value
         try await Task.sleep(for: .milliseconds(10))
-        #expect(session.isResponding == false)
+        #expect(asyncSession.isResponding == false)
+        #expect(asyncSession.transcript.count == 2)
+        #expect(response.transcriptEntries.count > 0)
+
+        // Test streaming response with isResponding state
+        let streamModel = MockLanguageModel.streamingMock()
+        let streamSession = LanguageModelSession(model: streamModel)
+
+        #expect(streamSession.isResponding == false)
+        #expect(streamSession.transcript.count == 0)
+
+        let stream = streamSession.streamResponse(to: "Stream test")
+
+        let streamTask = Task {
+            for try await _ in stream {}
+        }
+
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(streamSession.isResponding == true)
+
+        _ = try await streamTask.value
+        try await Task.sleep(for: .milliseconds(10))
+        #expect(streamSession.isResponding == false)
+        #expect(streamSession.transcript.count == 2)
     }
 
-    @Test func isRespondingDuringStreaming() async throws {
-        let model = MockLanguageModel.streamingMock()
+    @Test func transcriptGrowsWithMultipleInteractions() async throws {
+        let model = MockLanguageModel.echo
         let session = LanguageModelSession(model: model)
 
-        #expect(session.isResponding == false)
+        #expect(session.transcript.count == 0)
 
-        let stream = session.streamResponse(to: "Test")
-        
-        // Start consuming the stream in a task
-        let task = Task {
-            for try await _ in stream {
-                // Just consume the stream
-            }
+        try await session.respond(to: "First prompt")
+        let countAfterFirst = session.transcript.count
+        #expect(countAfterFirst == 2)
+
+        try await session.respond(to: "Second prompt")
+        let countAfterSecond = session.transcript.count
+        #expect(countAfterSecond == 4)
+
+        try await session.respond(to: "Third prompt")
+        let countAfterThird = session.transcript.count
+        #expect(countAfterThird == 6)
+
+        // Verify all entries are identifiable
+        for entry in session.transcript {
+            #expect(!entry.id.isEmpty)
         }
-
-        // Give the streaming task time to start and call beginResponding
-        try await Task.sleep(for: .milliseconds(50))
-        #expect(session.isResponding == true)
-
-        // Wait for stream to complete
-        _ = try await task.value
-        
-        // Give time for endResponding to complete
-        try await Task.sleep(for: .milliseconds(10))
-        #expect(session.isResponding == false)
     }
 }

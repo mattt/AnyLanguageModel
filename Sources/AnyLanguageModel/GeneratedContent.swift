@@ -4,7 +4,7 @@ import CoreFoundation
 /// A type that represents structured, generated content.
 ///
 /// Generated content may contain a single value, an array, or key-value pairs with unique keys.
-public struct GeneratedContent: Sendable, Equatable, Generable, CustomDebugStringConvertible {
+public struct GeneratedContent: Sendable, Equatable, Generable, CustomDebugStringConvertible, Codable {
     /// An instance of the generation schema.
     public static var generationSchema: GenerationSchema {
         // GeneratedContent is self-describing, it doesn't have a fixed schema
@@ -390,4 +390,87 @@ public enum GeneratedContentError: Error {
     case propertyNotFound(String)
     case typeMismatch
     case neverCannotBeInstantiated
+}
+
+// MARK: - Codable
+
+extension GeneratedContent {
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case kind
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try container.decodeIfPresent(GenerationID.self, forKey: .id)
+        self.kind = try container.decode(Kind.self, forKey: .kind)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(id, forKey: .id)
+        try container.encode(kind, forKey: .kind)
+    }
+}
+
+extension GeneratedContent.Kind: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case value
+        case properties
+        case orderedKeys
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let type = try container.decode(String.self, forKey: .type)
+
+        switch type {
+        case "null":
+            self = .null
+        case "bool":
+            self = .bool(try container.decode(Bool.self, forKey: .value))
+        case "number":
+            self = .number(try container.decode(Double.self, forKey: .value))
+        case "string":
+            self = .string(try container.decode(String.self, forKey: .value))
+        case "array":
+            self = .array(try container.decode([GeneratedContent].self, forKey: .value))
+        case "structure":
+            let properties = try container.decode([String: GeneratedContent].self, forKey: .properties)
+            let orderedKeys = try container.decode([String].self, forKey: .orderedKeys)
+            self = .structure(properties: properties, orderedKeys: orderedKeys)
+        default:
+            throw DecodingError.dataCorruptedError(
+                forKey: .type,
+                in: container,
+                debugDescription: "Unknown kind type: \(type)"
+            )
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+
+        switch self {
+        case .null:
+            try container.encode("null", forKey: .type)
+        case .bool(let value):
+            try container.encode("bool", forKey: .type)
+            try container.encode(value, forKey: .value)
+        case .number(let value):
+            try container.encode("number", forKey: .type)
+            try container.encode(value, forKey: .value)
+        case .string(let value):
+            try container.encode("string", forKey: .type)
+            try container.encode(value, forKey: .value)
+        case .array(let elements):
+            try container.encode("array", forKey: .type)
+            try container.encode(elements, forKey: .value)
+        case .structure(let properties, let orderedKeys):
+            try container.encode("structure", forKey: .type)
+            try container.encode(properties, forKey: .properties)
+            try container.encode(orderedKeys, forKey: .orderedKeys)
+        }
+    }
 }
