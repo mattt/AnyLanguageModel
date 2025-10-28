@@ -148,5 +148,3 @@ extension GenerationOptions {
         }
     }
 }
-
-

@@ -70,7 +70,7 @@ public final class LanguageModelSession: @unchecked Sendable {
                         toolDefinitions: tools.map { Transcript.ToolDefinition(tool: $0) }
                     )
                 )
-                finalTranscript.append(instructionsEntry)
+                finalTranscript.entries.append(instructionsEntry)
             }
         }
 
@@ -119,7 +119,7 @@ public final class LanguageModelSession: @unchecked Sendable {
             Task {
                 // Add prompt to transcript when stream starts
                 await MainActor.run {
-                    session.transcript.append(promptEntry)
+                    session.transcript.entries.append(promptEntry)
                 }
 
                 await session.beginResponding()
@@ -148,7 +148,7 @@ public final class LanguageModelSession: @unchecked Sendable {
                             )
                         )
                         await MainActor.run {
-                            session.transcript.append(responseEntry)
+                            session.transcript.entries.append(responseEntry)
                         }
                     }
                 } catch {
@@ -257,7 +257,7 @@ public final class LanguageModelSession: @unchecked Sendable {
                 )
             )
             await MainActor.run {
-                self.transcript.append(promptEntry)
+                self.transcript.entries.append(promptEntry)
             }
 
             let response = try await model.respond(
@@ -270,7 +270,7 @@ public final class LanguageModelSession: @unchecked Sendable {
 
             // Add response entries to transcript
             await MainActor.run {
-                self.transcript.append(contentsOf: response.transcriptEntries)
+                self.transcript.entries.append(contentsOf: response.transcriptEntries)
             }
 
             return response
