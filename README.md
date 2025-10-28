@@ -91,7 +91,7 @@ let model = SystemLanguageModel.default
 let session = LanguageModelSession(model: model, tools: [WeatherTool()])
 
 let response = try await session.respond {
-    Prompt("What's the weather in Cupertino?")
+    Prompt("How's the weather in Cupertino?")
 }
 print(response.content)
 ```
@@ -130,7 +130,7 @@ models.append(LlamaLanguageModel(modelPath: "/path/to/model.gguf"))
 
 for model in models {
     let session = LanguageModelSession(model: model, tools: [WeatherTool()])
-    let response = try await session.respond(to: "What's the weather in Cupertino?")
+    let response = try await session.respond(to: "How's the weather in Cupertino?")
     print(response.text) // "It's sunny and 72°F in Cupertino"
 }
 ```
