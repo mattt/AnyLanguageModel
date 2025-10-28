@@ -2,7 +2,7 @@ import struct Foundation.UUID
 
 /// A type that represents a conversation history between a user and a language model.
 public struct Transcript: Sendable, Equatable, Codable {
-    var entries: [Entry]
+    private var entries: [Entry]
 
     /// Creates a transcript.
     ///
@@ -10,6 +10,16 @@ public struct Transcript: Sendable, Equatable, Codable {
     ///   - entries: An array of entries to seed the transcript.
     public init(entries: some Sequence<Entry> = []) {
         self.entries = Array(entries)
+    }
+
+    /// Appends a single entry to the transcript.
+    mutating func append(_ entry: Entry) {
+        entries.append(entry)
+    }
+
+    /// Appends multiple entries to the transcript.
+    mutating func append<S>(contentsOf newEntries: S) where S: Sequence, S.Element == Entry {
+        entries.append(contentsOf: newEntries)
     }
 
     /// An entry in a transcript.
