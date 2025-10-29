@@ -538,10 +538,25 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
                 guidesArray = "[\(guides.joined(separator: ", "))]"
             }
 
+            // Escape the description string so it can be safely embedded in generated code.
+            // Multi-line strings need newlines converted to \n escape sequences,
+            // and special characters (backslashes, quotes) must be escaped.
+            let escapedDescription: String
+            if let desc = prop.guideDescription {
+                let escaped =
+                    desc
+                    .replacingOccurrences(of: "\\", with: "\\\\")  // Escape backslashes first
+                    .replacingOccurrences(of: "\"", with: "\\\"")  // Escape quotes
+                    .replacingOccurrences(of: "\n", with: "\\n")  // Convert newlines to escape sequences
+                escapedDescription = "\"\(escaped)\""
+            } else {
+                escapedDescription = "nil"
+            }
+
             return """
                 GenerationSchema.Property(
                                 name: "\(prop.name)",
-                                description: \(prop.guideDescription.map { "\"\($0)\"" } ?? "nil"),
+                                description: \(escapedDescription),
                                 type: \(prop.type).self,
                                 guides: \(guidesArray)
                             )
