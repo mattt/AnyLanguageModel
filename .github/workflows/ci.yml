@@ -6,22 +6,26 @@ on:
   pull_request:
     branches: ["main"]
 
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
-  test:
-    name: Swift ${{ matrix.swift }} on Xcode ${{ matrix.xcode }}
-    runs-on: ${{ matrix.runs-on }}
+  test-macos:
+    name: Swift ${{ matrix.swift }} on macOS ${{ matrix.macos }} with Xcode ${{ matrix.xcode }}
+    runs-on: macos-${{ matrix.macos }}
     env:
       DEVELOPER_DIR: "/Applications/Xcode_${{ matrix.xcode }}.app/Contents/Developer"
     strategy:
       fail-fast: false
       matrix:
         include:
-          - swift: "6.1"
+          - macos: "15"
+            swift: "6.1"
             xcode: "16.3"
-            runs-on: macos-15
-          - swift: "6.2"
+          - macos: "26"
+            swift: "6.2"
             xcode: "26.0"
-            runs-on: macos-26
     timeout-minutes: 10
     steps:
       - name: Checkout code
@@ -36,6 +40,30 @@ jobs:
           key: ${{ runner.os }}-swift-${{ matrix.swift }}-spm-${{ hashFiles('**/Package.resolved') }}
           restore-keys: |
             ${{ runner.os }}-swift-${{ matrix.swift }}-spm-
+
+      - name: Build
+        run: swift build -v
+
+      - name: Test
+        run: swift test -v
+
+  test-linux:
+    name: Swift ${{ matrix.swift-version }} on Linux
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        swift-version:
+          - 6.1.0
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Swift
+        uses: vapor/swiftly-action@v0.2
+        with:
+          toolchain: ${{ matrix.swift-version }}
 
       - name: Build
         run: swift build -v
