@@ -3,7 +3,11 @@ import Testing
 
 @testable import AnyLanguageModel
 
-@Suite("OllamaLanguageModel", .enabled(if: ProcessInfo.processInfo.environment["CI"] == nil))
+@Suite(
+    "OllamaLanguageModel",
+    .serialized,
+    .enabled(if: ProcessInfo.processInfo.environment["CI"] == nil)
+)
 struct OllamaLanguageModelTests {
     let model = OllamaLanguageModel(model: "qwen3:8b")
 
