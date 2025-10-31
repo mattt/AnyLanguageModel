@@ -201,13 +201,14 @@ let response = try await session.respond {
 }
 ```
 
-For structured outputs, use the Responses API:
+For OpenAI-compatible endpoints that use older Chat Completions API:
 
 ```swift
 let model = OpenAILanguageModel(
+    baseURL: URL(string: "https://api.example.com")!,
     apiKey: apiKey,
     model: "gpt-4o-mini",
-    useResponsesAPI: true
+    apiVariant: .chatCompletions
 )
 ```
 
