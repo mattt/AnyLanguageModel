@@ -83,7 +83,7 @@ extension URLSession {
                         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
                     }
 
-                    let (bytes, response) = try await bytes(for: request)
+                    let (bytes, response) = try await self.bytes(for: request)
 
                     guard let httpResponse = response as? HTTPURLResponse else {
                         throw URLSessionError.invalidResponse
@@ -151,7 +151,7 @@ extension URLSession {
                         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
                     }
 
-                    let (bytes, _) = try await bytes(for: request)
+                    let (bytes, _) = try await self.bytes(for: request)
                     let decoder = JSONDecoder()
 
                     for try await event in bytes.events {
