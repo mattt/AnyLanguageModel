@@ -30,7 +30,7 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/swiftlang/swift-syntax.git", from: "600.0.0"),
         .package(url: "https://github.com/mattt/JSONSchema.git", from: "1.3.0"),
-        .package(url: "https://github.com/mattt/EventSource.git", from: "1.2.0"),
+        .package(url: "https://github.com/mattt/EventSource.git", from: "1.3.0"),
         .package(url: "https://github.com/mattt/PartialJSONDecoder.git", from: "1.0.0"),
         .package(url: "https://github.com/ml-explore/mlx-swift-examples/", branch: "main"),
         .package(url: "https://github.com/huggingface/swift-transformers", from: "1.0.0"),

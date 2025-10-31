@@ -6,6 +6,7 @@ import Testing
 #if Llama
     @Suite(
         "LlamaLanguageModel",
+        .serialized,
         .enabled(if: ProcessInfo.processInfo.environment["LLAMA_MODEL_PATH"] != nil)
     )
     struct LlamaLanguageModelTests {
