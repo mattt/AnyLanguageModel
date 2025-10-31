@@ -83,37 +83,28 @@ extension URLSession {
                         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
                     }
 
-                    let (bytes, response) = try await self.bytes(for: request)
+                    let (data, response) = try await self.data(for: request)
 
                     guard let httpResponse = response as? HTTPURLResponse else {
                         throw URLSessionError.invalidResponse
                     }
 
                     guard (200 ..< 300).contains(httpResponse.statusCode) else {
-                        var errorData = Data()
-                        for try await byte in bytes {
-                            errorData.append(byte)
-                        }
-
-                        if let errorString = String(data: errorData, encoding: .utf8) {
+                        if let errorString = String(data: data, encoding: .utf8) {
                             throw URLSessionError.httpError(statusCode: httpResponse.statusCode, detail: errorString)
                         }
                         throw URLSessionError.httpError(statusCode: httpResponse.statusCode, detail: "Invalid response")
                     }
 
-                    var buffer = Data()
+                    var buffer = data
 
-                    for try await byte in bytes {
-                        buffer.append(byte)
+                    while let newlineIndex = buffer.firstIndex(of: UInt8(ascii: "\n")) {
+                        let chunk = buffer[..<newlineIndex]
+                        buffer = buffer[buffer.index(after: newlineIndex)...]
 
-                        while let newlineIndex = buffer.firstIndex(of: UInt8(ascii: "\n")) {
-                            let chunk = buffer[..<newlineIndex]
-                            buffer = buffer[buffer.index(after: newlineIndex)...]
-
-                            if !chunk.isEmpty {
-                                let decoded = try decoder.decode(T.self, from: chunk)
-                                continuation.yield(decoded)
-                            }
+                        if !chunk.isEmpty {
+                            let decoded = try decoder.decode(T.self, from: chunk)
+                            continuation.yield(decoded)
                         }
                     }
 
@@ -151,10 +142,28 @@ extension URLSession {
                         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
                     }
 
-                    let (bytes, _) = try await self.bytes(for: request)
-                    let decoder = JSONDecoder()
+                    let (asyncBytes, response) = try await self.data(for: request)
 
-                    for try await event in bytes.events {
+                    guard let httpResponse = response as? HTTPURLResponse else {
+                        throw URLSessionError.invalidResponse
+                    }
+
+                    guard (200 ..< 300).contains(httpResponse.statusCode) else {
+                        if let errorString = String(data: asyncBytes, encoding: .utf8) {
+                            throw URLSessionError.httpError(statusCode: httpResponse.statusCode, detail: errorString)
+                        }
+                        throw URLSessionError.httpError(statusCode: httpResponse.statusCode, detail: "Invalid response")
+                    }
+
+                    let decoder = JSONDecoder()
+                    let parser = EventSource.Parser()
+
+                    for byte in asyncBytes {
+                        await parser.consume(byte)
+                    }
+                    await parser.finish()
+
+                    while let event = await parser.getNextEvent() {
                         guard let data = event.data.data(using: .utf8) else { continue }
 
                         if let decoded = try? decoder.decode(T.self, from: data) {
