@@ -10,7 +10,10 @@ import AnyLanguageModel
         }
     }()
 
-    @Suite("SystemLanguageModel", .enabled(if: isSystemLanguageModelAvailable))
+    @Suite(
+        "SystemLanguageModel",
+        .enabled(if: isSystemLanguageModelAvailable)
+    )
     struct SystemLanguageModelTests {
         @available(macOS 26.0, *)
         @Test func basicResponse() async throws {
