@@ -14,6 +14,35 @@ public struct GeminiLanguageModel: LanguageModel {
 
     public static let defaultAPIVersion = "v1beta"
 
+    public enum Thinking: Sendable, ExpressibleByBooleanLiteral, ExpressibleByIntegerLiteral {
+        case disabled
+        case dynamic
+        case budget(Int)
+
+        var budgetValue: Int? {
+            switch self {
+            case .disabled: return 0
+            case .dynamic: return -1
+            case .budget(let value): return value
+            }
+        }
+
+        public init(booleanLiteral value: Bool) {
+            self = value ? .dynamic : .disabled
+        }
+
+        public init(integerLiteral value: Int) {
+            self = .budget(value)
+        }
+    }
+
+    public enum GeminiServerTool: Sendable, Equatable {
+        case googleSearch
+        case urlContext
+        case codeExecution
+        case googleMaps(latitude: Double?, longitude: Double?)
+    }
+
     public let baseURL: URL
 
     private let tokenProvider: @Sendable () -> String
@@ -22,11 +51,9 @@ public struct GeminiLanguageModel: LanguageModel {
 
     public let model: String
 
-    public var thinkingBudget: Int?
+    public var thinking: Thinking
 
-    public var includeThoughts: Bool
-
-    public var enableGoogleSearch: Bool
+    public var serverTools: [GeminiServerTool]
 
     private let urlSession: URLSession
 
@@ -35,9 +62,8 @@ public struct GeminiLanguageModel: LanguageModel {
         apiKey tokenProvider: @escaping @autoclosure @Sendable () -> String,
         apiVersion: String = defaultAPIVersion,
         model: String,
-        thinkingBudget: Int? = nil,
-        includeThoughts: Bool = false,
-        enableGoogleSearch: Bool = false,
+        thinking: Thinking = .disabled,
+        serverTools: [GeminiServerTool] = [],
         session: URLSession = URLSession(configuration: .default)
     ) {
         var baseURL = baseURL
@@ -49,9 +75,8 @@ public struct GeminiLanguageModel: LanguageModel {
         self.tokenProvider = tokenProvider
         self.apiVersion = apiVersion
         self.model = model
-        self.thinkingBudget = thinkingBudget
-        self.includeThoughts = includeThoughts
-        self.enableGoogleSearch = enableGoogleSearch
+        self.thinking = thinking
+        self.serverTools = serverTools
         self.urlSession = session
     }
 
@@ -72,62 +97,89 @@ public struct GeminiLanguageModel: LanguageModel {
             .appendingPathComponent("models/\(model):generateContent")
         let headers = buildHeaders()
 
-        let contents = [
+        var contents = [
             GeminiContent(role: .user, parts: [.text(GeminiTextPart(text: prompt.description))])
         ]
 
         let geminiTools = try buildTools(from: session.tools)
 
-        let params = try createGenerateContentParams(
-            contents: contents,
-            tools: geminiTools,
-            options: options,
-            thinkingBudget: thinkingBudget,
-            includeThoughts: includeThoughts
-        )
+        var allEntries: [Transcript.Entry] = []
 
-        let body = try JSONEncoder().encode(params)
+        // Multi-turn conversation loop for tool calling
+        while true {
+            let params = try createGenerateContentParams(
+                contents: contents,
+                tools: geminiTools,
+                options: options,
+                thinking: thinking
+            )
 
-        let response: GeminiGenerateContentResponse = try await urlSession.fetch(
-            .post,
-            url: url,
-            headers: headers,
-            body: body
-        )
+            let body = try JSONEncoder().encode(params)
 
-        var entries: [Transcript.Entry] = []
+            let response: GeminiGenerateContentResponse = try await urlSession.fetch(
+                .post,
+                url: url,
+                headers: headers,
+                body: body
+            )
 
-        guard let firstCandidate = response.candidates.first else {
-            throw GeminiError.noCandidate
-        }
+            guard let firstCandidate = response.candidates.first else {
+                throw GeminiError.noCandidate
+            }
 
-        let functionCalls: [GeminiFunctionCall] = firstCandidate.content.parts.compactMap { part in
-            if case .functionCall(let call) = part { return call }
-            return nil
-        }
+            let functionCalls: [GeminiFunctionCall] = firstCandidate.content.parts.compactMap { part in
+                if case .functionCall(let call) = part { return call }
+                return nil
+            }
 
-        if !functionCalls.isEmpty {
-            let invocations = try await resolveFunctionCalls(functionCalls, session: session)
-            if !invocations.isEmpty {
-                entries.append(.toolCalls(Transcript.ToolCalls(invocations.map(\.call))))
-                for invocation in invocations {
-                    entries.append(.toolOutput(invocation.output))
+            if !functionCalls.isEmpty {
+                // Append the model's response with function calls to the conversation
+                contents.append(firstCandidate.content)
+
+                // Resolve function calls
+                let invocations = try await resolveFunctionCalls(functionCalls, session: session)
+                if !invocations.isEmpty {
+                    allEntries.append(.toolCalls(Transcript.ToolCalls(invocations.map(\.call))))
+
+                    // Build tool response parts for Gemini
+                    var toolParts: [GeminiPart] = []
+                    for invocation in invocations {
+                        allEntries.append(.toolOutput(invocation.output))
+
+                        // Convert tool output to function response
+                        let responseValue = try toJSONValue(invocation.output)
+                        toolParts.append(
+                            .functionResponse(
+                                GeminiFunctionResponse(
+                                    name: invocation.call.toolName,
+                                    response: responseValue
+                                )
+                            )
+                        )
+                    }
+
+                    // Append tool responses to the conversation
+                    contents.append(GeminiContent(role: .tool, parts: toolParts))
                 }
+
+                // Continue the loop to send the next request with tool results
+                continue
+            } else {
+                // No function calls, extract final text and return
+                let text = firstCandidate.content.parts.compactMap { part -> String? in
+                    switch part {
+                    case .text(let t): return t.text
+                    default: return nil
+                    }
+                }.joined()
+
+                return LanguageModelSession.Response(
+                    content: text as! Content,
+                    rawContent: GeneratedContent(text),
+                    transcriptEntries: ArraySlice(allEntries)
+                )
             }
         }
-
-        let text = firstCandidate.content.parts.compactMap { part -> String? in
-            switch part {
-            case .text(let t): return t.text
-            default: return nil
-            }
-        }.joined()
-
-        return LanguageModelSession.Response(
-            content: text as! Content,
-            rawContent: GeneratedContent(text),
-            transcriptEntries: ArraySlice(entries)
-        )
     }
 
     public func streamResponse<Content>(
@@ -150,8 +202,7 @@ public struct GeminiLanguageModel: LanguageModel {
             .appendingPathComponent(apiVersion)
             .appendingPathComponent("models/\(model):streamGenerateContent")
 
-        let thinkingBudget = self.thinkingBudget
-        let includeThoughts = self.includeThoughts
+        let thinking = self.thinking
 
         let stream: AsyncThrowingStream<LanguageModelSession.ResponseStream<Content>.Snapshot, any Error> = .init {
             continuation in
@@ -165,8 +216,7 @@ public struct GeminiLanguageModel: LanguageModel {
                         contents: contents,
                         tools: geminiTools,
                         options: options,
-                        thinkingBudget: thinkingBudget,
-                        includeThoughts: includeThoughts
+                        thinking: thinking
                     )
                     params["stream"] = .bool(true)
 
@@ -224,11 +274,20 @@ public struct GeminiLanguageModel: LanguageModel {
             let functionDeclarations: [GeminiFunctionDeclaration] = try tools.map { tool in
                 try convertToolToGeminiFormat(tool)
             }
-            geminiTools.append(GeminiTool(functionDeclarations: functionDeclarations))
+            geminiTools.append(.functionDeclarations(functionDeclarations))
         }
 
-        if enableGoogleSearch {
-            geminiTools.append(GeminiTool(googleSearch: GeminiGoogleSearch()))
+        for serverTool in serverTools {
+            switch serverTool {
+            case .googleSearch:
+                geminiTools.append(.googleSearch)
+            case .urlContext:
+                geminiTools.append(.urlContext)
+            case .codeExecution:
+                geminiTools.append(.codeExecution)
+            case .googleMaps(let latitude, let longitude):
+                geminiTools.append(.googleMaps(latitude: latitude, longitude: longitude))
+            }
         }
 
         return geminiTools.isEmpty ? nil : geminiTools
@@ -239,8 +298,7 @@ private func createGenerateContentParams(
     contents: [GeminiContent],
     tools: [GeminiTool]?,
     options: GenerationOptions,
-    thinkingBudget: Int?,
-    includeThoughts: Bool
+    thinking: GeminiLanguageModel.Thinking
 ) throws -> [String: JSONValue] {
     var params: [String: JSONValue] = [
         "contents": try JSONValue(contents)
@@ -260,20 +318,17 @@ private func createGenerateContentParams(
         generationConfig["temperature"] = .double(temperature)
     }
 
-    if thinkingBudget != nil || includeThoughts {
+    if case .disabled = thinking {
+    } else {
         var thinkingConfig: [String: JSONValue] = [:]
 
-        if let budget = thinkingBudget {
+        if let budget = thinking.budgetValue {
             thinkingConfig["thinkingBudget"] = .int(budget)
         }
 
-        if includeThoughts {
-            thinkingConfig["includeThoughts"] = .bool(true)
-        }
+        thinkingConfig["includeThoughts"] = .bool(true)
 
-        if !thinkingConfig.isEmpty {
-            generationConfig["thinkingConfig"] = .object(thinkingConfig)
-        }
+        generationConfig["thinkingConfig"] = .object(thinkingConfig)
     }
 
     if !generationConfig.isEmpty {
@@ -360,27 +415,90 @@ private func toGeneratedContent(_ value: [String: JSONValue]?) throws -> Generat
     return try GeneratedContent(json: json)
 }
 
-private struct GeminiTool: Codable, Sendable {
-    let functionDeclarations: [GeminiFunctionDeclaration]?
-    let googleSearch: GeminiGoogleSearch?
+private func toJSONValue(_ toolOutput: Transcript.ToolOutput) throws -> [String: JSONValue] {
+    var result: [String: JSONValue] = [:]
+
+    for segment in toolOutput.segments {
+        switch segment {
+        case .text(let text):
+            result["result"] = .string(text.content)
+        case .structure(let structured):
+            // For structured segments, encode the content
+            let data = try JSONEncoder().encode(structured.content)
+            if let jsonString = String(data: data, encoding: .utf8) {
+                result["result"] = .string(jsonString)
+            }
+        }
+    }
+
+    return result
+}
+
+private enum GeminiTool: Codable, Sendable {
+    case functionDeclarations([GeminiFunctionDeclaration])
+    case googleSearch
+    case urlContext
+    case codeExecution
+    case googleMaps(latitude: Double?, longitude: Double?)
 
     enum CodingKeys: String, CodingKey {
         case functionDeclarations = "function_declarations"
         case googleSearch = "google_search"
+        case urlContext = "url_context"
+        case codeExecution = "code_execution"
+        case googleMaps = "google_maps"
     }
 
-    init(functionDeclarations: [GeminiFunctionDeclaration]) {
-        self.functionDeclarations = functionDeclarations
-        self.googleSearch = nil
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        if let declarations = try container.decodeIfPresent(
+            [GeminiFunctionDeclaration].self,
+            forKey: .functionDeclarations
+        ) {
+            self = .functionDeclarations(declarations)
+        } else if container.contains(.googleSearch) {
+            self = .googleSearch
+        } else if container.contains(.urlContext) {
+            self = .urlContext
+        } else if container.contains(.codeExecution) {
+            self = .codeExecution
+        } else if let mapsData = try container.decodeIfPresent(GoogleMapsPayload.self, forKey: .googleMaps) {
+            self = .googleMaps(latitude: mapsData.lat, longitude: mapsData.lng)
+        } else {
+            throw DecodingError.dataCorrupted(
+                DecodingError.Context(
+                    codingPath: decoder.codingPath,
+                    debugDescription: "Unable to decode GeminiTool"
+                )
+            )
+        }
     }
 
-    init(googleSearch: GeminiGoogleSearch) {
-        self.functionDeclarations = nil
-        self.googleSearch = googleSearch
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+
+        switch self {
+        case .functionDeclarations(let declarations):
+            try container.encode(declarations, forKey: .functionDeclarations)
+        case .googleSearch:
+            try container.encode(EmptyObject(), forKey: .googleSearch)
+        case .urlContext:
+            try container.encode(EmptyObject(), forKey: .urlContext)
+        case .codeExecution:
+            try container.encode(EmptyObject(), forKey: .codeExecution)
+        case .googleMaps(let latitude, let longitude):
+            try container.encode(GoogleMapsPayload(lat: latitude, lng: longitude), forKey: .googleMaps)
+        }
+    }
+
+    private struct EmptyObject: Codable {}
+
+    private struct GoogleMapsPayload: Codable {
+        let lat: Double?
+        let lng: Double?
     }
 }
-
-private struct GeminiGoogleSearch: Codable, Sendable {}
 
 private struct GeminiFunctionDeclaration: Codable, Sendable {
     let name: String

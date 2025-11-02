@@ -245,15 +245,78 @@ let response = try await session.respond {
 }
 ```
 
-Enable Gemini-specific features like thinking mode and Google Search grounding:
+Enable Gemini-specific features like thinking mode and server-side tools:
 
 ```swift
+// Enable thinking mode with specific token budget
 let model = GeminiLanguageModel(
     apiKey: apiKey,
     model: "gemini-2.5-flash",
-    thinkingBudget: 1024,           // Enable thinking mode with budget
-    includeThoughts: true,           // Include thought summaries in response
-    enableGoogleSearch: true         // Enable Google Search grounding
+    thinking: .budget(1024),         // Specific thinking budget
+    serverTools: [.googleSearch]     // Enable Google Search grounding
+)
+
+// Enable dynamic thinking (model decides budget)
+let model = GeminiLanguageModel(
+    apiKey: apiKey,
+    model: "gemini-2.5-flash",
+    thinking: true,                  // Dynamic thinking
+    serverTools: [.googleSearch, .codeExecution]
+)
+
+// Disable thinking (default)
+let model = GeminiLanguageModel(
+    apiKey: apiKey,
+    model: "gemini-2.5-flash",
+    thinking: .disabled
+)
+```
+
+#### Server-Side Tools
+
+Gemini supports server-side tools that execute transparently on Google's infrastructure:
+
+```swift
+// Google Search - provides real-time web information
+let model = GeminiLanguageModel(
+    apiKey: apiKey,
+    model: "gemini-2.5-flash",
+    serverTools: [.googleSearch]
+)
+
+// URL Context - fetches and analyzes content from URLs mentioned in prompts
+let model = GeminiLanguageModel(
+    apiKey: apiKey,
+    model: "gemini-2.5-flash",
+    serverTools: [.urlContext]
+)
+
+// Code Execution - generates and runs Python code to solve problems
+let model = GeminiLanguageModel(
+    apiKey: apiKey,
+    model: "gemini-2.5-flash",
+    serverTools: [.codeExecution]
+)
+
+// Google Maps - provides location-aware responses
+let model = GeminiLanguageModel(
+    apiKey: apiKey,
+    model: "gemini-2.5-flash",
+    serverTools: [
+        .googleMaps(latitude: 37.7749, longitude: -122.4194)
+    ]
+)
+
+// Combine multiple server tools
+let model = GeminiLanguageModel(
+    apiKey: apiKey,
+    model: "gemini-2.5-flash",
+    serverTools: [
+        .googleSearch,
+        .codeExecution,
+        .urlContext,
+        .googleMaps(latitude: nil, longitude: nil)  // Optional location
+    ]
 )
 ```
 
