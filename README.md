@@ -47,6 +47,7 @@ print(response.content)
 - [x] [llama.cpp](https://github.com/ggml-org/llama.cpp) (GGUF models)
 - [x] Ollama [HTTP API](https://github.com/ollama/ollama/blob/main/docs/api.md)
 - [x] Anthropic [Messages API](https://docs.claude.com/en/api/messages)
+- [x] Google [Gemini API](https://ai.google.dev/api/generate-content)
 - [x] OpenAI [Chat Completions API](https://platform.openai.com/docs/api-reference/chat)
 - [x] OpenAI [Responses API](https://platform.openai.com/docs/api-reference/responses)
 
@@ -226,6 +227,34 @@ let session = LanguageModelSession(model: model, tools: [WeatherTool()])
 let response = try await session.respond {
     Prompt("What's the weather like in San Francisco?")
 }
+```
+
+### Google Gemini
+
+Uses the [Gemini API](https://ai.google.dev/api/generate-content) with Gemini models:
+
+```swift
+let model = GeminiLanguageModel(
+    apiKey: ProcessInfo.processInfo.environment["GEMINI_API_KEY"]!,
+    model: "gemini-2.5-flash"
+)
+
+let session = LanguageModelSession(model: model, tools: [WeatherTool()])
+let response = try await session.respond {
+    Prompt("What's the weather like in Tokyo?")
+}
+```
+
+Enable Gemini-specific features like thinking mode and Google Search grounding:
+
+```swift
+let model = GeminiLanguageModel(
+    apiKey: apiKey,
+    model: "gemini-2.5-flash",
+    thinkingBudget: 1024,           // Enable thinking mode with budget
+    includeThoughts: true,           // Include thought summaries in response
+    enableGoogleSearch: true         // Enable Google Search grounding
+)
 ```
 
 ### Ollama
