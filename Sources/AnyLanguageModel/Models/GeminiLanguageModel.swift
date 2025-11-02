@@ -36,7 +36,7 @@ public struct GeminiLanguageModel: LanguageModel {
         }
     }
 
-    public enum GeminiServerTool: Sendable, Equatable {
+    public enum ServerTool: Sendable, Equatable {
         case googleSearch
         case urlContext
         case codeExecution
@@ -53,7 +53,7 @@ public struct GeminiLanguageModel: LanguageModel {
 
     public var thinking: Thinking
 
-    public var serverTools: [GeminiServerTool]
+    public var serverTools: [ServerTool]
 
     private let urlSession: URLSession
 
@@ -63,7 +63,7 @@ public struct GeminiLanguageModel: LanguageModel {
         apiVersion: String = defaultAPIVersion,
         model: String,
         thinking: Thinking = .disabled,
-        serverTools: [GeminiServerTool] = [],
+        serverTools: [ServerTool] = [],
         session: URLSession = URLSession(configuration: .default)
     ) {
         var baseURL = baseURL
