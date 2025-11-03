@@ -62,7 +62,13 @@ struct GeminiLanguageModelTests {
     }
 
     @Test func withGenerationOptions() async throws {
-        let session = LanguageModelSession(model: model)
+        // Use a model with thinking disabled to avoid consuming all tokens on thinking
+        let modelWithoutThinking = GeminiLanguageModel(
+            apiKey: geminiAPIKey!,
+            model: "gemini-2.5-flash",
+            thinking: false
+        )
+        let session = LanguageModelSession(model: modelWithoutThinking)
 
         let options = GenerationOptions(
             temperature: 0.7,
