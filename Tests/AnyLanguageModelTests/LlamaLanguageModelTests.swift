@@ -125,5 +125,19 @@ import Testing
             // Response should be limited by max tokens
             #expect(!response.content.isEmpty)
         }
+
+        @Test func greedySamplingWithTemperature() async throws {
+            let session = LanguageModelSession(model: model)
+            let options = GenerationOptions(
+                sampling: .greedy,
+                temperature: 0.7,
+                maximumResponseTokens: 50
+            )
+            let response = try await session.respond(
+                to: "Tell me a fact",
+                options: options
+            )
+            #expect(!response.content.isEmpty)
+        }
     }
 #endif  // Llama
