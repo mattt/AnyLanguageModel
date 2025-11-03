@@ -308,10 +308,6 @@ import Foundation
             }
             defer { llama_sampler_free(sampler) }
 
-            // Use temperature from options if provided, otherwise use model's default
-            let effectiveTemperature = options.temperature.map { Float($0) } ?? temperature
-            llama_sampler_chain_add(sampler, llama_sampler_init_temp(effectiveTemperature))
-
             // Use sampling parameters from options if provided
             if let sampling = options.sampling {
                 switch sampling.mode {
@@ -321,12 +317,18 @@ import Foundation
                 case .topK(let k, let seed):
                     llama_sampler_chain_add(sampler, llama_sampler_init_top_k(Int32(k)))
                     llama_sampler_chain_add(sampler, llama_sampler_init_top_p(1.0, 1))
+                    if let temperature = options.temperature {
+                        llama_sampler_chain_add(sampler, llama_sampler_init_temp(Float(temperature)))
+                    }
                     if let seed = seed {
                         llama_sampler_chain_add(sampler, llama_sampler_init_dist(UInt32(seed)))
                     }
                 case .nucleus(let threshold, let seed):
                     llama_sampler_chain_add(sampler, llama_sampler_init_top_k(0))  // Disable top-k
                     llama_sampler_chain_add(sampler, llama_sampler_init_top_p(Float(threshold), 1))
+                    if let temperature = options.temperature {
+                        llama_sampler_chain_add(sampler, llama_sampler_init_temp(Float(temperature)))
+                    }
                     if let seed = seed {
                         llama_sampler_chain_add(sampler, llama_sampler_init_dist(UInt32(seed)))
                     }
@@ -450,10 +452,6 @@ import Foundation
                 }
                 defer { llama_sampler_free(sampler) }
 
-                // Use temperature from options if provided, otherwise use model's default
-                let effectiveTemperature = options.temperature.map { Float($0) } ?? self.temperature
-                llama_sampler_chain_add(sampler, llama_sampler_init_temp(effectiveTemperature))
-
                 // Use sampling parameters from options if provided
                 if let sampling = options.sampling {
                     switch sampling.mode {
@@ -463,12 +461,18 @@ import Foundation
                     case .topK(let k, let seed):
                         llama_sampler_chain_add(sampler, llama_sampler_init_top_k(Int32(k)))
                         llama_sampler_chain_add(sampler, llama_sampler_init_top_p(1.0, 1))
+                        if let temperature = options.temperature {
+                            llama_sampler_chain_add(sampler, llama_sampler_init_temp(Float(temperature)))
+                        }
                         if let seed = seed {
                             llama_sampler_chain_add(sampler, llama_sampler_init_dist(UInt32(seed)))
                         }
                     case .nucleus(let threshold, let seed):
                         llama_sampler_chain_add(sampler, llama_sampler_init_top_k(0))  // Disable top-k
                         llama_sampler_chain_add(sampler, llama_sampler_init_top_p(Float(threshold), 1))
+                        if let temperature = options.temperature {
+                            llama_sampler_chain_add(sampler, llama_sampler_init_temp(Float(temperature)))
+                        }
                         if let seed = seed {
                             llama_sampler_chain_add(sampler, llama_sampler_init_dist(UInt32(seed)))
                         }
