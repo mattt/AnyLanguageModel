@@ -272,10 +272,12 @@ let model = GeminiLanguageModel(
     apiKey: apiKey,
     model: "gemini-2.5-flash",
     serverTools: [
-        .googleMaps(latitude: 37.7749, longitude: -122.4194) // Optional location
+        .googleMaps(latitude: 35.6580, longitude: 139.7016) // Optional location
     ]
 )
 ```
+
+**Available server tools**:
 
 - `.googleSearch`
   Grounds responses with real-time web information
@@ -287,8 +289,7 @@ let model = GeminiLanguageModel(
   Fetches and analyzes content from URLs mentioned in prompts
 
 > [!TIP]
-> Google server tools are exclusive to Gemini models,
-> and not available as client tools (`Tool`) for other models.  
+> Gemini server tools are not available as client tools (`Tool`) for other models.  
 
 ### Ollama
 
