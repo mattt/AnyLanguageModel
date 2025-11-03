@@ -197,10 +197,12 @@ public struct GeminiLanguageModel: LanguageModel {
             GeminiContent(role: .user, parts: [.text(GeminiTextPart(text: prompt.description))])
         ]
 
-        let url =
+        var streamURL =
             baseURL
             .appendingPathComponent(apiVersion)
             .appendingPathComponent("models/\(model):streamGenerateContent")
+        streamURL.append(queryItems: [URLQueryItem(name: "alt", value: "sse")])
+        let url = streamURL
 
         let thinking = self.thinking
 
@@ -212,13 +214,12 @@ public struct GeminiLanguageModel: LanguageModel {
 
                     let geminiTools = try buildTools(from: session.tools)
 
-                    var params = try createGenerateContentParams(
+                    let params = try createGenerateContentParams(
                         contents: contents,
                         tools: geminiTools,
                         options: options,
                         thinking: thinking
                     )
-                    params["stream"] = .bool(true)
 
                     let body = try JSONEncoder().encode(params)
 
