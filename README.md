@@ -245,80 +245,50 @@ let response = try await session.respond {
 }
 ```
 
-Enable Gemini-specific features like thinking mode and server-side tools:
+Gemini models use an internal ["thinking process"](https://ai.google.dev/gemini-api/docs/thinking) 
+that improves reasoning and multi-step planning. 
+You can configure how much Gemini should "think" using the `thinking` parameter:
 
 ```swift
-// Enable thinking mode with specific token budget
-let model = GeminiLanguageModel(
+// Enable thinking
+var model = GeminiLanguageModel(
     apiKey: apiKey,
     model: "gemini-2.5-flash",
-    thinking: .budget(1024),         // Specific thinking budget
-    serverTools: [.googleSearch]     // Enable Google Search grounding
+    thinking: true /* or `.dynamic` */,
 )
 
-// Enable dynamic thinking (model decides budget)
-let model = GeminiLanguageModel(
-    apiKey: apiKey,
-    model: "gemini-2.5-flash",
-    thinking: true,                  // Dynamic thinking
-    serverTools: [.googleSearch, .codeExecution]
-)
+// Set an explicit number of tokens for its thinking budget
+model.thinking = .budget(1024)
 
-// Disable thinking (default)
-let model = GeminiLanguageModel(
-    apiKey: apiKey,
-    model: "gemini-2.5-flash",
-    thinking: .disabled
-)
+// Revert to default configuration without thinking
+model.thinking = false /* or `.disabled` */
 ```
 
-#### Server-Side Tools
-
-Gemini supports server-side tools that execute transparently on Google's infrastructure:
+Gemini supports [server-side tools](https://ai.google.dev/gemini-api/docs/google-search)
+that execute transparently on Google's infrastructure:
 
 ```swift
-// Google Search - provides real-time web information
-let model = GeminiLanguageModel(
-    apiKey: apiKey,
-    model: "gemini-2.5-flash",
-    serverTools: [.googleSearch]
-)
-
-// URL Context - fetches and analyzes content from URLs mentioned in prompts
-let model = GeminiLanguageModel(
-    apiKey: apiKey,
-    model: "gemini-2.5-flash",
-    serverTools: [.urlContext]
-)
-
-// Code Execution - generates and runs Python code to solve problems
-let model = GeminiLanguageModel(
-    apiKey: apiKey,
-    model: "gemini-2.5-flash",
-    serverTools: [.codeExecution]
-)
-
-// Google Maps - provides location-aware responses
 let model = GeminiLanguageModel(
     apiKey: apiKey,
     model: "gemini-2.5-flash",
     serverTools: [
-        .googleMaps(latitude: 37.7749, longitude: -122.4194)
-    ]
-)
-
-// Combine multiple server tools
-let model = GeminiLanguageModel(
-    apiKey: apiKey,
-    model: "gemini-2.5-flash",
-    serverTools: [
-        .googleSearch,
-        .codeExecution,
-        .urlContext,
-        .googleMaps(latitude: nil, longitude: nil)  // Optional location
+        .googleMaps(latitude: 37.7749, longitude: -122.4194) // Optional location
     ]
 )
 ```
+
+- `.googleSearch`
+  Grounds responses with real-time web information
+- `.googleMaps`
+  Provides location-aware responses
+- `.codeExecution`
+  Generates and runs Python code to solve problems
+- `.urlContext`
+  Fetches and analyzes content from URLs mentioned in prompts
+
+> [!TIP]
+> Google server tools are exclusive to Gemini models,
+> and not available as client tools (`Tool`) for other models.  
 
 ### Ollama
 
