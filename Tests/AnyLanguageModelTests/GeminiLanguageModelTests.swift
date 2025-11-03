@@ -1,0 +1,122 @@
+import Foundation
+import Testing
+
+@testable import AnyLanguageModel
+
+private let geminiAPIKey: String? = ProcessInfo.processInfo.environment["GEMINI_API_KEY"]
+
+@Suite("GeminiLanguageModel", .serialized, .enabled(if: geminiAPIKey?.isEmpty == false))
+struct GeminiLanguageModelTests {
+    let model = GeminiLanguageModel(
+        apiKey: geminiAPIKey!,
+        model: "gemini-2.5-flash"
+    )
+
+    @Test func customHost() throws {
+        let customURL = URL(string: "https://example.com")!
+        let model = GeminiLanguageModel(baseURL: customURL, apiKey: "test", model: "test-model")
+        #expect(model.baseURL.absoluteString.hasSuffix("/"))
+    }
+
+    @Test func basicResponse() async throws {
+        let session = LanguageModelSession(model: model)
+        let response = try await session.respond(to: "Say hello")
+        #expect(!response.content.isEmpty)
+    }
+
+    @Test func withInstructions() async throws {
+        let session = LanguageModelSession(
+            model: model,
+            instructions: "You are a helpful assistant. Be concise."
+        )
+
+        let response = try await session.respond(to: "What is 2+2?")
+        #expect(!response.content.isEmpty)
+    }
+
+    @Test func streaming() async throws {
+        let session = LanguageModelSession(model: model)
+
+        let stream = session.streamResponse(to: "Count to 5")
+        var chunks: [String] = []
+
+        for try await response in stream {
+            chunks.append(response.content)
+        }
+
+        #expect(!chunks.isEmpty)
+    }
+
+    @Test func streamingString() async throws {
+        let session = LanguageModelSession(model: model)
+
+        let stream = session.streamResponse(to: "Say 'Hello' slowly")
+
+        var snapshots: [LanguageModelSession.ResponseStream<String>.Snapshot] = []
+        for try await snapshot in stream {
+            snapshots.append(snapshot)
+        }
+
+        #expect(!snapshots.isEmpty)
+        #expect(!snapshots.last!.rawContent.jsonString.isEmpty)
+    }
+
+    @Test func withGenerationOptions() async throws {
+        // Use a model with thinking disabled to avoid consuming all tokens on thinking
+        let modelWithoutThinking = GeminiLanguageModel(
+            apiKey: geminiAPIKey!,
+            model: "gemini-2.5-flash",
+            thinking: false
+        )
+        let session = LanguageModelSession(model: modelWithoutThinking)
+
+        let options = GenerationOptions(
+            temperature: 0.7,
+            maximumResponseTokens: 2048
+        )
+
+        let response = try await session.respond(
+            to: "Tell me a fact",
+            options: options
+        )
+        #expect(!response.content.isEmpty)
+    }
+
+    @Test func conversationContext() async throws {
+        let session = LanguageModelSession(model: model)
+
+        let firstResponse = try await session.respond(to: "My favorite color is blue")
+        #expect(!firstResponse.content.isEmpty)
+
+        let secondResponse = try await session.respond(to: "What did I just tell you?")
+        #expect(!secondResponse.content.isEmpty)
+    }
+
+    @Test func withClientTools() async throws {
+        let weatherTool = WeatherTool()
+        let session = LanguageModelSession(model: model, tools: [weatherTool])
+
+        let response = try await session.respond(to: "How's the weather in San Francisco?")
+
+        var foundToolOutput = false
+        for case let .toolOutput(toolOutput) in response.transcriptEntries {
+            #expect(toolOutput.id == "getWeather")
+            foundToolOutput = true
+        }
+        #expect(foundToolOutput)
+    }
+
+    @Test func withServerTools() async throws {
+        let model = GeminiLanguageModel(
+            apiKey: geminiAPIKey!,
+            model: "gemini-2.5-flash",
+            serverTools: [
+                .googleMaps(latitude: 37.7749, longitude: -122.4194)
+            ]
+        )
+
+        let session = LanguageModelSession(model: model)
+        let response = try await session.respond(to: "What coffee shops are nearby?")
+        #expect(!response.content.isEmpty)
+    }
+}
