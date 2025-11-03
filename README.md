@@ -47,6 +47,7 @@ print(response.content)
 - [x] [llama.cpp](https://github.com/ggml-org/llama.cpp) (GGUF models)
 - [x] Ollama [HTTP API](https://github.com/ollama/ollama/blob/main/docs/api.md)
 - [x] Anthropic [Messages API](https://docs.claude.com/en/api/messages)
+- [x] Google [Gemini API](https://ai.google.dev/api/generate-content)
 - [x] OpenAI [Chat Completions API](https://platform.openai.com/docs/api-reference/chat)
 - [x] OpenAI [Responses API](https://platform.openai.com/docs/api-reference/responses)
 
@@ -227,6 +228,68 @@ let response = try await session.respond {
     Prompt("What's the weather like in San Francisco?")
 }
 ```
+
+### Google Gemini
+
+Uses the [Gemini API](https://ai.google.dev/api/generate-content) with Gemini models:
+
+```swift
+let model = GeminiLanguageModel(
+    apiKey: ProcessInfo.processInfo.environment["GEMINI_API_KEY"]!,
+    model: "gemini-2.5-flash"
+)
+
+let session = LanguageModelSession(model: model, tools: [WeatherTool()])
+let response = try await session.respond {
+    Prompt("What's the weather like in Tokyo?")
+}
+```
+
+Gemini models use an internal ["thinking process"](https://ai.google.dev/gemini-api/docs/thinking) 
+that improves reasoning and multi-step planning. 
+You can configure how much Gemini should "think" using the `thinking` parameter:
+
+```swift
+// Enable thinking
+var model = GeminiLanguageModel(
+    apiKey: apiKey,
+    model: "gemini-2.5-flash",
+    thinking: true /* or `.dynamic` */,
+)
+
+// Set an explicit number of tokens for its thinking budget
+model.thinking = .budget(1024)
+
+// Revert to default configuration without thinking
+model.thinking = false /* or `.disabled` */
+```
+
+Gemini supports [server-side tools](https://ai.google.dev/gemini-api/docs/google-search)
+that execute transparently on Google's infrastructure:
+
+```swift
+let model = GeminiLanguageModel(
+    apiKey: apiKey,
+    model: "gemini-2.5-flash",
+    serverTools: [
+        .googleMaps(latitude: 35.6580, longitude: 139.7016) // Optional location
+    ]
+)
+```
+
+**Available server tools**:
+
+- `.googleSearch`
+  Grounds responses with real-time web information
+- `.googleMaps`
+  Provides location-aware responses
+- `.codeExecution`
+  Generates and runs Python code to solve problems
+- `.urlContext`
+  Fetches and analyzes content from URLs mentioned in prompts
+
+> [!TIP]
+> Gemini server tools are not available as client tools (`Tool`) for other models.  
 
 ### Ollama
 
