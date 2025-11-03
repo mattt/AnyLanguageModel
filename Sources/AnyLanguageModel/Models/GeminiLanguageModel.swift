@@ -306,7 +306,15 @@ private func createGenerateContentParams(
     ]
 
     if let tools, !tools.isEmpty {
-        params["tools"] = try JSONValue(tools)
+        params["tools"] = try .array(tools.map { try $0.jsonValue })
+
+        // Add toolConfig if any tool provides one
+        for tool in tools {
+            if let toolConfig = tool.toolConfigValue {
+                params["toolConfig"] = toolConfig
+                break
+            }
+        }
     }
 
     var generationConfig: [String: JSONValue] = [:]
@@ -319,18 +327,17 @@ private func createGenerateContentParams(
         generationConfig["temperature"] = .double(temperature)
     }
 
+    var thinkingConfig: [String: JSONValue] = [:]
     if case .disabled = thinking {
+        thinkingConfig["includeThoughts"] = .bool(false)
     } else {
-        var thinkingConfig: [String: JSONValue] = [:]
+        thinkingConfig["includeThoughts"] = .bool(true)
 
         if let budget = thinking.budgetValue {
             thinkingConfig["thinkingBudget"] = .int(budget)
         }
-
-        thinkingConfig["includeThoughts"] = .bool(true)
-
-        generationConfig["thinkingConfig"] = .object(thinkingConfig)
     }
+    generationConfig["thinkingConfig"] = .object(thinkingConfig)
 
     if !generationConfig.isEmpty {
         params["generationConfig"] = .object(generationConfig)
@@ -435,69 +442,45 @@ private func toJSONValue(_ toolOutput: Transcript.ToolOutput) throws -> [String:
     return result
 }
 
-private enum GeminiTool: Codable, Sendable {
+private enum GeminiTool: Sendable {
     case functionDeclarations([GeminiFunctionDeclaration])
     case googleSearch
     case urlContext
     case codeExecution
     case googleMaps(latitude: Double?, longitude: Double?)
 
-    enum CodingKeys: String, CodingKey {
-        case functionDeclarations = "function_declarations"
-        case googleSearch = "google_search"
-        case urlContext = "url_context"
-        case codeExecution = "code_execution"
-        case googleMaps = "google_maps"
-    }
-
-    init(from decoder: any Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-
-        if let declarations = try container.decodeIfPresent(
-            [GeminiFunctionDeclaration].self,
-            forKey: .functionDeclarations
-        ) {
-            self = .functionDeclarations(declarations)
-        } else if container.contains(.googleSearch) {
-            self = .googleSearch
-        } else if container.contains(.urlContext) {
-            self = .urlContext
-        } else if container.contains(.codeExecution) {
-            self = .codeExecution
-        } else if let mapsData = try container.decodeIfPresent(GoogleMapsPayload.self, forKey: .googleMaps) {
-            self = .googleMaps(latitude: mapsData.lat, longitude: mapsData.lng)
-        } else {
-            throw DecodingError.dataCorrupted(
-                DecodingError.Context(
-                    codingPath: decoder.codingPath,
-                    debugDescription: "Unable to decode GeminiTool"
-                )
-            )
+    var jsonValue: JSONValue {
+        get throws {
+            switch self {
+            case .functionDeclarations(let declarations):
+                return .object(["function_declarations": try JSONValue(declarations)])
+            case .googleSearch:
+                return .object(["google_search": .object([:])])
+            case .urlContext:
+                return .object(["url_context": .object([:])])
+            case .codeExecution:
+                return .object(["code_execution": .object([:])])
+            case .googleMaps:
+                return .object(["google_maps": .object([:])])
+            }
         }
     }
 
-    func encode(to encoder: any Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-
+    var toolConfigValue: JSONValue? {
         switch self {
-        case .functionDeclarations(let declarations):
-            try container.encode(declarations, forKey: .functionDeclarations)
-        case .googleSearch:
-            try container.encode(EmptyObject(), forKey: .googleSearch)
-        case .urlContext:
-            try container.encode(EmptyObject(), forKey: .urlContext)
-        case .codeExecution:
-            try container.encode(EmptyObject(), forKey: .codeExecution)
         case .googleMaps(let latitude, let longitude):
-            try container.encode(GoogleMapsPayload(lat: latitude, lng: longitude), forKey: .googleMaps)
+            guard let lat = latitude, let lng = longitude else { return nil }
+            return .object([
+                "retrievalConfig": .object([
+                    "latLng": .object([
+                        "latitude": .double(lat),
+                        "longitude": .double(lng),
+                    ])
+                ])
+            ])
+        default:
+            return nil
         }
-    }
-
-    private struct EmptyObject: Codable {}
-
-    private struct GoogleMapsPayload: Codable {
-        let lat: Double?
-        let lng: Double?
     }
 }
 
