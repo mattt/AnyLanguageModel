@@ -5,7 +5,7 @@ import Testing
 
 private let geminiAPIKey: String? = ProcessInfo.processInfo.environment["GEMINI_API_KEY"]
 
-@Suite("GeminiLanguageModel", .enabled(if: geminiAPIKey?.isEmpty == false))
+@Suite("GeminiLanguageModel", .serialized, .enabled(if: geminiAPIKey?.isEmpty == false))
 struct GeminiLanguageModelTests {
     let model = GeminiLanguageModel(
         apiKey: geminiAPIKey!,
