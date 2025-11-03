@@ -72,7 +72,7 @@ struct GeminiLanguageModelTests {
 
         let options = GenerationOptions(
             temperature: 0.7,
-            maximumResponseTokens: 50
+            maximumResponseTokens: 2048
         )
 
         let response = try await session.respond(
