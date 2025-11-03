@@ -127,10 +127,11 @@ public struct GeminiLanguageModel: LanguageModel {
                 throw GeminiError.noCandidate
             }
 
-            let functionCalls: [GeminiFunctionCall] = firstCandidate.content.parts.compactMap { part in
-                if case .functionCall(let call) = part { return call }
-                return nil
-            }
+            let functionCalls: [GeminiFunctionCall] =
+                firstCandidate.content.parts?.compactMap { part in
+                    if case .functionCall(let call) = part { return call }
+                    return nil
+                } ?? []
 
             if !functionCalls.isEmpty {
                 // Append the model's response with function calls to the conversation
@@ -166,12 +167,13 @@ public struct GeminiLanguageModel: LanguageModel {
                 continue
             } else {
                 // No function calls, extract final text and return
-                let text = firstCandidate.content.parts.compactMap { part -> String? in
-                    switch part {
-                    case .text(let t): return t.text
-                    default: return nil
-                    }
-                }.joined()
+                let text =
+                    firstCandidate.content.parts?.compactMap { part -> String? in
+                        switch part {
+                        case .text(let t): return t.text
+                        default: return nil
+                        }
+                    }.joined() ?? ""
 
                 return LanguageModelSession.Response(
                     content: text as! Content,
@@ -225,7 +227,7 @@ public struct GeminiLanguageModel: LanguageModel {
 
                     let stream: AsyncThrowingStream<GeminiGenerateContentResponse, any Error> =
                         urlSession
-                        .fetchStream(
+                        .fetchEventStream(
                             .post,
                             url: url,
                             headers: headers,
@@ -237,14 +239,16 @@ public struct GeminiLanguageModel: LanguageModel {
                     for try await chunk in stream {
                         guard let candidate = chunk.candidates.first else { continue }
 
-                        for part in candidate.content.parts {
-                            if case .text(let textPart) = part {
-                                accumulatedText += textPart.text
+                        if let parts = candidate.content.parts {
+                            for part in parts {
+                                if case .text(let textPart) = part {
+                                    accumulatedText += textPart.text
 
-                                let raw = GeneratedContent(accumulatedText)
-                                let content: Content.PartiallyGenerated = (accumulatedText as! Content)
-                                    .asPartiallyGenerated()
-                                continuation.yield(.init(content: content, rawContent: raw))
+                                    let raw = GeneratedContent(accumulatedText)
+                                    let content: Content.PartiallyGenerated = (accumulatedText as! Content)
+                                        .asPartiallyGenerated()
+                                    continuation.yield(.init(content: content, rawContent: raw))
+                                }
                             }
                         }
                     }
@@ -390,7 +394,7 @@ private func resolveFunctionCalls(
         do {
             let segments = try await tool.makeOutputSegments(from: args)
             let output = Transcript.ToolOutput(
-                id: callID,
+                id: tool.name,
                 toolName: tool.name,
                 segments: segments
             )
@@ -406,7 +410,9 @@ private func resolveFunctionCalls(
 private func convertToolToGeminiFormat(_ tool: any Tool) throws -> GeminiFunctionDeclaration {
     let resolvedSchema = tool.parameters.withResolvedRoot() ?? tool.parameters
 
-    let data = try JSONEncoder().encode(resolvedSchema)
+    let encoder = JSONEncoder()
+    encoder.userInfo[GenerationSchema.omitAdditionalPropertiesKey] = true
+    let data = try encoder.encode(resolvedSchema)
     let schema = try JSONDecoder().decode(JSONSchema.self, from: data)
 
     return GeminiFunctionDeclaration(
@@ -498,7 +504,7 @@ private struct GeminiContent: Codable, Sendable {
     }
 
     let role: Role
-    let parts: [GeminiPart]
+    let parts: [GeminiPart]?
 }
 
 private enum GeminiPart: Codable, Sendable {
@@ -510,17 +516,20 @@ private enum GeminiPart: Codable, Sendable {
         case text
         case functionCall
         case functionResponse
+        case thoughtSignature
     }
 
     init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
 
         if container.contains(.text) {
-            self = .text(try GeminiTextPart(from: decoder))
+            let text = try container.decode(String.self, forKey: .text)
+            self = .text(GeminiTextPart(text: text))
         } else if container.contains(.functionCall) {
-            self = .functionCall(try GeminiFunctionCall(from: decoder))
+            // Note: thoughtSignature may be present but is ignored
+            self = .functionCall(try container.decode(GeminiFunctionCall.self, forKey: .functionCall))
         } else if container.contains(.functionResponse) {
-            self = .functionResponse(try GeminiFunctionResponse(from: decoder))
+            self = .functionResponse(try container.decode(GeminiFunctionResponse.self, forKey: .functionResponse))
         } else {
             throw DecodingError.dataCorrupted(
                 DecodingError.Context(
@@ -532,10 +541,14 @@ private enum GeminiPart: Codable, Sendable {
     }
 
     func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
-        case .text(let part): try part.encode(to: encoder)
-        case .functionCall(let call): try call.encode(to: encoder)
-        case .functionResponse(let response): try response.encode(to: encoder)
+        case .text(let part):
+            try container.encode(part.text, forKey: .text)
+        case .functionCall(let call):
+            try container.encode(call, forKey: .functionCall)
+        case .functionResponse(let response):
+            try container.encode(response, forKey: .functionResponse)
         }
     }
 }
