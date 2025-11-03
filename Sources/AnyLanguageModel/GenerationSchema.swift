@@ -9,9 +9,6 @@ import struct Foundation.Decimal
 /// Generation  schemas guide the output of a ``SystemLanguageModel`` to deterministically
 /// ensure the output is in the desired format.
 public struct GenerationSchema: Sendable, Codable, CustomDebugStringConvertible {
-
-    // MARK: - Structure
-
     indirect enum Node: Sendable, Codable {
         case object(ObjectNode)
         case array(ArrayNode)
@@ -44,7 +41,12 @@ public struct GenerationSchema: Sendable, Codable, CustomDebugStringConvertible 
                     try propsContainer.encode(node, forKey: DynamicCodingKey(stringValue: name)!)
                 }
                 try container.encode(Array(obj.required), forKey: .required)
-                try container.encode(false, forKey: .additionalProperties)
+
+                // Check userInfo to see if additionalProperties should be omitted
+                let shouldOmit = encoder.userInfo[GenerationSchema.omitAdditionalPropertiesKey] as? Bool ?? false
+                if !shouldOmit {
+                    try container.encode(false, forKey: .additionalProperties)
+                }
 
             case .array(let arr):
                 try container.encode("array", forKey: .type)
@@ -200,8 +202,6 @@ public struct GenerationSchema: Sendable, Codable, CustomDebugStringConvertible 
             self.intValue = intValue
         }
     }
-
-    // MARK: - Properties
 
     let root: Node
     private var defs: [String: Node]
@@ -773,4 +773,22 @@ extension GenerationSchema {
             }
         }
     }
+}
+
+// MARK: - CodingUserInfoKey
+
+extension GenerationSchema {
+    /// A key used in the encoder's `userInfo` dictionary to control whether
+    /// the `additionalProperties` field should be omitted from the encoded output.
+    ///
+    /// Set this to `true` to omit `additionalProperties` from object schemas.
+    /// Defaults to `false` (includes `additionalProperties`) if not specified.
+    ///
+    /// Example:
+    /// ```swift
+    /// let encoder = JSONEncoder()
+    /// encoder.userInfo[GenerationSchema.omitAdditionalPropertiesKey] = true
+    /// let data = try encoder.encode(schema)
+    /// ```
+    static let omitAdditionalPropertiesKey = CodingUserInfoKey(rawValue: "GenerationSchema.omitAdditionalProperties")!
 }
