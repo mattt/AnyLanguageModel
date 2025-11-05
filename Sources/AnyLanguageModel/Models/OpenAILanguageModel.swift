@@ -87,9 +87,13 @@ public struct OpenAILanguageModel: LanguageModel {
             fatalError("OpenAILanguageModel only supports generating String content")
         }
 
-        let messages = [
-            OpenAIMessage(role: .user, content: .text(prompt.description))
-        ]
+        var messages: [OpenAIMessage] = []
+        if let instructions = session.instructions,
+            !instructions.description.isEmpty
+        {
+            messages.append(OpenAIMessage(role: .system, content: .text(instructions.description)))
+        }
+        messages.append(OpenAIMessage(role: .user, content: .text(prompt.description)))
 
         // Convert tools if any are available in the session
         let openAITools: [OpenAITool]? = {
@@ -231,9 +235,13 @@ public struct OpenAILanguageModel: LanguageModel {
             fatalError("OpenAILanguageModel only supports generating String content")
         }
 
-        let messages = [
-            OpenAIMessage(role: .user, content: .text(prompt.description))
-        ]
+        var messages: [OpenAIMessage] = []
+        if let instructions = session.instructions,
+            !instructions.description.isEmpty
+        {
+            messages.append(OpenAIMessage(role: .system, content: .text(instructions.description)))
+        }
+        messages.append(OpenAIMessage(role: .user, content: .text(prompt.description)))
 
         // Convert tools if any are available in the session
         let openAITools: [OpenAITool]? = {
@@ -435,7 +443,8 @@ private enum Responses {
         options: GenerationOptions,
         stream: Bool
     ) -> JSONValue {
-        // Extract the user message content for the input parameter
+        // Extract the system and user message content for the request
+        let systemMessage = messages.first { $0.role == .system }
         let userMessage = messages.first { $0.role == .user }
         let inputText = if case .text(let text) = userMessage?.content { text } else { "" }
 
@@ -444,6 +453,10 @@ private enum Responses {
             "input": .string(inputText),
             "stream": .bool(stream),
         ]
+
+        if case .text(let instructions) = systemMessage?.content, !instructions.isEmpty {
+            body["instructions"] = .string(instructions)
+        }
 
         if let tools {
             body["tools"] = .array(tools.map { $0.jsonValue(for: .responses) })
