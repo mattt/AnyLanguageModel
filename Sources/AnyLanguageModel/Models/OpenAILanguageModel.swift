@@ -88,9 +88,7 @@ public struct OpenAILanguageModel: LanguageModel {
         }
 
         var messages: [OpenAIMessage] = []
-        if let instructions = session.instructions,
-            !instructions.description.isEmpty
-        {
+        if let instructions = session.instructions {
             messages.append(OpenAIMessage(role: .system, content: .text(instructions.description)))
         }
         messages.append(OpenAIMessage(role: .user, content: .text(prompt.description)))
@@ -236,9 +234,7 @@ public struct OpenAILanguageModel: LanguageModel {
         }
 
         var messages: [OpenAIMessage] = []
-        if let instructions = session.instructions,
-            !instructions.description.isEmpty
-        {
+        if let instructions = session.instructions {
             messages.append(OpenAIMessage(role: .system, content: .text(instructions.description)))
         }
         messages.append(OpenAIMessage(role: .user, content: .text(prompt.description)))
