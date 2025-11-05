@@ -196,6 +196,12 @@ public struct Transcript: Sendable, Equatable, Codable {
         }
     }
 
+    /// Errors that can occur when converting platform images to encoded data.
+    public enum ImageEncodingError: Error {
+        /// The image couldn't be converted to the requested format.
+        case imageConversionFailed
+    }
+
     /// Instructions you provide to the model that define its behavior.
     ///
     /// Instructions are typically provided to define the role and behavior of the model. Apple trains the model
@@ -454,22 +460,16 @@ extension Transcript.StructuredSegment: CustomStringConvertible {
                 switch self {
                 case .jpeg(let quality):
                     guard let data = image.jpegData(compressionQuality: quality) else {
-                        throw ImageEncodingError.imageConversionFailed
+                        throw Transcript.ImageEncodingError.imageConversionFailed
                     }
                     return (data, "image/jpeg")
                 case .png:
                     guard let data = image.pngData() else {
-                        throw ImageEncodingError.imageConversionFailed
+                        throw Transcript.ImageEncodingError.imageConversionFailed
                     }
                     return (data, "image/png")
                 }
             }
-        }
-
-        /// Errors that can occur when converting a `UIImage` to encoded data.
-        public enum ImageEncodingError: Error {
-            /// The image couldn't be converted to the requested format.
-            case imageConversionFailed
         }
 
         /// Creates an image segment by encoding a UIKit image.
@@ -477,8 +477,64 @@ extension Transcript.StructuredSegment: CustomStringConvertible {
         /// - Parameters:
         ///   - image: The source image to encode.
         ///   - format: The target encoding. Defaults to JPEG with 0.9 quality.
-        /// - Throws: ``Transcript/ImageSegment/ImageEncodingError-swift.enum/imageConversionFailed`` if encoding fails.
+        /// - Throws: ``Transcript/ImageEncodingError-swift.enum/imageConversionFailed`` if encoding fails.
         public init(image: UIImage, format: ImageFormat = .jpeg()) throws {
+            let (data, mimeType) = try format.encode(image)
+            self.init(data: data, mimeType: mimeType)
+        }
+    }
+#endif
+
+#if canImport(AppKit)
+    import AppKit
+
+    extension Transcript.ImageSegment {
+        /// Preferred image encodings for AppKit image conversion.
+        public enum ImageFormat {
+            /// JPEG encoding with the specified compression quality.
+            case jpeg(compressionQuality: Double = 0.9)
+            /// PNG encoding.
+            case png
+
+            fileprivate func encode(_ image: NSImage) throws -> (Data, String) {
+                guard let tiffData = image.tiffRepresentation,
+                    let bitmapImage = NSBitmapImageRep(data: tiffData)
+                else {
+                    throw Transcript.ImageEncodingError.imageConversionFailed
+                }
+
+                switch self {
+                case .jpeg(let quality):
+                    guard
+                        let data = bitmapImage.representation(
+                            using: .jpeg,
+                            properties: [.compressionFactor: quality]
+                        )
+                    else {
+                        throw Transcript.ImageEncodingError.imageConversionFailed
+                    }
+                    return (data, "image/jpeg")
+                case .png:
+                    guard
+                        let data = bitmapImage.representation(
+                            using: .png,
+                            properties: [:]
+                        )
+                    else {
+                        throw Transcript.ImageEncodingError.imageConversionFailed
+                    }
+                    return (data, "image/png")
+                }
+            }
+        }
+
+        /// Creates an image segment by encoding an AppKit image.
+        ///
+        /// - Parameters:
+        ///   - image: The source image to encode.
+        ///   - format: The target encoding. Defaults to JPEG with 0.9 quality.
+        /// - Throws: ``Transcript/ImageEncodingError-swift.enum/imageConversionFailed`` if encoding fails.
+        public init(image: NSImage, format: ImageFormat = .jpeg()) throws {
             let (data, mimeType) = try format.encode(image)
             self.init(data: data, mimeType: mimeType)
         }
