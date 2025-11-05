@@ -450,7 +450,7 @@ private enum Responses {
             "stream": .bool(stream),
         ]
 
-        if case .text(let instructions) = systemMessage?.content, !instructions.isEmpty {
+        if case .text(let instructions) = systemMessage?.content {
             body["instructions"] = .string(instructions)
         }
 
