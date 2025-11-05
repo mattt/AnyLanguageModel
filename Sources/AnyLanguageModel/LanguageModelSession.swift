@@ -167,6 +167,74 @@ public final class LanguageModelSession: @unchecked Sendable {
     }
 
     @discardableResult
+    nonisolated public func respond<Content>(
+        to prompt: Prompt,
+        generating type: Content.Type = Content.self,
+        includeSchemaInPrompt: Bool = true,
+        options: GenerationOptions = GenerationOptions()
+    ) async throws -> Response<Content> where Content: Generable {
+        try await wrapRespond {
+            // Add prompt to transcript
+            let promptEntry = Transcript.Entry.prompt(
+                Transcript.Prompt(
+                    segments: [.text(.init(content: prompt.description))],
+                    options: options,
+                    responseFormat: nil
+                )
+            )
+            await MainActor.run {
+                self.transcript.append(promptEntry)
+            }
+
+            let response = try await model.respond(
+                within: self,
+                to: prompt,
+                generating: type,
+                includeSchemaInPrompt: includeSchemaInPrompt,
+                options: options
+            )
+
+            // Add response entries to transcript
+            await MainActor.run {
+                self.transcript.append(contentsOf: response.transcriptEntries)
+            }
+
+            return response
+        }
+    }
+
+    nonisolated public func streamResponse<Content>(
+        to prompt: Prompt,
+        generating type: Content.Type = Content.self,
+        includeSchemaInPrompt: Bool = true,
+        options: GenerationOptions = GenerationOptions()
+    ) -> sending ResponseStream<Content> where Content: Generable {
+        // Create prompt entry that will be added when stream starts
+        let promptEntry = Transcript.Entry.prompt(
+            Transcript.Prompt(
+                segments: [.text(.init(content: prompt.description))],
+                options: options,
+                responseFormat: nil
+            )
+        )
+
+        return wrapStream(
+            model.streamResponse(
+                within: self,
+                to: prompt,
+                generating: type,
+                includeSchemaInPrompt: includeSchemaInPrompt,
+                options: options
+            ),
+            promptEntry: promptEntry
+        )
+    }
+}
+
+// MARK: - String Response Convenience Methods
+
+extension LanguageModelSession {
+    @discardableResult
     nonisolated public func respond(
         to prompt: Prompt,
         options: GenerationOptions = GenerationOptions()
@@ -195,6 +263,36 @@ public final class LanguageModelSession: @unchecked Sendable {
         try await respond(to: try prompt(), options: options)
     }
 
+    public func streamResponse(
+        to prompt: Prompt,
+        options: GenerationOptions = GenerationOptions()
+    ) -> sending ResponseStream<String> {
+        streamResponse(
+            to: prompt,
+            generating: String.self,
+            includeSchemaInPrompt: true,
+            options: options
+        )
+    }
+
+    public func streamResponse(
+        to prompt: String,
+        options: GenerationOptions = GenerationOptions()
+    ) -> sending ResponseStream<String> {
+        streamResponse(to: Prompt(prompt), options: options)
+    }
+
+    public func streamResponse(
+        options: GenerationOptions = GenerationOptions(),
+        @PromptBuilder prompt: () throws -> Prompt
+    ) rethrows -> sending ResponseStream<String> {
+        streamResponse(to: try prompt(), options: options)
+    }
+}
+
+// MARK: - GeneratedContent with Schema Convenience Methods
+
+extension LanguageModelSession {
     @discardableResult
     nonisolated public func respond(
         to prompt: Prompt,
@@ -235,73 +333,6 @@ public final class LanguageModelSession: @unchecked Sendable {
         try await respond(
             to: try prompt(),
             schema: schema,
-            includeSchemaInPrompt: includeSchemaInPrompt,
-            options: options
-        )
-    }
-
-    @discardableResult
-    nonisolated public func respond<Content>(
-        to prompt: Prompt,
-        generating type: Content.Type = Content.self,
-        includeSchemaInPrompt: Bool = true,
-        options: GenerationOptions = GenerationOptions()
-    ) async throws -> Response<Content> where Content: Generable {
-        try await wrapRespond {
-            // Add prompt to transcript
-            let promptEntry = Transcript.Entry.prompt(
-                Transcript.Prompt(
-                    segments: [.text(.init(content: prompt.description))],
-                    options: options,
-                    responseFormat: nil
-                )
-            )
-            await MainActor.run {
-                self.transcript.append(promptEntry)
-            }
-
-            let response = try await model.respond(
-                within: self,
-                to: prompt,
-                generating: type,
-                includeSchemaInPrompt: includeSchemaInPrompt,
-                options: options
-            )
-
-            // Add response entries to transcript
-            await MainActor.run {
-                self.transcript.append(contentsOf: response.transcriptEntries)
-            }
-
-            return response
-        }
-    }
-
-    @discardableResult
-    nonisolated public func respond<Content>(
-        to prompt: String,
-        generating type: Content.Type = Content.self,
-        includeSchemaInPrompt: Bool = true,
-        options: GenerationOptions = GenerationOptions()
-    ) async throws -> Response<Content> where Content: Generable {
-        try await respond(
-            to: Prompt(prompt),
-            generating: type,
-            includeSchemaInPrompt: includeSchemaInPrompt,
-            options: options
-        )
-    }
-
-    @discardableResult
-    nonisolated public func respond<Content>(
-        generating type: Content.Type = Content.self,
-        includeSchemaInPrompt: Bool = true,
-        options: GenerationOptions = GenerationOptions(),
-        @PromptBuilder prompt: () throws -> Prompt
-    ) async throws -> Response<Content> where Content: Generable {
-        try await respond(
-            to: try prompt(),
-            generating: type,
             includeSchemaInPrompt: includeSchemaInPrompt,
             options: options
         )
@@ -343,31 +374,38 @@ public final class LanguageModelSession: @unchecked Sendable {
     ) rethrows -> sending ResponseStream<GeneratedContent> {
         streamResponse(to: try prompt(), schema: schema, includeSchemaInPrompt: includeSchemaInPrompt, options: options)
     }
+}
 
-    nonisolated public func streamResponse<Content>(
-        to prompt: Prompt,
+// MARK: - Generic Content Convenience Methods
+
+extension LanguageModelSession {
+    @discardableResult
+    nonisolated public func respond<Content>(
+        to prompt: String,
         generating type: Content.Type = Content.self,
         includeSchemaInPrompt: Bool = true,
         options: GenerationOptions = GenerationOptions()
-    ) -> sending ResponseStream<Content> where Content: Generable {
-        // Create prompt entry that will be added when stream starts
-        let promptEntry = Transcript.Entry.prompt(
-            Transcript.Prompt(
-                segments: [.text(.init(content: prompt.description))],
-                options: options,
-                responseFormat: nil
-            )
+    ) async throws -> Response<Content> where Content: Generable {
+        try await respond(
+            to: Prompt(prompt),
+            generating: type,
+            includeSchemaInPrompt: includeSchemaInPrompt,
+            options: options
         )
+    }
 
-        return wrapStream(
-            model.streamResponse(
-                within: self,
-                to: prompt,
-                generating: type,
-                includeSchemaInPrompt: includeSchemaInPrompt,
-                options: options
-            ),
-            promptEntry: promptEntry
+    @discardableResult
+    nonisolated public func respond<Content>(
+        generating type: Content.Type = Content.self,
+        includeSchemaInPrompt: Bool = true,
+        options: GenerationOptions = GenerationOptions(),
+        @PromptBuilder prompt: () throws -> Prompt
+    ) async throws -> Response<Content> where Content: Generable {
+        try await respond(
+            to: try prompt(),
+            generating: type,
+            includeSchemaInPrompt: includeSchemaInPrompt,
+            options: options
         )
     }
 
@@ -398,33 +436,188 @@ public final class LanguageModelSession: @unchecked Sendable {
             options: options
         )
     }
+}
 
-    public func streamResponse(
-        to prompt: Prompt,
+// MARK: - Image Convenience Methods
+
+extension LanguageModelSession {
+    @discardableResult
+    nonisolated public func respond(
+        to prompt: String,
+        image: Transcript.ImageSegment,
         options: GenerationOptions = GenerationOptions()
-    ) -> sending ResponseStream<String> {
-        streamResponse(
+    ) async throws -> Response<String> {
+        try await respond(
             to: prompt,
+            images: [image],
+            options: options
+        )
+    }
+
+    @discardableResult
+    nonisolated public func respond(
+        to prompt: String,
+        images: [Transcript.ImageSegment],
+        options: GenerationOptions = GenerationOptions()
+    ) async throws -> Response<String> {
+        try await respond(
+            to: prompt,
+            images: images,
             generating: String.self,
             includeSchemaInPrompt: true,
             options: options
         )
     }
 
+    @discardableResult
+    nonisolated public func respond<Content>(
+        to prompt: String,
+        image: Transcript.ImageSegment,
+        generating type: Content.Type = Content.self,
+        includeSchemaInPrompt: Bool = true,
+        options: GenerationOptions = GenerationOptions()
+    ) async throws -> Response<Content> where Content: Generable {
+        try await respond(
+            to: prompt,
+            images: [image],
+            generating: type,
+            includeSchemaInPrompt: includeSchemaInPrompt,
+            options: options
+        )
+    }
+
+    @discardableResult
+    nonisolated public func respond<Content>(
+        to prompt: String,
+        images: [Transcript.ImageSegment],
+        generating type: Content.Type = Content.self,
+        includeSchemaInPrompt: Bool = true,
+        options: GenerationOptions = GenerationOptions()
+    ) async throws -> Response<Content> where Content: Generable {
+        try await wrapRespond {
+            // Build segments from text and images
+            var segments: [Transcript.Segment] = []
+            if !prompt.isEmpty {
+                segments.append(.text(.init(content: prompt)))
+            }
+            segments.append(contentsOf: images.map { .image($0) })
+
+            // Add prompt to transcript
+            let promptEntry = Transcript.Entry.prompt(
+                Transcript.Prompt(
+                    segments: segments,
+                    options: options,
+                    responseFormat: nil
+                )
+            )
+            await MainActor.run {
+                self.transcript.append(promptEntry)
+            }
+
+            // Extract text content for the Prompt parameter
+            let textPrompt = Prompt(prompt)
+
+            let response = try await model.respond(
+                within: self,
+                to: textPrompt,
+                generating: type,
+                includeSchemaInPrompt: includeSchemaInPrompt,
+                options: options
+            )
+
+            // Add response entries to transcript
+            await MainActor.run {
+                self.transcript.append(contentsOf: response.transcriptEntries)
+            }
+
+            return response
+        }
+    }
+
     public func streamResponse(
         to prompt: String,
+        image: Transcript.ImageSegment,
         options: GenerationOptions = GenerationOptions()
     ) -> sending ResponseStream<String> {
-        streamResponse(to: Prompt(prompt), options: options)
+        streamResponse(
+            to: prompt,
+            images: [image],
+            options: options
+        )
     }
 
     public func streamResponse(
-        options: GenerationOptions = GenerationOptions(),
-        @PromptBuilder prompt: () throws -> Prompt
-    ) rethrows -> sending ResponseStream<String> {
-        streamResponse(to: try prompt(), options: options)
+        to prompt: String,
+        images: [Transcript.ImageSegment],
+        options: GenerationOptions = GenerationOptions()
+    ) -> sending ResponseStream<String> {
+        streamResponse(
+            to: prompt,
+            images: images,
+            generating: String.self,
+            includeSchemaInPrompt: true,
+            options: options
+        )
     }
 
+    nonisolated public func streamResponse<Content>(
+        to prompt: String,
+        image: Transcript.ImageSegment,
+        generating type: Content.Type = Content.self,
+        includeSchemaInPrompt: Bool = true,
+        options: GenerationOptions = GenerationOptions()
+    ) -> sending ResponseStream<Content> where Content: Generable {
+        streamResponse(
+            to: prompt,
+            images: [image],
+            generating: type,
+            includeSchemaInPrompt: includeSchemaInPrompt,
+            options: options
+        )
+    }
+
+    nonisolated public func streamResponse<Content>(
+        to prompt: String,
+        images: [Transcript.ImageSegment],
+        generating type: Content.Type = Content.self,
+        includeSchemaInPrompt: Bool = true,
+        options: GenerationOptions = GenerationOptions()
+    ) -> sending ResponseStream<Content> where Content: Generable {
+        // Build segments from text and images
+        var segments: [Transcript.Segment] = []
+        if !prompt.isEmpty {
+            segments.append(.text(.init(content: prompt)))
+        }
+        segments.append(contentsOf: images.map { .image($0) })
+
+        // Create prompt entry that will be added when stream starts
+        let promptEntry = Transcript.Entry.prompt(
+            Transcript.Prompt(
+                segments: segments,
+                options: options,
+                responseFormat: nil
+            )
+        )
+
+        // Extract text content for the Prompt parameter
+        let textPrompt = Prompt(prompt)
+
+        return wrapStream(
+            model.streamResponse(
+                within: self,
+                to: textPrompt,
+                generating: type,
+                includeSchemaInPrompt: includeSchemaInPrompt,
+                options: options
+            ),
+            promptEntry: promptEntry
+        )
+    }
+}
+
+// MARK: -
+
+extension LanguageModelSession {
     @discardableResult
     public func logFeedbackAttachment(
         sentiment: LanguageModelFeedback.Sentiment?,
@@ -440,19 +633,7 @@ public final class LanguageModelSession: @unchecked Sendable {
     }
 }
 
-private actor RespondingState {
-    private var count = 0
-
-    func increment() -> Int {
-        count += 1
-        return count
-    }
-
-    func decrement() -> Int {
-        count = max(0, count - 1)
-        return count
-    }
-}
+// MARK: -
 
 extension LanguageModelSession {
     public enum GenerationError: Error, LocalizedError {
@@ -647,5 +828,21 @@ extension LanguageModelSession.ResponseStream: AsyncSequence {
             rawContent: rawContent,
             transcriptEntries: []
         )
+    }
+}
+
+// MARK: -
+
+private actor RespondingState {
+    private var count = 0
+
+    func increment() -> Int {
+        count += 1
+        return count
+    }
+
+    func decrement() -> Int {
+        count = max(0, count - 1)
+        return count
     }
 }
