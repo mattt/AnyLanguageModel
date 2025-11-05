@@ -1,4 +1,4 @@
-import struct Foundation.UUID
+import Foundation
 
 /// A type that represents a conversation history between a user and a language model.
 public struct Transcript: Sendable, Equatable, Codable {
@@ -61,8 +61,11 @@ public struct Transcript: Sendable, Equatable, Codable {
         /// A segment containing text.
         case text(TextSegment)
 
-        /// A segment containing structured content
+        /// A segment containing structured content.
         case structure(StructuredSegment)
+
+        /// A segment containing an image.
+        case image(ImageSegment)
 
         /// The stable identity of the entity associated with this instance.
         public var id: String {
@@ -71,6 +74,8 @@ public struct Transcript: Sendable, Equatable, Codable {
                 return textSegment.id
             case .structure(let structuredSegment):
                 return structuredSegment.id
+            case .image(let imageSegment):
+                return imageSegment.id
             }
         }
     }
@@ -103,6 +108,91 @@ public struct Transcript: Sendable, Equatable, Codable {
             self.id = id
             self.source = source
             self.content = content
+        }
+    }
+
+    /// A segment that represents an image for multi‑modal prompts and outputs.
+    ///
+    /// Use this type to include images alongside text and structured content when
+    /// constructing `Transcript` entries. Images can be provided as raw data with a
+    /// MIME type or by URL.
+    public struct ImageSegment: Sendable, Identifiable, Equatable, Codable {
+        /// The stable identity of the entity associated with this instance.
+        public var id: String
+
+        /// The source of the image data.
+        public let source: Source
+
+        /// The origin of an image's content.
+        public enum Source: Sendable, Equatable, Codable {
+            /// Image bytes and their MIME type (for example, `image/jpeg`).
+            case data(Data, mimeType: String)
+            /// A URL that references an image.
+            case url(URL)
+
+            private enum CodingKeys: String, CodingKey { case kind, data, mimeType, url }
+
+            public init(from decoder: Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                let kind = try container.decode(String.self, forKey: .kind)
+                switch kind {
+                case "data":
+                    let data = try container.decode(Data.self, forKey: .data)
+                    let mimeType = try container.decode(String.self, forKey: .mimeType)
+                    self = .data(data, mimeType: mimeType)
+                case "url":
+                    let url = try container.decode(URL.self, forKey: .url)
+                    self = .url(url)
+                default:
+                    throw DecodingError.dataCorrupted(
+                        .init(codingPath: [CodingKeys.kind], debugDescription: "Unknown image source kind: \(kind)")
+                    )
+                }
+            }
+
+            public func encode(to encoder: Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                switch self {
+                case .data(let data, let mimeType):
+                    try container.encode("data", forKey: .kind)
+                    try container.encode(data, forKey: .data)
+                    try container.encode(mimeType, forKey: .mimeType)
+                case .url(let url):
+                    try container.encode("url", forKey: .kind)
+                    try container.encode(url, forKey: .url)
+                }
+            }
+        }
+
+        /// Creates an image segment from a source.
+        ///
+        /// - Parameters:
+        ///   - id: A unique identifier for this segment. Defaults to a generated UUID.
+        ///   - source: The image source.
+        public init(id: String = UUID().uuidString, source: Source) {
+            self.id = id
+            self.source = source
+        }
+
+        /// Creates an image segment from raw bytes.
+        ///
+        /// - Parameters:
+        ///   - id: A unique identifier for this segment. Defaults to a generated UUID.
+        ///   - data: The encoded image bytes.
+        ///   - mimeType: The MIME type corresponding to the image data (for example, `image/png`).
+        public init(id: String = UUID().uuidString, data: Data, mimeType: String) {
+            self.id = id
+            self.source = .data(data, mimeType: mimeType)
+        }
+
+        /// Creates an image segment from a URL.
+        ///
+        /// - Parameters:
+        ///   - id: A unique identifier for this segment. Defaults to a generated UUID.
+        ///   - url: A URL that references an image.
+        public init(id: String = UUID().uuidString, url: URL) {
+            self.id = id
+            self.source = .url(url)
         }
     }
 
@@ -333,6 +423,8 @@ extension Transcript.Segment: CustomStringConvertible {
             return textSegment.description
         case .structure(let structuredSegment):
             return structuredSegment.description
+        case .image:
+            return "<image>"
         }
     }
 }
@@ -346,6 +438,52 @@ extension Transcript.StructuredSegment: CustomStringConvertible {
         "StructuredSegment(source: \(source), content: \(content))"
     }
 }
+
+#if canImport(UIKit)
+    import UIKit
+
+    extension Transcript.ImageSegment {
+        /// Preferred image encodings for UIKit image conversion.
+        public enum ImageFormat {
+            /// JPEG encoding with the specified compression quality.
+            case jpeg(compressionQuality: Double = 0.9)
+            /// PNG encoding.
+            case png
+
+            fileprivate func encode(_ image: UIImage) throws -> (Data, String) {
+                switch self {
+                case .jpeg(let quality):
+                    guard let data = image.jpegData(compressionQuality: quality) else {
+                        throw ImageEncodingError.imageConversionFailed
+                    }
+                    return (data, "image/jpeg")
+                case .png:
+                    guard let data = image.pngData() else {
+                        throw ImageEncodingError.imageConversionFailed
+                    }
+                    return (data, "image/png")
+                }
+            }
+        }
+
+        /// Errors that can occur when converting a `UIImage` to encoded data.
+        public enum ImageEncodingError: Error {
+            /// The image couldn't be converted to the requested format.
+            case imageConversionFailed
+        }
+
+        /// Creates an image segment by encoding a UIKit image.
+        ///
+        /// - Parameters:
+        ///   - image: The source image to encode.
+        ///   - format: The target encoding. Defaults to JPEG with 0.9 quality.
+        /// - Throws: ``Transcript/ImageSegment/ImageEncodingError-swift.enum/imageConversionFailed`` if encoding fails.
+        public init(image: UIImage, format: ImageFormat = .jpeg()) throws {
+            let (data, mimeType) = try format.encode(image)
+            self.init(data: data, mimeType: mimeType)
+        }
+    }
+#endif
 
 extension Transcript.Instructions: CustomStringConvertible {
     public var description: String {
