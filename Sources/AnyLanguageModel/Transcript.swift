@@ -445,30 +445,32 @@ extension Transcript.StructuredSegment: CustomStringConvertible {
     }
 }
 
+extension Transcript.ImageSegment {
+    /// Preferred image encodings for image conversion.
+    public enum Format: Sendable {
+        /// JPEG encoding with the specified compression quality.
+        case jpeg(compressionQuality: Double = 0.9)
+        /// PNG encoding.
+        case png
+    }
+}
+
 #if canImport(UIKit)
     import UIKit
 
     extension Transcript.ImageSegment {
-        /// Preferred image encodings for UIKit image conversion.
-        public enum ImageFormat {
-            /// JPEG encoding with the specified compression quality.
-            case jpeg(compressionQuality: Double = 0.9)
-            /// PNG encoding.
-            case png
-
-            fileprivate func encode(_ image: UIImage) throws -> (Data, String) {
-                switch self {
-                case .jpeg(let quality):
-                    guard let data = image.jpegData(compressionQuality: quality) else {
-                        throw Transcript.ImageEncodingError.imageConversionFailed
-                    }
-                    return (data, "image/jpeg")
-                case .png:
-                    guard let data = image.pngData() else {
-                        throw Transcript.ImageEncodingError.imageConversionFailed
-                    }
-                    return (data, "image/png")
+        fileprivate static func encode(_ image: UIImage, format: Format) throws -> (Data, String) {
+            switch format {
+            case .jpeg(let quality):
+                guard let data = image.jpegData(compressionQuality: quality) else {
+                    throw Transcript.ImageEncodingError.imageConversionFailed
                 }
+                return (data, "image/jpeg")
+            case .png:
+                guard let data = image.pngData() else {
+                    throw Transcript.ImageEncodingError.imageConversionFailed
+                }
+                return (data, "image/png")
             }
         }
 
@@ -478,8 +480,8 @@ extension Transcript.StructuredSegment: CustomStringConvertible {
         ///   - image: The source image to encode.
         ///   - format: The target encoding. Defaults to JPEG with 0.9 quality.
         /// - Throws: ``Transcript/ImageEncodingError-swift.enum/imageConversionFailed`` if encoding fails.
-        public init(image: UIImage, format: ImageFormat = .jpeg()) throws {
-            let (data, mimeType) = try format.encode(image)
+        public init(image: UIImage, format: Format = .jpeg()) throws {
+            let (data, mimeType) = try Self.encode(image, format: format)
             self.init(data: data, mimeType: mimeType)
         }
     }
@@ -489,42 +491,34 @@ extension Transcript.StructuredSegment: CustomStringConvertible {
     import AppKit
 
     extension Transcript.ImageSegment {
-        /// Preferred image encodings for AppKit image conversion.
-        public enum ImageFormat {
-            /// JPEG encoding with the specified compression quality.
-            case jpeg(compressionQuality: Double = 0.9)
-            /// PNG encoding.
-            case png
+        fileprivate static func encode(_ image: NSImage, format: Format) throws -> (Data, String) {
+            guard let tiffData = image.tiffRepresentation,
+                let bitmapImage = NSBitmapImageRep(data: tiffData)
+            else {
+                throw Transcript.ImageEncodingError.imageConversionFailed
+            }
 
-            fileprivate func encode(_ image: NSImage) throws -> (Data, String) {
-                guard let tiffData = image.tiffRepresentation,
-                    let bitmapImage = NSBitmapImageRep(data: tiffData)
+            switch format {
+            case .jpeg(let quality):
+                guard
+                    let data = bitmapImage.representation(
+                        using: .jpeg,
+                        properties: [.compressionFactor: quality]
+                    )
                 else {
                     throw Transcript.ImageEncodingError.imageConversionFailed
                 }
-
-                switch self {
-                case .jpeg(let quality):
-                    guard
-                        let data = bitmapImage.representation(
-                            using: .jpeg,
-                            properties: [.compressionFactor: quality]
-                        )
-                    else {
-                        throw Transcript.ImageEncodingError.imageConversionFailed
-                    }
-                    return (data, "image/jpeg")
-                case .png:
-                    guard
-                        let data = bitmapImage.representation(
-                            using: .png,
-                            properties: [:]
-                        )
-                    else {
-                        throw Transcript.ImageEncodingError.imageConversionFailed
-                    }
-                    return (data, "image/png")
+                return (data, "image/jpeg")
+            case .png:
+                guard
+                    let data = bitmapImage.representation(
+                        using: .png,
+                        properties: [:]
+                    )
+                else {
+                    throw Transcript.ImageEncodingError.imageConversionFailed
                 }
+                return (data, "image/png")
             }
         }
 
@@ -534,8 +528,64 @@ extension Transcript.StructuredSegment: CustomStringConvertible {
         ///   - image: The source image to encode.
         ///   - format: The target encoding. Defaults to JPEG with 0.9 quality.
         /// - Throws: ``Transcript/ImageEncodingError-swift.enum/imageConversionFailed`` if encoding fails.
-        public init(image: NSImage, format: ImageFormat = .jpeg()) throws {
-            let (data, mimeType) = try format.encode(image)
+        public init(image: NSImage, format: Format = .jpeg()) throws {
+            let (data, mimeType) = try Self.encode(image, format: format)
+            self.init(data: data, mimeType: mimeType)
+        }
+    }
+#endif
+
+#if canImport(CoreGraphics)
+    import CoreGraphics
+    import ImageIO
+    import UniformTypeIdentifiers
+
+    extension Transcript.ImageSegment {
+        fileprivate static func encode(_ image: CGImage, format: Format) throws -> (Data, String) {
+            let data = NSMutableData()
+            let utType: UTType
+
+            switch format {
+            case .jpeg:
+                utType = .jpeg
+            case .png:
+                utType = .png
+            }
+
+            guard
+                let destination = CGImageDestinationCreateWithData(
+                    data,
+                    utType.identifier as CFString,
+                    1,
+                    nil
+                )
+            else {
+                throw Transcript.ImageEncodingError.imageConversionFailed
+            }
+
+            var properties: [CFString: Any] = [:]
+            if case .jpeg(let quality) = format {
+                properties[kCGImageDestinationLossyCompressionQuality] = quality
+            }
+
+            CGImageDestinationAddImage(destination, image, properties as CFDictionary)
+
+            guard CGImageDestinationFinalize(destination) else {
+                throw Transcript.ImageEncodingError.imageConversionFailed
+            }
+
+            let mimeType = (utType == .jpeg) ? "image/jpeg" : "image/png"
+            return (data as Data, mimeType)
+        }
+
+        /// Creates an image segment by encoding a CoreGraphics image.
+        ///
+        /// - Parameters:
+        ///   - image: The source image to encode.
+        ///   - format: The target encoding. Defaults to JPEG with 0.9 quality.
+        /// - Throws: ``Transcript/ImageEncodingError-swift.enum/imageConversionFailed`` if encoding fails.
+        public init(image: CGImage, format: Format = .jpeg()) throws {
+            let (data, mimeType) = try Self.encode(image, format: format)
             self.init(data: data, mimeType: mimeType)
         }
     }
