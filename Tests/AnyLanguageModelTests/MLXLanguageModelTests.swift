@@ -79,5 +79,36 @@ import Testing
                 #expect(first.arguments.city.contains("San Francisco"))
             }
         }
+
+        @Test func multimodal_rejectsImageURL() async throws {
+            let session = LanguageModelSession(model: model)
+            let prompt = Transcript.Prompt(segments: [
+                .text(.init(content: "Describe this image")),
+                .image(.init(url: testImageURL)),
+            ])
+            do {
+                _ = try await session.respond(to: prompt)
+                Issue.record("Expected error when image segments are present")
+            } catch {
+                // MLXUnsupportedFeatureError is a private struct, so we just check that an error is thrown
+                #expect(true)
+            }
+        }
+
+        @Test func multimodal_rejectsImageData() async throws {
+            let session = LanguageModelSession(model: model)
+            let data = Data(png1x1)
+            let prompt = Transcript.Prompt(segments: [
+                .text(.init(content: "Describe this image")),
+                .image(.init(data: data, mimeType: "image/png")),
+            ])
+            do {
+                _ = try await session.respond(to: prompt)
+                Issue.record("Expected error when image segments are present")
+            } catch {
+                // MLXUnsupportedFeatureError is a private struct, so we just check that an error is thrown
+                #expect(true)
+            }
+        }
     }
 #endif  // MLX

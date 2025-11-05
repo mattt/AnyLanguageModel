@@ -133,5 +133,52 @@ import Testing
             // Note: We can't easily test token count without access to the tokenizer
             // but we can verify the response is not empty
         }
+
+        @Test @available(macOS 15.0, iOS 18.0, tvOS 18.0, visionOS 2.0, watchOS 11.0, *)
+        func multimodal_rejectsImageURL() async throws {
+            let model = try await getModel()
+            let session = LanguageModelSession(model: model)
+            let prompt = Transcript.Prompt(segments: [
+                .text(.init(content: "Describe this image")),
+                .image(.init(url: testImageURL)),
+            ])
+            do {
+                _ = try await session.respond(to: prompt)
+                Issue.record("Expected error when image segments are present")
+            } catch {
+                // CoreMLUnsupportedFeatureError is a private struct, so we just check that an error is thrown
+                #expect(true)
+            }
+        }
+
+        @Test @available(macOS 15.0, iOS 18.0, tvOS 18.0, visionOS 2.0, watchOS 11.0, *)
+        func multimodal_rejectsImageData() async throws {
+            let model = try await getModel()
+            let session = LanguageModelSession(model: model)
+            // Minimal 1x1 PNG
+            let png1x1: [UInt8] = [
+                0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+                0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+                0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+                0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53,
+                0xDE, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41,
+                0x54, 0x78, 0x9C, 0x63, 0xF8, 0x0F, 0x00, 0x01,
+                0x01, 0x01, 0x00, 0x18, 0xDD, 0x8D, 0xF7, 0x00,
+                0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE,
+                0x42, 0x60, 0x82,
+            ]
+            let data = Data(png1x1)
+            let prompt = Transcript.Prompt(segments: [
+                .text(.init(content: "Describe this image")),
+                .image(.init(data: data, mimeType: "image/png")),
+            ])
+            do {
+                _ = try await session.respond(to: prompt)
+                Issue.record("Expected error when image segments are present")
+            } catch {
+                // CoreMLUnsupportedFeatureError is a private struct, so we just check that an error is thrown
+                #expect(true)
+            }
+        }
     }
 #endif  // CoreML

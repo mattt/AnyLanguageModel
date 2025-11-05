@@ -62,8 +62,10 @@ public struct OllamaLanguageModel: LanguageModel {
             fatalError("OllamaLanguageModel only supports generating String content")
         }
 
+        let userSegments = extractPromptSegments(from: session, fallbackText: prompt.description)
+        let (ollamaText, ollamaImages) = convertSegmentsToOllama(userSegments)
         let messages = [
-            OllamaMessage(role: .user, content: prompt.description)
+            OllamaMessage(role: .user, content: ollamaText)
         ]
         let ollamaOptions = convertOptions(options)
         let ollamaTools = try session.tools.map { tool in
@@ -75,7 +77,8 @@ public struct OllamaLanguageModel: LanguageModel {
             messages: messages,
             tools: ollamaTools.isEmpty ? nil : ollamaTools,
             options: ollamaOptions,
-            stream: false
+            stream: false,
+            images: ollamaImages.isEmpty ? nil : ollamaImages
         )
 
         let url = baseURL.appendingPathComponent("api/chat")
@@ -119,8 +122,10 @@ public struct OllamaLanguageModel: LanguageModel {
             fatalError("OllamaLanguageModel only supports generating String content")
         }
 
+        let userSegments = extractPromptSegments(from: session, fallbackText: prompt.description)
+        let (ollamaText, ollamaImages) = convertSegmentsToOllama(userSegments)
         let messages = [
-            OllamaMessage(role: .user, content: prompt.description)
+            OllamaMessage(role: .user, content: ollamaText)
         ]
         let ollamaOptions = convertOptions(options)
         let ollamaTools = try? session.tools.map { tool in
@@ -132,7 +137,8 @@ public struct OllamaLanguageModel: LanguageModel {
             messages: messages,
             tools: (ollamaTools?.isEmpty == false) ? ollamaTools : nil,
             options: ollamaOptions,
-            stream: true
+            stream: true,
+            images: (ollamaImages.isEmpty ? nil : ollamaImages)
         )
 
         let url = baseURL.appendingPathComponent("api/chat")
@@ -312,7 +318,8 @@ private func createChatParams(
     messages: [OllamaMessage],
     tools: [[String: JSONValue]]?,
     options: [String: JSONValue]?,
-    stream: Bool
+    stream: Bool,
+    images: [String]?
 ) throws -> [String: JSONValue] {
     var params: [String: JSONValue] = [
         "model": .string(model),
@@ -326,6 +333,10 @@ private func createChatParams(
 
     if let options {
         params["options"] = .object(options)
+    }
+
+    if let images, !images.isEmpty {
+        params["images"] = .array(images.map { .string($0) })
     }
 
     return params
@@ -343,6 +354,37 @@ private struct OllamaMessage: Hashable, Codable, Sendable {
 
     let role: Role
     let content: String
+}
+
+private func convertSegmentsToOllama(_ segments: [Transcript.Segment]) -> (String, [String]) {
+    var textParts: [String] = []
+    var images: [String] = []
+    for segment in segments {
+        switch segment {
+        case .text(let t):
+            textParts.append(t.content)
+        case .structure(let s):
+            textParts.append(s.content.jsonString)
+        case .image(let img):
+            switch img.source {
+            case .data(let data, _):
+                images.append(data.base64EncodedString())
+            case .url(let url):
+                // Ollama supports base64 images; include URL as text if provided
+                textParts.append(url.absoluteString)
+            }
+        }
+    }
+    return (textParts.joined(separator: "\n"), images)
+}
+
+private func extractPromptSegments(from session: LanguageModelSession, fallbackText: String) -> [Transcript.Segment] {
+    for entry in session.transcript.reversed() {
+        if case .prompt(let p) = entry {
+            return p.segments
+        }
+    }
+    return [.text(.init(content: fallbackText))]
 }
 
 private struct ChatResponse: Decodable, Sendable {

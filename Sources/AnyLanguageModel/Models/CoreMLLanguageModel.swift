@@ -210,6 +210,8 @@
 
         /// The model file was found but is corrupted, incompatible, or otherwise invalid.
         case modelInvalid(URL, underlyingError: Error)
+        /// Image segments are not supported in CoreMLLanguageModel
+        case unsupportedFeature
 
         public var errorDescription: String? {
             switch self {
@@ -221,6 +223,8 @@
             case .modelInvalid(let url, let underlyingError):
                 return
                     "Core ML model at \(url.path) is invalid or corrupted: \(underlyingError.localizedDescription). Please verify the model file is valid and compatible with the current Core ML version."
+            case .unsupportedFeature:
+                return "This CoreMLLanguageModel does not support image segments"
             }
         }
     }
@@ -245,7 +249,7 @@
                 config.topK = k
             case .nucleus(let p, _):
                 config.doSample = true
-                config.topP = p
+                config.topP = Float(p)
             }
         }
 

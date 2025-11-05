@@ -601,6 +601,7 @@ import Foundation
         case decodingFailed
         case invalidModelPath
         case insufficientMemory
+        case unsupportedFeature
 
         public var errorDescription: String? {
             switch self {
@@ -618,6 +619,8 @@ import Foundation
                 return "Invalid model file path"
             case .insufficientMemory:
                 return "Insufficient memory for operation"
+            case .unsupportedFeature:
+                return "This LlamaLanguageModel does not support image segments"
             }
         }
     }
