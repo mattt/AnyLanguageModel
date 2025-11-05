@@ -62,7 +62,7 @@ Add this package to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/mattt/AnyLanguageModel.git", from: "0.2.0")
+    .package(url: "https://github.com/mattt/AnyLanguageModel.git", from: "0.3.0")
 ]
 ```
 
@@ -245,8 +245,8 @@ let response = try await session.respond {
 }
 ```
 
-Gemini models use an internal ["thinking process"](https://ai.google.dev/gemini-api/docs/thinking) 
-that improves reasoning and multi-step planning. 
+Gemini models use an internal ["thinking process"](https://ai.google.dev/gemini-api/docs/thinking)
+that improves reasoning and multi-step planning.
 You can configure how much Gemini should "think" using the `thinking` parameter:
 
 ```swift
@@ -289,7 +289,7 @@ let model = GeminiLanguageModel(
   Fetches and analyzes content from URLs mentioned in prompts
 
 > [!TIP]
-> Gemini server tools are not available as client tools (`Tool`) for other models.  
+> Gemini server tools are not available as client tools (`Tool`) for other models.
 
 ### Ollama
 
