@@ -50,6 +50,11 @@ let package = Package(
                     condition: .when(traits: ["MLX"])
                 ),
                 .product(
+                    name: "MLXVLM",
+                    package: "mlx-swift-examples",
+                    condition: .when(traits: ["MLX"])
+                ),
+                .product(
                     name: "MLXLMCommon",
                     package: "mlx-swift-examples",
                     condition: .when(traits: ["MLX"])
