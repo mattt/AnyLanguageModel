@@ -323,9 +323,9 @@ swift test
 
 Tests for different language model backends have varying requirements:
 
-- **CoreML tests**: `swift test --enable-trait CoreML` + `ENABLE_COREML_TESTS=1` + `HF_TOKEN` (downloads model from HuggingFace)
-- **MLX tests**: `swift test --enable-trait MLX` + `ENABLE_MLX_TESTS=1` + `HF_TOKEN` (uses pre-defined model)
-- **Llama tests**: `swift test --enable-trait Llama` + `LLAMA_MODEL_PATH` (points to local GGUF file)
+- **CoreML tests**: `swift test --traits CoreML` + `ENABLE_COREML_TESTS=1` + `HF_TOKEN` (downloads model from HuggingFace)
+- **MLX tests**: `swift test --traits MLX` + `ENABLE_MLX_TESTS=1` + `HF_TOKEN` (uses pre-defined model)
+- **Llama tests**: `swift test --traits Llama` + `LLAMA_MODEL_PATH` (points to local GGUF file)
 - **Anthropic tests**: `ANTHROPIC_API_KEY` (no traits needed)
 - **OpenAI tests**: `OPENAI_API_KEY` (no traits needed)
 - **Ollama tests**: No setup needed (skips in CI)
@@ -342,5 +342,5 @@ export ANTHROPIC_API_KEY=your_anthropic_key
 export OPENAI_API_KEY=your_openai_key
 
 # Run all tests with traits enabled
-swift test --enable-trait CoreML --enable-trait MLX --enable-trait Llama
+swift test --traits CoreML,MLX,Llama
 ```
