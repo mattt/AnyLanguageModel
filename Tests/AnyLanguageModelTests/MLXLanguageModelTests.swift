@@ -33,6 +33,7 @@ import Testing
     struct MLXLanguageModelTests {
         // Qwen3-0.6B is a small model that supports tool calling
         let model = MLXLanguageModel(modelId: "mlx-community/Qwen3-0.6B-4bit")
+        let visionModel = MLXLanguageModel(modelId: "mlx-community/Qwen2-VL-2B-Instruct-4bit")
 
         @Test func basicResponse() async throws {
             let session = LanguageModelSession(model: model)
@@ -80,35 +81,32 @@ import Testing
             }
         }
 
-        @Test func multimodal_rejectsImageURL() async throws {
-            let session = LanguageModelSession(model: model)
-            let prompt = Transcript.Prompt(segments: [
-                .text(.init(content: "Describe this image")),
-                .image(.init(url: testImageURL)),
+        @Test func multimodalWithImageURL() async throws {
+            let transcript = Transcript(entries: [
+                .prompt(
+                    Transcript.Prompt(segments: [
+                        .text(.init(content: "Describe this image")),
+                        .image(.init(url: testImageURL)),
+                    ])
+                )
             ])
-            do {
-                _ = try await session.respond(to: prompt)
-                Issue.record("Expected error when image segments are present")
-            } catch {
-                // MLXUnsupportedFeatureError is a private struct, so we just check that an error is thrown
-                #expect(true)
-            }
+            let session = LanguageModelSession(model: visionModel, transcript: transcript)
+            let response = try await session.respond(to: "")
+            #expect(!response.content.isEmpty)
         }
 
-        @Test func multimodal_rejectsImageData() async throws {
-            let session = LanguageModelSession(model: model)
-            let data = Data(png1x1)
-            let prompt = Transcript.Prompt(segments: [
-                .text(.init(content: "Describe this image")),
-                .image(.init(data: data, mimeType: "image/png")),
+        @Test func multimodalWithImageData() async throws {
+            let transcript = Transcript(entries: [
+                .prompt(
+                    Transcript.Prompt(segments: [
+                        .text(.init(content: "Describe this image")),
+                        .image(.init(data: testImageData, mimeType: "image/png")),
+                    ])
+                )
             ])
-            do {
-                _ = try await session.respond(to: prompt)
-                Issue.record("Expected error when image segments are present")
-            } catch {
-                // MLXUnsupportedFeatureError is a private struct, so we just check that an error is thrown
-                #expect(true)
-            }
+            let session = LanguageModelSession(model: visionModel, transcript: transcript)
+            let response = try await session.respond(to: "")
+            #expect(!response.content.isEmpty)
         }
     }
 #endif  // MLX
