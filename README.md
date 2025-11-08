@@ -54,7 +54,7 @@ print(response.content)
 ## Requirements
 
 - Swift 6.1+
-- iOS 17.0+ / macOS 14.0+ / visionOS 1.0+
+- iOS 17.0+ / macOS 14.0+ / visionOS 1.0+ / Linux
 
 ## Installation
 
