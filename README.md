@@ -54,7 +54,7 @@ print(response.content)
 ## Requirements
 
 - Swift 6.1+
-- iOS 17.0+ / macOS 14.0+ / visionOS 1.0+
+- iOS 17.0+ / macOS 14.0+ / visionOS 1.0+ / Linux
 
 > [!IMPORTANT]
 > A bug in Xcode 26 may cause build errors
