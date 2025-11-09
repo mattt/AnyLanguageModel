@@ -80,6 +80,8 @@
                 fatalError("CoreMLLanguageModel only supports generating String content")
             }
 
+            try validateNoImageSegments(in: session)
+
             // Convert AnyLanguageModel GenerationOptions to swift-transformers GenerationConfig
             let generationConfig = toGenerationConfig(options)
 
@@ -120,6 +122,17 @@
             // For now, only String is supported
             guard type == String.self else {
                 fatalError("CoreMLLanguageModel only supports generating String content")
+            }
+
+            // Validate that no image segments are present
+            do {
+                try validateNoImageSegments(in: session)
+            } catch {
+                return LanguageModelSession.ResponseStream(
+                    stream: AsyncThrowingStream { continuation in
+                        continuation.finish(throwing: error)
+                    }
+                )
             }
 
             // Convert AnyLanguageModel GenerationOptions to swift-transformers GenerationConfig
@@ -225,6 +238,31 @@
                     "Core ML model at \(url.path) is invalid or corrupted: \(underlyingError.localizedDescription). Please verify the model file is valid and compatible with the current Core ML version."
             case .unsupportedFeature:
                 return "This CoreMLLanguageModel does not support image segments"
+            }
+        }
+    }
+
+    // MARK: - Image Validation
+
+    private func validateNoImageSegments(in session: LanguageModelSession) throws {
+        // Check for image segments in instructions
+        if let instructions = session.instructions {
+            for segment in instructions.segments {
+                if case .image = segment {
+                    throw CoreMLLanguageModelError.unsupportedFeature
+                }
+            }
+        }
+
+        // Check for image segments in the most recent prompt
+        for entry in session.transcript.reversed() {
+            if case .prompt(let p) = entry {
+                for segment in p.segments {
+                    if case .image = segment {
+                        throw CoreMLLanguageModelError.unsupportedFeature
+                    }
+                }
+                break
             }
         }
     }
