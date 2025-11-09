@@ -111,6 +111,9 @@ import Foundation
                 fatalError("LlamaLanguageModel only supports generating String content")
             }
 
+            // Validate that no image segments are present
+            try validateNoImageSegments(in: session)
+
             try await ensureModelLoaded()
 
             let contextParams = createContextParams(from: options)
@@ -152,6 +155,17 @@ import Foundation
             // For now, only String is supported
             guard type == String.self else {
                 fatalError("LlamaLanguageModel only supports generating String content")
+            }
+
+            // Validate that no image segments are present
+            do {
+                try validateNoImageSegments(in: session)
+            } catch {
+                return LanguageModelSession.ResponseStream(
+                    stream: AsyncThrowingStream { continuation in
+                        continuation.finish(throwing: error)
+                    }
+                )
             }
 
             let maxTokens = options.maximumResponseTokens ?? 100
@@ -523,6 +537,31 @@ import Foundation
                 continuation.finish()
             } catch {
                 continuation.finish(throwing: error)
+            }
+        }
+
+        // MARK: - Image Validation
+
+        private func validateNoImageSegments(in session: LanguageModelSession) throws {
+            // Check for image segments in instructions
+            if let instructions = session.instructions {
+                for segment in instructions.segments {
+                    if case .image = segment {
+                        throw LlamaLanguageModelError.unsupportedFeature
+                    }
+                }
+            }
+
+            // Check for image segments in the most recent prompt
+            for entry in session.transcript.reversed() {
+                if case .prompt(let p) = entry {
+                    for segment in p.segments {
+                        if case .image = segment {
+                            throw LlamaLanguageModelError.unsupportedFeature
+                        }
+                    }
+                    break
+                }
             }
         }
 
