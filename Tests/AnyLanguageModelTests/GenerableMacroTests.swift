@@ -70,4 +70,31 @@ struct GenerableMacroTests {
         let decodedSchema = try decoder.decode(GenerationSchema.self, from: jsonData)
         #expect(decodedSchema.debugDescription.contains("object"))
     }
+
+    @MainActor
+    @Generable
+    struct MainActorIsolatedStruct {
+        @Guide(description: "A test field")
+        var field: String
+    }
+
+    /// Test to verify @Generable works correctly with MainActor isolation.
+    @MainActor
+    @Test func mainActorIsolation() async throws {
+        let generatedContent = GeneratedContent(properties: [
+            "field": "test value"
+        ])
+        let instance = try MainActorIsolatedStruct(generatedContent)
+        #expect(instance.field == "test value")
+
+        let convertedBack = instance.generatedContent
+        let decoded = try MainActorIsolatedStruct(convertedBack)
+        #expect(decoded.field == "test value")
+
+        let schema = MainActorIsolatedStruct.generationSchema
+        #expect(schema.debugDescription.contains("MainActorIsolatedStruct"))
+
+        let partiallyGenerated = instance.asPartiallyGenerated()
+        #expect(partiallyGenerated.field == "test value")
+    }
 }
