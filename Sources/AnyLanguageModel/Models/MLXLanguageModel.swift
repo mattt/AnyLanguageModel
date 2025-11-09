@@ -51,8 +51,6 @@ import Foundation
                 fatalError("MLXLanguageModel only supports generating String content")
             }
 
-            // Set GPU memory limit to prevent out of memory issues
-            MLX.GPU.set(cacheLimit: 20 * 1024 * 1024)
             let context = try await loadModel(id: modelId)
 
             // Convert session tools to MLX ToolSpec format
