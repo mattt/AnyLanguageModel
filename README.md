@@ -262,14 +262,16 @@ let response = try await session.respond {
 }
 ```
 
-You can include images with your question.
-You can point to remote URLs or construct from bytes if you already have image data:
+You can include images with your prompt.
+You can point to remote URLs or construct from image data:
 
 ```swift
-let data = try Data(contentsOf: URL(fileURLWithPath: "/path/to/diagram.png"))
 let response = try await session.respond(
     to: "Explain the key parts of this diagram",
-    image: .init(data: data, mimeType: "image/png")
+    image: .init(
+        data: try Data(contentsOf: URL(fileURLWithPath: "/path/to/diagram.png")),
+        mimeType: "image/png"
+    )
 )
 print(response.content)
 ```
@@ -368,7 +370,7 @@ let response = try await session.respond {
 ```
 
 For local models, make sure you’re using a vision‑capable model
-(for example, a “‑VL” variant).
+(for example, a `-vl` variant).
 You can combine multiple images:
 
 ```swift
