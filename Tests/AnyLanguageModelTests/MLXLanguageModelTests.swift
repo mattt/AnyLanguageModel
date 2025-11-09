@@ -33,6 +33,7 @@ import Testing
     struct MLXLanguageModelTests {
         // Qwen3-0.6B is a small model that supports tool calling
         let model = MLXLanguageModel(modelId: "mlx-community/Qwen3-0.6B-4bit")
+        let visionModel = MLXLanguageModel(modelId: "mlx-community/Qwen2-VL-2B-Instruct-4bit")
 
         @Test func basicResponse() async throws {
             let session = LanguageModelSession(model: model)
@@ -78,6 +79,34 @@ import Testing
             if let first = calls.first {
                 #expect(first.arguments.city.contains("San Francisco"))
             }
+        }
+
+        @Test func multimodalWithImageURL() async throws {
+            let transcript = Transcript(entries: [
+                .prompt(
+                    Transcript.Prompt(segments: [
+                        .text(.init(content: "Describe this image")),
+                        .image(.init(url: testImageURL)),
+                    ])
+                )
+            ])
+            let session = LanguageModelSession(model: visionModel, transcript: transcript)
+            let response = try await session.respond(to: "")
+            #expect(!response.content.isEmpty)
+        }
+
+        @Test func multimodalWithImageData() async throws {
+            let transcript = Transcript(entries: [
+                .prompt(
+                    Transcript.Prompt(segments: [
+                        .text(.init(content: "Describe this image")),
+                        .image(.init(data: testImageData, mimeType: "image/png")),
+                    ])
+                )
+            ])
+            let session = LanguageModelSession(model: visionModel, transcript: transcript)
+            let response = try await session.respond(to: "")
+            #expect(!response.content.isEmpty)
         }
     }
 #endif  // MLX

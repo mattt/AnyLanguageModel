@@ -88,10 +88,13 @@ public struct OpenAILanguageModel: LanguageModel {
         }
 
         var messages: [OpenAIMessage] = []
-        if let instructions = session.instructions {
-            messages.append(OpenAIMessage(role: .system, content: .text(instructions.description)))
+        if let systemSegments = extractInstructionSegments(from: session) {
+            messages.append(
+                OpenAIMessage(role: .system, content: .blocks(convertSegmentsToOpenAIBlocks(systemSegments)))
+            )
         }
-        messages.append(OpenAIMessage(role: .user, content: .text(prompt.description)))
+        let userSegments = extractPromptSegments(from: session, fallbackText: prompt.description)
+        messages.append(OpenAIMessage(role: .user, content: .blocks(convertSegmentsToOpenAIBlocks(userSegments))))
 
         // Convert tools if any are available in the session
         let openAITools: [OpenAITool]? = {
@@ -234,10 +237,13 @@ public struct OpenAILanguageModel: LanguageModel {
         }
 
         var messages: [OpenAIMessage] = []
-        if let instructions = session.instructions {
-            messages.append(OpenAIMessage(role: .system, content: .text(instructions.description)))
+        if let systemSegments = extractInstructionSegments(from: session) {
+            messages.append(
+                OpenAIMessage(role: .system, content: .blocks(convertSegmentsToOpenAIBlocks(systemSegments)))
+            )
         }
-        messages.append(OpenAIMessage(role: .user, content: .text(prompt.description)))
+        let userSegments = extractPromptSegments(from: session, fallbackText: prompt.description)
+        messages.append(OpenAIMessage(role: .user, content: .blocks(convertSegmentsToOpenAIBlocks(userSegments))))
 
         // Convert tools if any are available in the session
         let openAITools: [OpenAITool]? = {
@@ -439,19 +445,65 @@ private enum Responses {
         options: GenerationOptions,
         stream: Bool
     ) -> JSONValue {
-        // Extract the system and user message content for the request
+        // Build input blocks from the user message content
         let systemMessage = messages.first { $0.role == .system }
         let userMessage = messages.first { $0.role == .user }
-        let inputText = if case .text(let text) = userMessage?.content { text } else { "" }
 
         var body: [String: JSONValue] = [
             "model": .string(model),
-            "input": .string(inputText),
             "stream": .bool(stream),
         ]
 
-        if case .text(let instructions) = systemMessage?.content {
-            body["instructions"] = .string(instructions)
+        if let userMessage {
+            // Wrap user content into a single top-level message as required by Responses API
+            let contentBlocks: [JSONValue]
+            switch userMessage.content {
+            case .text(let text):
+                contentBlocks = [
+                    .object(["type": .string("input_text"), "text": .string(text)])
+                ]
+            case .blocks(let blocks):
+                contentBlocks = blocks.map { block in
+                    switch block {
+                    case .text(let text):
+                        return .object(["type": .string("input_text"), "text": .string(text)])
+                    case .imageURL(let url):
+                        return .object([
+                            "type": .string("input_image"),
+                            "image_url": .object(["url": .string(url)]),
+                        ])
+                    }
+                }
+            }
+
+            body["input"] = .array([
+                .object([
+                    "type": .string("message"),
+                    "role": .string("user"),
+                    "content": .array(contentBlocks),
+                ])
+            ])
+        } else {
+            body["input"] = .array([
+                .object([
+                    "type": .string("message"),
+                    "role": .string("user"),
+                    "content": .array([]),
+                ])
+            ])
+        }
+
+        if let systemMessage {
+            switch systemMessage.content {
+            case .text(let text):
+                body["instructions"] = .string(text)
+            case .blocks(let blocks):
+                // Concatenate text blocks for instructions; ignore images
+                let text = blocks.compactMap { if case .text(let t) = $0 { return t } else { return nil } }.joined(
+                    separator: "\n"
+                )
+                if !text.isEmpty { body["instructions"] = .string(text) }
+            }
         }
 
         if let tools {
@@ -490,6 +542,7 @@ private struct OpenAIMessage: Hashable, Codable, Sendable {
 
     enum Content: Hashable, Codable, Sendable {
         case text(String)
+        case blocks([Block])
     }
 
     let role: Role
@@ -512,8 +565,99 @@ private struct OpenAIMessage: Hashable, Codable, Sendable {
                     "content": .array([.object(["type": .string("text"), "text": .string(text)])]),
                 ])
             }
+        case .blocks(let blocks):
+            switch apiVariant {
+            case .chatCompletions:
+                // Chat Completions accepts array of content parts
+                return .object([
+                    "role": .string(role.rawValue),
+                    "content": .array(blocks.map { $0.jsonValueForChatCompletions }),
+                ])
+            case .responses:
+                // Responses expects message content blocks
+                return .object([
+                    "role": .string(role.rawValue),
+                    "content": .array(blocks.map { $0.jsonValueForResponses }),
+                ])
+            }
         }
     }
+}
+
+private enum Block: Hashable, Codable, Sendable {
+    case text(String)
+    case imageURL(String)
+
+    var jsonValueForChatCompletions: JSONValue {
+        switch self {
+        case .text(let text):
+            return .object(["type": .string("text"), "text": .string(text)])
+        case .imageURL(let url):
+            return .object([
+                "type": .string("image_url"),
+                "image_url": .object(["url": .string(url)]),
+            ])
+        }
+    }
+
+    var jsonValueForResponses: JSONValue {
+        switch self {
+        case .text(let text):
+            return .object(["type": .string("text"), "text": .string(text)])
+        case .imageURL(let url):
+            // Responses API uses input_image at top-level input, but inside messages we mirror block
+            return .object([
+                "type": .string("input_image"),
+                "image_url": .object(["url": .string(url)]),
+            ])
+        }
+    }
+}
+
+private func convertSegmentsToOpenAIBlocks(_ segments: [Transcript.Segment]) -> [Block] {
+    var blocks: [Block] = []
+    blocks.reserveCapacity(segments.count)
+    for segment in segments {
+        switch segment {
+        case .text(let text):
+            blocks.append(.text(text.content))
+        case .structure(let structured):
+            blocks.append(.text(structured.content.jsonString))
+        case .image(let image):
+            switch image.source {
+            case .url(let url):
+                blocks.append(.imageURL(url.absoluteString))
+            case .data(let data, let mimeType):
+                let b64 = data.base64EncodedString()
+                let dataURL = "data:\(mimeType);base64,\(b64)"
+                blocks.append(.imageURL(dataURL))
+            }
+        }
+    }
+    return blocks
+}
+
+private func extractPromptSegments(from session: LanguageModelSession, fallbackText: String) -> [Transcript.Segment] {
+    // Prefer the most recent Transcript.Prompt entry if present
+    for entry in session.transcript.reversed() {
+        if case .prompt(let p) = entry {
+            return p.segments
+        }
+    }
+    return [.text(.init(content: fallbackText))]
+}
+
+private func extractInstructionSegments(from session: LanguageModelSession) -> [Transcript.Segment]? {
+    // Prefer the first Transcript.Instructions entry if present
+    for entry in session.transcript {
+        if case .instructions(let i) = entry {
+            return i.segments
+        }
+    }
+    if let instructions = session.instructions?.description, !instructions.isEmpty {
+        return [.text(.init(content: instructions))]
+    }
+    return nil
 }
 
 private struct OpenAITool: Hashable, Codable, Sendable {

@@ -146,4 +146,120 @@ struct MockLanguageModelTests {
             #expect(!entry.id.isEmpty)
         }
     }
+
+    @Test func respondWithSingleImage() async throws {
+        let model = MockLanguageModel.echo
+        let session = LanguageModelSession(model: model)
+
+        let image = Transcript.ImageSegment(url: testImageURL)
+        let response = try await session.respond(to: "Describe this image", image: image)
+
+        #expect(response.content.contains("Describe this image"))
+
+        // Verify transcript has prompt with text + image and a response
+        #expect(session.transcript.count == 2)
+        if case .prompt(let promptEntry) = session.transcript[0] {
+            #expect(promptEntry.segments.count == 2)
+            // Expect one text and one image segment
+            let kinds = promptEntry.segments.map { segment -> String in
+                switch segment {
+                case .text: return "text";
+                case .image: return "image";
+                case .structure: return "structure"
+                }
+            }
+            #expect(kinds.contains("text"))
+            #expect(kinds.contains("image"))
+        } else {
+            Issue.record("First entry should be prompt with image")
+        }
+    }
+
+    @Test func respondWithMultipleImages() async throws {
+        let model = MockLanguageModel.echo
+        let session = LanguageModelSession(model: model)
+
+        let images: [Transcript.ImageSegment] = [
+            .init(url: testImageURL),
+            .init(data: testImageData, mimeType: "image/png"),
+        ]
+        let response = try await session.respond(to: "Classify these", images: images)
+
+        #expect(response.content.contains("Classify these"))
+        #expect(session.transcript.count == 2)
+        if case .prompt(let promptEntry) = session.transcript[0] {
+            #expect(promptEntry.segments.count == 3)
+            let imageCount = promptEntry.segments.reduce(into: 0) { count, seg in if case .image = seg { count += 1 } }
+            #expect(imageCount == 2)
+        } else {
+            Issue.record("First entry should be prompt with images")
+        }
+    }
+
+    @Test func respondGeneratingStringWithImages() async throws {
+        let model = MockLanguageModel.echo
+        let session = LanguageModelSession(model: model)
+
+        let images: [Transcript.ImageSegment] = [
+            .init(url: testImageURL)
+        ]
+        let response: LanguageModelSession.Response<String> = try await session.respond(
+            to: "What do you see?",
+            images: images,
+            generating: String.self,
+            includeSchemaInPrompt: true
+        )
+
+        #expect(response.content.contains("What do you see?"))
+        #expect(session.transcript.count == 2)
+        if case .prompt(let promptEntry) = session.transcript[0] {
+            #expect(promptEntry.segments.count == 2)
+        } else {
+            Issue.record("First entry should be prompt with image")
+        }
+    }
+
+    @Test func streamResponseWithSingleImage() async throws {
+        let model = MockLanguageModel.streamingMock()
+        let session = LanguageModelSession(model: model)
+
+        let image = Transcript.ImageSegment(url: testImageURL)
+        let stream = session.streamResponse(to: "Stream about image", image: image)
+
+        var snapshots = 0
+        for try await _ in stream { snapshots += 1 }
+        #expect(snapshots >= 1)
+
+        // Prompt added at start, response added at end (append may occur after stream finishes)
+        try await Task.sleep(for: .milliseconds(10))
+        #expect(session.transcript.count == 2)
+        if case .prompt(let promptEntry) = session.transcript[0] {
+            #expect(promptEntry.segments.count == 2)
+        } else {
+            Issue.record("First entry should be prompt with image")
+        }
+    }
+
+    @Test func streamResponseWithMultipleImages() async throws {
+        let model = MockLanguageModel.streamingMock()
+        let session = LanguageModelSession(model: model)
+
+        let images: [Transcript.ImageSegment] = [
+            .init(url: testImageURL),
+            .init(data: testImageData, mimeType: "image/png"),
+        ]
+        let stream = session.streamResponse(to: "Stream about images", images: images)
+
+        for try await _ in stream { /* drain */  }
+        // Response append occurs after stream finishes; wait briefly
+        try await Task.sleep(for: .milliseconds(10))
+        #expect(session.transcript.count == 2)
+        if case .prompt(let promptEntry) = session.transcript[0] {
+            #expect(promptEntry.segments.count == 3)
+            let imageCount = promptEntry.segments.reduce(into: 0) { c, seg in if case .image = seg { c += 1 } }
+            #expect(imageCount == 2)
+        } else {
+            Issue.record("First entry should be prompt with images")
+        }
+    }
 }

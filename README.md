@@ -119,6 +119,9 @@ let response = try await session.respond {
 }
 ```
 
+> [!NOTE]  
+> Image inputs are not yet supported by Apple Foundation Models.
+
 ### Core ML
 
 Run [Core ML](https://developer.apple.com/documentation/coreml) models
@@ -143,6 +146,9 @@ Enable the trait in Package.swift:
 )
 ```
 
+> [!NOTE]  
+> Image inputs are not currently supported with `CoreMLLanguageModel`.
+
 ### MLX
 
 Run [MLX](https://github.com/ml-explore/mlx-swift) models on Apple Silicon
@@ -155,6 +161,22 @@ let session = LanguageModelSession(model: model)
 let response = try await session.respond {
     Prompt("What is the capital of France?")
 }
+```
+
+Vision support depends on the specific MLX model you load.
+Use a vision‑capable model for multimodal prompts
+(for example, a VLM variant).
+The following shows extracting text from an image:
+
+```swift
+let ocr = try await session.respond(
+    to: "Extract the total amount from this receipt",
+    images: [
+        .init(url: URL(fileURLWithPath: "/path/to/receipt_page1.png")),
+        .init(url: URL(fileURLWithPath: "/path/to/receipt_page2.png"))
+    ]
+)
+print(ocr.content)
 ```
 
 Enable the trait in Package.swift:
@@ -191,6 +213,9 @@ Enable the trait in Package.swift:
 )
 ```
 
+> [!NOTE]  
+> Image inputs are not currently supported with `LlamaLanguageModel`.
+
 ### OpenAI
 
 Supports both
@@ -204,9 +229,17 @@ let model = OpenAILanguageModel(
 )
 
 let session = LanguageModelSession(model: model)
-let response = try await session.respond {
-    Prompt("Write a haiku about Swift")
-}
+let response = try await session.respond(
+    to: "List the objects you see",
+    images: [
+        .init(url: URL(string: "https://example.com/desk.jpg")!),
+        .init(
+            data: try Data(contentsOf: URL(fileURLWithPath: "/path/to/closeup.png")),
+            mimeType: "image/png"
+        )
+    ]
+)
+print(response.content)
 ```
 
 For OpenAI-compatible endpoints that use older Chat Completions API:
@@ -236,6 +269,20 @@ let response = try await session.respond {
 }
 ```
 
+You can include images with your prompt.
+You can point to remote URLs or construct from image data:
+
+```swift
+let response = try await session.respond(
+    to: "Explain the key parts of this diagram",
+    image: .init(
+        data: try Data(contentsOf: URL(fileURLWithPath: "/path/to/diagram.png")),
+        mimeType: "image/png"
+    )
+)
+print(response.content)
+```
+
 ### Google Gemini
 
 Uses the [Gemini API](https://ai.google.dev/api/generate-content) with Gemini models:
@@ -250,6 +297,16 @@ let session = LanguageModelSession(model: model, tools: [WeatherTool()])
 let response = try await session.respond {
     Prompt("What's the weather like in Tokyo?")
 }
+```
+
+Send images with your prompt using remote or local sources:
+
+```swift
+let response = try await session.respond(
+    to: "Identify the plants in this photo",
+    image: .init(url: URL(string: "https://example.com/garden.jpg")!)
+)
+print(response.content)
 ```
 
 Gemini models use an internal ["thinking process"](https://ai.google.dev/gemini-api/docs/thinking)
@@ -300,11 +357,12 @@ let model = GeminiLanguageModel(
 
 ### Ollama
 
-Run models locally via Ollama's [HTTP API](https://github.com/ollama/ollama/blob/main/docs/api.md):
+Run models locally via Ollama's
+[HTTP API](https://github.com/ollama/ollama/blob/main/docs/api.md):
 
 ```swift
 // Default: connects to http://localhost:11434
-let model = OllamaLanguageModel(model: "qwen3")
+let model = OllamaLanguageModel(model: "qwen3") // `ollama pull qwen3:8b`
 
 // Custom endpoint
 let model = OllamaLanguageModel(
@@ -318,7 +376,22 @@ let response = try await session.respond {
 }
 ```
 
-First, pull the model: `ollama pull qwen3:0.6b`
+For local models, make sure you’re using a vision‑capable model
+(for example, a `-vl` variant).
+You can combine multiple images:
+
+```swift
+let model = OllamaLanguageModel(model: "qwen3-vl") // `ollama pull qwen3-vl:8b`
+let session = LanguageModelSession(model: model)
+let response = try await session.respond(
+    to: "Compare these posters and summarize their differences",
+    images: [
+        .init(url: URL(string: "https://example.com/poster1.jpg")!),
+        .init(url: URL(fileURLWithPath: "/path/to/poster2.jpg"))
+    ]
+)
+print(response.content)
+```
 
 ## Testing
 

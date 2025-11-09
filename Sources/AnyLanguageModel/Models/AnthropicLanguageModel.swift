@@ -100,8 +100,9 @@ public struct AnthropicLanguageModel: LanguageModel {
         let url = baseURL.appendingPathComponent("v1/messages")
         let headers = buildHeaders()
 
+        let userSegments = extractPromptSegments(from: session, fallbackText: prompt.description)
         let messages = [
-            AnthropicMessage(role: .user, content: [.text(.init(text: prompt.description))])
+            AnthropicMessage(role: .user, content: convertSegmentsToAnthropicContent(userSegments))
         ]
 
         // Convert available tools to Anthropic format
@@ -170,8 +171,9 @@ public struct AnthropicLanguageModel: LanguageModel {
             fatalError("AnthropicLanguageModel only supports generating String content")
         }
 
+        let userSegments = extractPromptSegments(from: session, fallbackText: prompt.description)
         let messages = [
-            AnthropicMessage(role: .user, content: [.text(.init(text: prompt.description))])
+            AnthropicMessage(role: .user, content: convertSegmentsToAnthropicContent(userSegments))
         ]
 
         let url = baseURL.appendingPathComponent("v1/messages")
@@ -383,11 +385,12 @@ private struct AnthropicMessage: Codable, Sendable {
 
 private enum AnthropicContent: Codable, Sendable {
     case text(AnthropicText)
+    case image(AnthropicImage)
     case toolUse(AnthropicToolUse)
 
     enum CodingKeys: String, CodingKey { case type }
 
-    enum ContentType: String, Codable { case text = "text", toolUse = "tool_use" }
+    enum ContentType: String, Codable { case text = "text", image = "image", toolUse = "tool_use" }
 
     init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -395,6 +398,8 @@ private enum AnthropicContent: Codable, Sendable {
         switch type {
         case .text:
             self = .text(try AnthropicText(from: decoder))
+        case .image:
+            self = .image(try AnthropicImage(from: decoder))
         case .toolUse:
             self = .toolUse(try AnthropicToolUse(from: decoder))
         }
@@ -403,6 +408,7 @@ private enum AnthropicContent: Codable, Sendable {
     func encode(to encoder: any Encoder) throws {
         switch self {
         case .text(let t): try t.encode(to: encoder)
+        case .image(let i): try i.encode(to: encoder)
         case .toolUse(let u): try u.encode(to: encoder)
         }
     }
@@ -416,6 +422,77 @@ private struct AnthropicText: Codable, Sendable {
         self.type = "text"
         self.text = text
     }
+}
+
+private struct AnthropicImage: Codable, Sendable {
+    struct Source: Codable, Sendable {
+        let type: String
+        let mediaType: String?
+        let data: String?
+        let url: String?
+
+        enum CodingKeys: String, CodingKey {
+            case type
+            case mediaType = "media_type"
+            case data
+            case url
+        }
+    }
+
+    let type: String
+    let source: Source
+
+    init(base64Data: String, mimeType: String) {
+        self.type = "image"
+        self.source = Source(type: "base64", mediaType: mimeType, data: base64Data, url: nil)
+    }
+
+    init(url: String) {
+        self.type = "image"
+        self.source = Source(type: "url", mediaType: nil, data: nil, url: url)
+    }
+}
+
+private func convertSegmentsToAnthropicContent(_ segments: [Transcript.Segment]) -> [AnthropicContent] {
+    var blocks: [AnthropicContent] = []
+    blocks.reserveCapacity(segments.count)
+    for segment in segments {
+        switch segment {
+        case .text(let t):
+            blocks.append(.text(AnthropicText(text: t.content)))
+        case .structure(let s):
+            blocks.append(.text(AnthropicText(text: s.content.jsonString)))
+        case .image(let img):
+            switch img.source {
+            case .url(let url):
+                blocks.append(.image(AnthropicImage(url: url.absoluteString)))
+            case .data(let data, let mimeType):
+                blocks.append(.image(AnthropicImage(base64Data: data.base64EncodedString(), mimeType: mimeType)))
+            }
+        }
+    }
+    return blocks
+}
+
+private func extractPromptSegments(from session: LanguageModelSession, fallbackText: String) -> [Transcript.Segment] {
+    for entry in session.transcript.reversed() {
+        if case .prompt(let p) = entry {
+            // Skip prompts that are effectively empty (single empty text block)
+            let hasMeaningfulContent = p.segments.contains { segment in
+                switch segment {
+                case .text(let t):
+                    return !t.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                case .structure:
+                    return true
+                case .image:
+                    return true
+                }
+            }
+            if hasMeaningfulContent { return p.segments }
+            // Otherwise continue searching older entries
+        }
+    }
+    return [.text(.init(content: fallbackText))]
 }
 
 private struct AnthropicToolUse: Codable, Sendable {

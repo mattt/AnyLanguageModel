@@ -1,6 +1,19 @@
 import Foundation
+
+#if canImport(UIKit)
+    import UIKit
+    import CoreImage
+#endif
+
+#if canImport(AppKit)
+    import AppKit
+    import CoreImage
+#endif
+
 #if MLX
     import MLXLMCommon
+    import MLX
+    import MLXVLM
     import Tokenizers
 
     /// A language model that runs locally using MLX.
@@ -38,8 +51,7 @@ import Foundation
                 fatalError("MLXLanguageModel only supports generating String content")
             }
 
-            // Load model context via MLXLMCommon
-            let context = try await MLXLMCommon.loadModel(id: modelId)
+            let context = try await loadModel(id: modelId)
 
             // Convert session tools to MLX ToolSpec format
             let toolSpecs: [ToolSpec]? =
@@ -53,7 +65,9 @@ import Foundation
             let generateParameters = toGenerateParameters(options)
 
             // Start with user prompt
-            var chat: [MLXLMCommon.Chat.Message] = [.user(prompt.description)]
+            let userSegments = extractPromptSegments(from: session, fallbackText: prompt.description)
+            let userMessage = convertSegmentsToMLXMessage(userSegments)
+            var chat: [MLXLMCommon.Chat.Message] = [userMessage]
             var allTextChunks: [String] = []
             var allEntries: [Transcript.Entry] = []
 
@@ -62,7 +76,8 @@ import Foundation
                 // Build user input with current chat history and tools
                 let userInput = MLXLMCommon.UserInput(
                     chat: chat,
-                    tools: toolSpecs
+                    processing: .init(resize: .init(width: 512, height: 512)),
+                    tools: toolSpecs,
                 )
                 let lmInput = try await context.processor.prepare(input: userInput)
 
@@ -162,6 +177,56 @@ import Foundation
             repetitionPenalty: nil,
             repetitionContextSize: 20
         )
+    }
+
+    // MARK: - Segment Extraction
+
+    private func extractPromptSegments(from session: LanguageModelSession, fallbackText: String) -> [Transcript.Segment]
+    {
+        // Prefer the most recent Transcript.Prompt entry if present
+        for entry in session.transcript.reversed() {
+            if case .prompt(let p) = entry {
+                return p.segments
+            }
+        }
+        return [.text(.init(content: fallbackText))]
+    }
+
+    private func convertSegmentsToMLXMessage(_ segments: [Transcript.Segment]) -> MLXLMCommon.Chat.Message {
+        var textParts: [String] = []
+        var images: [MLXLMCommon.UserInput.Image] = []
+
+        for segment in segments {
+            switch segment {
+            case .text(let text):
+                textParts.append(text.content)
+            case .structure(let structured):
+                textParts.append(structured.content.jsonString)
+            case .image(let imageSegment):
+                switch imageSegment.source {
+                case .url(let url):
+                    images.append(.url(url))
+                case .data(let data, _):
+                    #if canImport(UIKit)
+                        if let uiImage = UIKit.UIImage(data: data),
+                            let ciImage = CIImage(image: uiImage)
+                        {
+                            images.append(.ciImage(ciImage))
+                        }
+                    #elseif canImport(AppKit)
+                        if let nsImage = AppKit.NSImage(data: data),
+                            let cgImage = nsImage.cgImage(forProposedRect: nil, context: nil, hints: nil)
+                        {
+                            let ciImage = CIImage(cgImage: cgImage)
+                            images.append(.ciImage(ciImage))
+                        }
+                    #endif
+                }
+            }
+        }
+
+        let content = textParts.joined(separator: "\n")
+        return MLXLMCommon.Chat.Message(role: .user, content: content, images: images)
     }
 
     // MARK: - Tool Conversion
@@ -267,6 +332,9 @@ import Foundation
             case .structure(let structuredSegment):
                 // structured content already has jsonString property
                 textParts.append(structuredSegment.content.jsonString)
+            case .image:
+                // Image segments are not supported in MLX tool output
+                break
             }
         }
         return textParts.joined(separator: "\n")
