@@ -56,6 +56,13 @@ print(response.content)
 - Swift 6.1+
 - iOS 17.0+ / macOS 14.0+ / visionOS 1.0+
 
+> [!IMPORTANT]
+> A bug in Xcode 26 may cause build errors
+> when targeting macOS 15 / iOS 18 or earlier
+> (e.g. `Conformance of 'String' to 'Generable' is only available in macOS 26.0 or newer`).
+> As a workaround, build your project with Xcode 16.
+> For more information, see [issue #15](https://github.com/mattt/AnyLanguageModel/issues/15).
+
 ## Installation
 
 Add this package to your `Package.swift`:
