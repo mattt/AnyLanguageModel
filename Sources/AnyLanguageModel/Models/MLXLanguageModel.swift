@@ -163,19 +163,6 @@ import Foundation
         }
     }
 
-    /// Errors that can occur when working with MLX language models.
-    public enum MLXLanguageModelError: LocalizedError {
-        /// Image segments are not supported in MLXLanguageModel
-        case unsupportedFeature
-
-        public var errorDescription: String? {
-            switch self {
-            case .unsupportedFeature:
-                return "This MLXLanguageModel does not support image segments"
-            }
-        }
-    }
-
     // MARK: - Options Mapping
 
     private func toGenerateParameters(_ options: GenerationOptions) -> MLXLMCommon.GenerateParameters {
