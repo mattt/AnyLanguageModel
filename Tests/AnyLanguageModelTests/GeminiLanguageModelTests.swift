@@ -119,4 +119,32 @@ struct GeminiLanguageModelTests {
         let response = try await session.respond(to: "What coffee shops are nearby?")
         #expect(!response.content.isEmpty)
     }
+
+    @Test func multimodalWithImageURL() async throws {
+        let transcript = Transcript(entries: [
+            .prompt(
+                Transcript.Prompt(segments: [
+                    .text(.init(content: "Describe this image")),
+                    .image(.init(url: testImageURL)),
+                ])
+            )
+        ])
+        let session = LanguageModelSession(model: model, transcript: transcript)
+        let response = try await session.respond(to: "")
+        #expect(!response.content.isEmpty)
+    }
+
+    @Test func multimodalWithImageData() async throws {
+        let transcript = Transcript(entries: [
+            .prompt(
+                Transcript.Prompt(segments: [
+                    .text(.init(content: "Describe this image")),
+                    .image(.init(data: testImageData, mimeType: "image/png")),
+                ])
+            )
+        ])
+        let session = LanguageModelSession(model: model, transcript: transcript)
+        let response = try await session.respond(to: "")
+        #expect(!response.content.isEmpty)
+    }
 }

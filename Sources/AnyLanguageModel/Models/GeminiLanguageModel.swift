@@ -97,8 +97,9 @@ public struct GeminiLanguageModel: LanguageModel {
             .appendingPathComponent("models/\(model):generateContent")
         let headers = buildHeaders()
 
+        let userSegments = extractPromptSegments(from: session, fallbackText: prompt.description)
         var contents = [
-            GeminiContent(role: .user, parts: [.text(GeminiTextPart(text: prompt.description))])
+            GeminiContent(role: .user, parts: convertSegmentsToGeminiParts(userSegments))
         ]
 
         let geminiTools = try buildTools(from: session.tools)
@@ -195,8 +196,9 @@ public struct GeminiLanguageModel: LanguageModel {
             fatalError("GeminiLanguageModel only supports generating String content")
         }
 
+        let userSegments = extractPromptSegments(from: session, fallbackText: prompt.description)
         let contents = [
-            GeminiContent(role: .user, parts: [.text(GeminiTextPart(text: prompt.description))])
+            GeminiContent(role: .user, parts: convertSegmentsToGeminiParts(userSegments))
         ]
 
         var streamURL =
@@ -442,6 +444,9 @@ private func toJSONValue(_ toolOutput: Transcript.ToolOutput) throws -> [String:
             if let jsonString = String(data: data, encoding: .utf8) {
                 result["result"] = .string(jsonString)
             }
+        case .image:
+            // Ignore images in tool outputs for Gemini conversion
+            break
         }
     }
 
@@ -511,12 +516,16 @@ private enum GeminiPart: Codable, Sendable {
     case text(GeminiTextPart)
     case functionCall(GeminiFunctionCall)
     case functionResponse(GeminiFunctionResponse)
+    case inlineData(GeminiInlineData)
+    case fileData(GeminiFileData)
 
     enum CodingKeys: String, CodingKey {
         case text
         case functionCall
         case functionResponse
         case thoughtSignature
+        case inlineData
+        case fileData
     }
 
     init(from decoder: any Decoder) throws {
@@ -530,6 +539,10 @@ private enum GeminiPart: Codable, Sendable {
             self = .functionCall(try container.decode(GeminiFunctionCall.self, forKey: .functionCall))
         } else if container.contains(.functionResponse) {
             self = .functionResponse(try container.decode(GeminiFunctionResponse.self, forKey: .functionResponse))
+        } else if container.contains(.inlineData) {
+            self = .inlineData(try container.decode(GeminiInlineData.self, forKey: .inlineData))
+        } else if container.contains(.fileData) {
+            self = .fileData(try container.decode(GeminiFileData.self, forKey: .fileData))
         } else {
             throw DecodingError.dataCorrupted(
                 DecodingError.Context(
@@ -549,12 +562,64 @@ private enum GeminiPart: Codable, Sendable {
             try container.encode(call, forKey: .functionCall)
         case .functionResponse(let response):
             try container.encode(response, forKey: .functionResponse)
+        case .inlineData(let data):
+            try container.encode(data, forKey: .inlineData)
+        case .fileData(let data):
+            try container.encode(data, forKey: .fileData)
         }
     }
 }
 
 private struct GeminiTextPart: Codable, Sendable {
     let text: String
+}
+
+private struct GeminiInlineData: Codable, Sendable {
+    let mimeType: String
+    let data: String
+
+    enum CodingKeys: String, CodingKey {
+        case mimeType = "mime_type"
+        case data
+    }
+}
+
+private struct GeminiFileData: Codable, Sendable {
+    let fileURI: String
+
+    enum CodingKeys: String, CodingKey {
+        case fileURI = "file_uri"
+    }
+}
+
+private func convertSegmentsToGeminiParts(_ segments: [Transcript.Segment]) -> [GeminiPart] {
+    var parts: [GeminiPart] = []
+    parts.reserveCapacity(segments.count)
+    for segment in segments {
+        switch segment {
+        case .text(let t):
+            parts.append(.text(GeminiTextPart(text: t.content)))
+        case .structure(let s):
+            parts.append(.text(GeminiTextPart(text: s.content.jsonString)))
+        case .image(let img):
+            switch img.source {
+            case .data(let data, let mime):
+                parts.append(.inlineData(GeminiInlineData(mimeType: mime, data: data.base64EncodedString())))
+            case .url(let url):
+                parts.append(.fileData(GeminiFileData(fileURI: url.absoluteString)))
+            }
+        }
+    }
+    return parts
+}
+
+private func extractPromptSegments(from session: LanguageModelSession, fallbackText: String) -> [Transcript.Segment] {
+    for entry in session.transcript.reversed() {
+        if case .prompt(let p) = entry {
+            return p.segments
+        }
+    }
+    return [.text(.init(content: fallbackText))]
 }
 
 private struct GeminiFunctionCall: Codable, Sendable {

@@ -133,5 +133,39 @@ import Testing
             // Note: We can't easily test token count without access to the tokenizer
             // but we can verify the response is not empty
         }
+
+        @Test @available(macOS 15.0, iOS 18.0, tvOS 18.0, visionOS 2.0, watchOS 11.0, *)
+        func multimodal_rejectsImageURL() async throws {
+            let model = try await getModel()
+            let session = LanguageModelSession(model: model)
+            let prompt = Transcript.Prompt(segments: [
+                .text(.init(content: "Describe this image")),
+                .image(.init(url: testImageURL)),
+            ])
+            do {
+                _ = try await session.respond(to: prompt)
+                Issue.record("Expected error when image segments are present")
+            } catch {
+                // CoreMLUnsupportedFeatureError is a private struct, so we just check that an error is thrown
+                #expect(true)
+            }
+        }
+
+        @Test @available(macOS 15.0, iOS 18.0, tvOS 18.0, visionOS 2.0, watchOS 11.0, *)
+        func multimodal_rejectsImageData() async throws {
+            let model = try await getModel()
+            let session = LanguageModelSession(model: model)
+            let prompt = Transcript.Prompt(segments: [
+                .text(.init(content: "Describe this image")),
+                .image(.init(data: testImageData, mimeType: "image/jpeg")),
+            ])
+            do {
+                _ = try await session.respond(to: prompt)
+                Issue.record("Expected error when image segments are present")
+            } catch {
+                // CoreMLUnsupportedFeatureError is a private struct, so we just check that an error is thrown
+                #expect(true)
+            }
+        }
     }
 #endif  // CoreML

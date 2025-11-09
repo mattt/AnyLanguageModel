@@ -139,5 +139,35 @@ import Testing
             )
             #expect(!response.content.isEmpty)
         }
+
+        @Test func multimodal_rejectsImageURL() async throws {
+            let session = LanguageModelSession(model: model)
+            let prompt = Transcript.Prompt(segments: [
+                .text(.init(content: "Describe this image")),
+                .image(.init(url: testImageURL)),
+            ])
+            do {
+                _ = try await session.respond(to: prompt)
+                Issue.record("Expected error when image segments are present")
+            } catch let error as LlamaLanguageModelError {
+                #expect(error == .unsupportedFeature)
+            }
+        }
+
+        @Test func multimodal_rejectsImageData() async throws {
+            let session = LanguageModelSession(model: model)
+
+            let data = Data(png1x1)
+            let prompt = Transcript.Prompt(segments: [
+                .text(.init(content: "Describe this image")),
+                .image(.init(data: data, mimeType: "image/png")),
+            ])
+            do {
+                _ = try await session.respond(to: prompt)
+                Issue.record("Expected error when image segments are present")
+            } catch let error as LlamaLanguageModelError {
+                #expect(error == .unsupportedFeature)
+            }
+        }
     }
 #endif  // Llama
