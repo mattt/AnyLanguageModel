@@ -1,10 +1,13 @@
 import Foundation
-import CoreImage
+
 #if canImport(UIKit)
     import UIKit
+    import CoreImage
 #endif
+
 #if canImport(AppKit)
     import AppKit
+    import CoreImage
 #endif
 
 #if MLX
@@ -193,7 +196,8 @@ import CoreImage
 
     // MARK: - Segment Extraction
 
-    private func extractPromptSegments(from session: LanguageModelSession, fallbackText: String) -> [Transcript.Segment] {
+    private func extractPromptSegments(from session: LanguageModelSession, fallbackText: String) -> [Transcript.Segment]
+    {
         // Prefer the most recent Transcript.Prompt entry if present
         for entry in session.transcript.reversed() {
             if case .prompt(let p) = entry {
@@ -220,12 +224,14 @@ import CoreImage
                 case .data(let data, _):
                     #if canImport(UIKit)
                         if let uiImage = UIKit.UIImage(data: data),
-                           let ciImage = CIImage(image: uiImage) {
+                            let ciImage = CIImage(image: uiImage)
+                        {
                             images.append(.ciImage(ciImage))
                         }
                     #elseif canImport(AppKit)
                         if let nsImage = AppKit.NSImage(data: data),
-                           let cgImage = nsImage.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+                            let cgImage = nsImage.cgImage(forProposedRect: nil, context: nil, hints: nil)
+                        {
                             let ciImage = CIImage(cgImage: cgImage)
                             images.append(.ciImage(ciImage))
                         }
