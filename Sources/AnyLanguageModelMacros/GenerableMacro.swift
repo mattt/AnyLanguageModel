@@ -73,16 +73,11 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
             extendedType: type,
             inheritanceClause: InheritanceClauseSyntax(
                 inheritedTypes: InheritedTypeListSyntax([
-                    InheritedTypeSyntax(
-                        type: TypeSyntax("Generable")
-                    )
+                    InheritedTypeSyntax(type: TypeSyntax(stringLiteral: "Generable"))
                 ])
             ),
-            memberBlock: MemberBlockSyntax(
-                members: MemberBlockItemListSyntax([])
-            )
+            memberBlock: MemberBlockSyntax(members: [])
         )
-
         return [extensionDecl]
     }
 
@@ -263,9 +258,9 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
         if properties.isEmpty {
             return DeclSyntax(
                 stringLiteral: """
-                    public init(_ generatedContent: GeneratedContent) throws {
+                    nonisolated public init(_ generatedContent: GeneratedContent) throws {
                         self._rawGeneratedContent = generatedContent
-                        
+
                         guard case .structure = generatedContent.kind else {
                             throw DecodingError.typeMismatch(
                                 \(structName).self,
@@ -278,16 +273,16 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
         } else {
             return DeclSyntax(
                 stringLiteral: """
-                    public init(_ generatedContent: GeneratedContent) throws {
+                    nonisolated public init(_ generatedContent: GeneratedContent) throws {
                         self._rawGeneratedContent = generatedContent
-                        
+
                         guard case .structure(let properties, _) = generatedContent.kind else {
                             throw DecodingError.typeMismatch(
                                 \(structName).self,
                                 DecodingError.Context(codingPath: [], debugDescription: "Expected structure for \(structName)")
                             )
                         }
-                        
+
                         \(propertyExtractions)
                     }
                     """
@@ -489,9 +484,9 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
         if properties.isEmpty {
             return DeclSyntax(
                 stringLiteral: """
-                    public var generatedContent: GeneratedContent {
+                    nonisolated public var generatedContent: GeneratedContent {
                         let properties: [String: GeneratedContent] = [:]
-                        
+
                         return GeneratedContent(
                             kind: .structure(
                                 properties: properties,
@@ -504,10 +499,10 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
         } else {
             return DeclSyntax(
                 stringLiteral: """
-                    public var generatedContent: GeneratedContent {
+                    nonisolated public var generatedContent: GeneratedContent {
                         var properties: [String: GeneratedContent] = [:]
                         \(propertyConversions)
-                        
+
                         return GeneratedContent(
                             kind: .structure(
                                 properties: properties,
@@ -565,8 +560,7 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
 
         return DeclSyntax(
             stringLiteral: """
-                public static var generationSchema: GenerationSchema {
-                    
+                nonisolated public static var generationSchema: GenerationSchema {
                     return GenerationSchema(
                         type: Self.self,
                         description: \(description.map { "\"\($0)\"" } ?? "\"Generated \(structName)\""),
@@ -580,7 +574,7 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
     private static func generateAsPartiallyGeneratedMethod(structName: String) -> DeclSyntax {
         return DeclSyntax(
             stringLiteral: """
-                public func asPartiallyGenerated() -> PartiallyGenerated {
+                nonisolated public func asPartiallyGenerated() -> PartiallyGenerated {
                     return try! PartiallyGenerated(_rawGeneratedContent)
                 }
                 """
@@ -590,7 +584,7 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
     private static func generateAsPartiallyGeneratedMethodForEnum(enumName: String) -> DeclSyntax {
         return DeclSyntax(
             stringLiteral: """
-                public func asPartiallyGenerated() -> \(enumName) {
+                nonisolated public func asPartiallyGenerated() -> \(enumName) {
                     return self
                 }
                 """
@@ -618,19 +612,19 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
             stringLiteral: """
                 public struct PartiallyGenerated: Sendable, ConvertibleFromGeneratedContent {
                     \(optionalProperties)
-                    
+
                     private let rawContent: GeneratedContent
-                    
+
                     public init(_ generatedContent: GeneratedContent) throws {
                         self.rawContent = generatedContent
-                        
+
                         if \(properties.isEmpty ? "case .structure = generatedContent.kind" : "case .structure(let properties, _) = generatedContent.kind") {
                             \(propertyExtractions)
                         } else {
                             \(properties.map { "self.\($0.name) = nil" }.joined(separator: "\n                    "))
                         }
                     }
-                    
+
                     public var generatedContent: GeneratedContent {
                         return rawContent
                     }
@@ -642,7 +636,7 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
     private static func generateInstructionsRepresentationProperty() -> DeclSyntax {
         return DeclSyntax(
             stringLiteral: """
-                public var instructionsRepresentation: Instructions {
+                nonisolated public var instructionsRepresentation: Instructions {
                     return Instructions(self.generatedContent.jsonString)
                 }
                 """
@@ -652,7 +646,7 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
     private static func generatePromptRepresentationProperty() -> DeclSyntax {
         return DeclSyntax(
             stringLiteral: """
-                public var promptRepresentation: Prompt {
+                nonisolated public var promptRepresentation: Prompt {
                     return Prompt(self.generatedContent.jsonString)
                 }
                 """
@@ -720,8 +714,7 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
 
             return DeclSyntax(
                 stringLiteral: """
-                    public init(_ generatedContent: GeneratedContent) throws {
-                        
+                    nonisolated public init(_ generatedContent: GeneratedContent) throws {
                         do {
                             guard case .structure(let properties, _) = generatedContent.kind else {
                                 throw DecodingError.typeMismatch(
@@ -729,7 +722,7 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
                                     DecodingError.Context(codingPath: [], debugDescription: "Expected structure for enum \(enumName)")
                                 )
                             }
-                            
+
                             guard case .string(let caseValue) = properties["case"]?.kind else {
                                 struct Key: CodingKey {
                                     var stringValue: String
@@ -742,9 +735,9 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
                                     DecodingError.Context(codingPath: [], debugDescription: "Missing 'case' property in enum data for \(enumName)")
                                 )
                             }
-                            
+
                             let valueContent = properties["value"]
-                            
+
                             switch caseValue {
                             \(switchCases)
                             default:
@@ -775,7 +768,7 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
 
             return DeclSyntax(
                 stringLiteral: """
-                    public init(_ generatedContent: GeneratedContent) throws {
+                    nonisolated public init(_ generatedContent: GeneratedContent) throws {
                         guard case .string(let value) = generatedContent.kind else {
                             throw DecodingError.typeMismatch(
                                 \(enumName).self,
@@ -783,7 +776,7 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
                             )
                         }
                         let trimmedValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
-                        
+
                         switch trimmedValue {
                         \(switchCases)
                         default:
@@ -942,7 +935,7 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
 
             return DeclSyntax(
                 stringLiteral: """
-                    public var generatedContent: GeneratedContent {
+                    nonisolated public var generatedContent: GeneratedContent {
                         switch self {
                         \(switchCases)
                         }
@@ -956,7 +949,7 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
 
             return DeclSyntax(
                 stringLiteral: """
-                    public var generatedContent: GeneratedContent {
+                    nonisolated public var generatedContent: GeneratedContent {
                         switch self {
                         \(switchCases)
                         }
@@ -1059,8 +1052,7 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
 
             return DeclSyntax(
                 stringLiteral: """
-                    public static var generationSchema: GenerationSchema {
-                        
+                    nonisolated public static var generationSchema: GenerationSchema {
                         return GenerationSchema(
                             type: Self.self,
                             description: \(description.map { "\"\($0)\"" } ?? "\"Generated \(enumName)\""),
@@ -1077,8 +1069,7 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
 
             return DeclSyntax(
                 stringLiteral: """
-                    public static var generationSchema: GenerationSchema {
-                        
+                    nonisolated public static var generationSchema: GenerationSchema {
                         return GenerationSchema(
                             type: Self.self,
                             description: \(description.map { "\"\($0)\"" } ?? "\"Generated \(enumName)\""),
