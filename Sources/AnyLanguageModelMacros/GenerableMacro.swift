@@ -69,7 +69,10 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
         conformingTo protocols: [TypeSyntax],
         in context: some MacroExpansionContext
     ) throws -> [ExtensionDeclSyntax] {
+        let nonisolatedModifier = DeclModifierSyntax(name: .keyword(.nonisolated))
+
         let extensionDecl = ExtensionDeclSyntax(
+            modifiers: DeclModifierListSyntax([nonisolatedModifier]),
             extendedType: type,
             inheritanceClause: InheritanceClauseSyntax(
                 inheritedTypes: InheritedTypeListSyntax([
