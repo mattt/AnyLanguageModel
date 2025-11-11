@@ -19,6 +19,7 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
 
             return [
                 generateRawContentProperty(),
+                generateMemberwiseInit(properties: properties),
                 generateInitFromGeneratedContent(structName: structName, properties: properties),
                 generateGeneratedContentProperty(
                     structName: structName,
@@ -246,6 +247,100 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
         return DeclSyntax(
             stringLiteral: """
                 private let _rawGeneratedContent: GeneratedContent
+                """
+        )
+    }
+
+    private static func generateMemberwiseInit(properties: [PropertyInfo]) -> DeclSyntax {
+        if properties.isEmpty {
+            return DeclSyntax(
+                stringLiteral: """
+                    nonisolated public init() {
+                        self._rawGeneratedContent = GeneratedContent(kind: .structure(properties: [:], orderedKeys: []))
+                    }
+                    """
+            )
+        }
+
+        let parameters = properties.map { prop in
+            "\(prop.name): \(prop.type)"
+        }.joined(separator: ", ")
+
+        let assignments = properties.map { prop in
+            "self.\(prop.name) = \(prop.name)"
+        }.joined(separator: "\n        ")
+
+        let propertyConversions = properties.map { prop in
+            let propName = prop.name
+            let propType = prop.type
+
+            if propType.hasSuffix("?") {
+                let baseType = String(propType.dropLast())
+                if baseType == "String" {
+                    return
+                        "properties[\"\(propName)\"] = \(propName).map { GeneratedContent($0) } ?? GeneratedContent(kind: .null)"
+                } else if baseType == "Int" || baseType == "Double" || baseType == "Float"
+                    || baseType == "Bool" || baseType == "Decimal"
+                {
+                    return
+                        "properties[\"\(propName)\"] = \(propName).map { $0.generatedContent } ?? GeneratedContent(kind: .null)"
+                } else if isDictionaryType(baseType) {
+                    return
+                        "properties[\"\(propName)\"] = \(propName).map { $0.generatedContent } ?? GeneratedContent(kind: .null)"
+                } else if baseType.hasPrefix("[") && baseType.hasSuffix("]") {
+                    return
+                        "properties[\"\(propName)\"] = \(propName).map { GeneratedContent(elements: $0) } ?? GeneratedContent(kind: .null)"
+                } else {
+                    return """
+                        if let value = \(propName) {
+                                    properties["\(propName)"] = value.generatedContent
+                                } else {
+                                    properties["\(propName)"] = GeneratedContent(kind: .null)
+                                }
+                        """
+                }
+            } else if isDictionaryType(propType) {
+                return "properties[\"\(propName)\"] = \(propName).generatedContent"
+            } else if propType.hasPrefix("[") && propType.hasSuffix("]") {
+                let elementType = String(propType.dropFirst().dropLast())
+                if elementType == "String" {
+                    return "properties[\"\(propName)\"] = GeneratedContent(elements: \(propName))"
+                } else if elementType == "Int" || elementType == "Double" || elementType == "Bool"
+                    || elementType == "Float" || elementType == "Decimal"
+                {
+                    return "properties[\"\(propName)\"] = GeneratedContent(elements: \(propName))"
+                } else {
+                    return "properties[\"\(propName)\"] = GeneratedContent(elements: \(propName))"
+                }
+            } else {
+                switch propType {
+                case "String":
+                    return "properties[\"\(propName)\"] = GeneratedContent(\(propName))"
+                case "Int", "Double", "Float", "Bool", "Decimal":
+                    return "properties[\"\(propName)\"] = \(propName).generatedContent"
+                default:
+                    return "properties[\"\(propName)\"] = \(propName).generatedContent"
+                }
+            }
+        }.joined(separator: "\n        ")
+
+        let orderedKeys = properties.map { "\"\($0.name)\"" }.joined(separator: ", ")
+
+        return DeclSyntax(
+            stringLiteral: """
+                nonisolated public init(\(parameters)) {
+                    \(assignments)
+                    
+                    var properties: [String: GeneratedContent] = [:]
+                    \(propertyConversions)
+                    
+                    self._rawGeneratedContent = GeneratedContent(
+                        kind: .structure(
+                            properties: properties,
+                            orderedKeys: [\(orderedKeys)]
+                        )
+                    )
+                }
                 """
         )
     }
