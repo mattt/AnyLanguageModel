@@ -25,9 +25,19 @@ private struct TestStructWithNewlines {
     var field: String
 }
 
+@Generable
+struct TestArguments {
+    @Guide(description: "A name field")
+    var name: String
+
+    @Guide(description: "An age field")
+    var age: Int
+}
+
 @Suite("Generable Macro")
 struct GenerableMacroTests {
-    @Test func multilineGuideDescription() async throws {
+    @Test("@Guide description with multiline string")
+    func multilineGuideDescription() async throws {
         let schema = TestStructWithMultilineDescription.generationSchema
         let encoder = JSONEncoder()
         let jsonData = try encoder.encode(schema)
@@ -41,7 +51,8 @@ struct GenerableMacroTests {
         #expect(decodedSchema.debugDescription.contains("object"))
     }
 
-    @Test func guideDescriptionWithSpecialCharacters() async throws {
+    @Test("@Guide description with special characters")
+    func guideDescriptionWithSpecialCharacters() async throws {
         let schema = TestStructWithSpecialCharacters.generationSchema
         let encoder = JSONEncoder()
         let jsonData = try encoder.encode(schema)
@@ -57,7 +68,8 @@ struct GenerableMacroTests {
         #expect(decodedSchema.debugDescription.contains("object"))
     }
 
-    @Test func guideDescriptionWithNewlines() async throws {
+    @Test("@Guide description with newlines")
+    func guideDescriptionWithNewlines() async throws {
         let schema = TestStructWithNewlines.generationSchema
         let encoder = JSONEncoder()
         let jsonData = try encoder.encode(schema)
@@ -78,9 +90,9 @@ struct GenerableMacroTests {
         var field: String
     }
 
-    /// Test to verify @Generable works correctly with MainActor isolation.
     @MainActor
-    @Test func mainActorIsolation() async throws {
+    @Test("@MainActor isolation")
+    func mainActorIsolation() async throws {
         let generatedContent = GeneratedContent(properties: [
             "field": "test value"
         ])
@@ -96,5 +108,31 @@ struct GenerableMacroTests {
 
         let partiallyGenerated = instance.asPartiallyGenerated()
         #expect(partiallyGenerated.field == "test value")
+    }
+
+    @Test("Memberwise initializer")
+    func memberwiseInit() throws {
+        // This is the natural Swift way to create instances
+        let args = TestArguments(name: "Alice", age: 30)
+
+        #expect(args.name == "Alice")
+        #expect(args.age == 30)
+
+        // The generatedContent should also be properly populated
+        let content = args.generatedContent
+        #expect(content.jsonString.contains("Alice"))
+        #expect(content.jsonString.contains("30"))
+    }
+
+    @Test("Create instance from GeneratedContent")
+    func fromGeneratedContent() throws {
+        let content = GeneratedContent(properties: [
+            "name": GeneratedContent("Bob"),
+            "age": GeneratedContent(kind: .number(25)),
+        ])
+
+        let args = try TestArguments(content)
+        #expect(args.name == "Bob")
+        #expect(args.age == 25)
     }
 }
