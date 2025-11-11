@@ -302,16 +302,7 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
             } else if isDictionaryType(propType) {
                 return "properties[\"\(propName)\"] = \(propName).generatedContent"
             } else if propType.hasPrefix("[") && propType.hasSuffix("]") {
-                let elementType = String(propType.dropFirst().dropLast())
-                if elementType == "String" {
-                    return "properties[\"\(propName)\"] = GeneratedContent(elements: \(propName))"
-                } else if elementType == "Int" || elementType == "Double" || elementType == "Bool"
-                    || elementType == "Float" || elementType == "Decimal"
-                {
-                    return "properties[\"\(propName)\"] = GeneratedContent(elements: \(propName))"
-                } else {
-                    return "properties[\"\(propName)\"] = GeneratedContent(elements: \(propName))"
-                }
+                return "properties[\"\(propName)\"] = GeneratedContent(elements: \(propName))"
             } else {
                 switch propType {
                 case "String":
@@ -555,16 +546,7 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
             } else if isDictionaryType(propType) {
                 return "properties[\"\(propName)\"] = \(propName).generatedContent"
             } else if propType.hasPrefix("[") && propType.hasSuffix("]") {
-                let elementType = String(propType.dropFirst().dropLast())
-                if elementType == "String" {
-                    return "properties[\"\(propName)\"] = GeneratedContent(elements: \(propName))"
-                } else if elementType == "Int" || elementType == "Double" || elementType == "Bool"
-                    || elementType == "Float" || elementType == "Decimal"
-                {
-                    return "properties[\"\(propName)\"] = GeneratedContent(elements: \(propName))"
-                } else {
-                    return "properties[\"\(propName)\"] = GeneratedContent(elements: \(propName))"
-                }
+                return "properties[\"\(propName)\"] = GeneratedContent(elements: \(propName))"
             } else {
                 switch propType {
                 case "String":
