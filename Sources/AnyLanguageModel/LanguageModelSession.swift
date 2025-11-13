@@ -118,7 +118,7 @@ public final class LanguageModelSession: @unchecked Sendable {
             let stream = upstream
             Task {
                 // Add prompt to transcript when stream starts
-                Task { @MainActor in
+                await MainActor.run {
                     session.transcript.append(promptEntry)
                 }
 
@@ -131,7 +131,7 @@ public final class LanguageModelSession: @unchecked Sendable {
                     }
                     continuation.finish()
 
-                    // Add response to transcript after stream completes (non-blocking)
+                    // Add response to transcript after stream completes
                     if let lastSnapshot {
                         // Extract text content from the generated content
                         let textContent: String
@@ -147,7 +147,7 @@ public final class LanguageModelSession: @unchecked Sendable {
                                 segments: [.text(.init(content: textContent))]
                             )
                         )
-                        Task { @MainActor in
+                        await MainActor.run {
                             session.transcript.append(responseEntry)
                         }
                     }
