@@ -164,6 +164,7 @@ extension URLSession {
 
                     for try await byte in asyncBytes {
                         await parser.consume(byte)
+
                         while let event = await parser.getNextEvent() {
                             guard let data = event.data.data(using: .utf8) else { continue }
 
@@ -173,15 +174,7 @@ extension URLSession {
                         }
                     }
                     await parser.finish()
-
-                    while let event = await parser.getNextEvent() {
-                        guard let data = event.data.data(using: .utf8) else { continue }
-
-                        if let decoded = try? decoder.decode(T.self, from: data) {
-                            continuation.yield(decoded)
-                        }
-                    }
-
+                    
                     continuation.finish()
                 } catch {
                     continuation.finish(throwing: error)
