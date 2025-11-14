@@ -67,7 +67,7 @@ Add this package to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/mattt/AnyLanguageModel.git", from: "0.3.0")
+    .package(url: "https://github.com/mattt/AnyLanguageModel.git", from: "0.4.0")
 ]
 ```
 
@@ -112,8 +112,17 @@ Your Xcode project can then add this internal package as a local dependency.
 For example,
 to use AnyLanguageModel with MLX support in an Xcode app project:
 
-**1. Create a local Swift package** 
-(e.g., `MyAppKit/Package.swift`):
+**1. Create a local Swift package**:
+
+```shell
+# In root directory containing Xcode project
+mkdir -p Packages/MyAppKit
+cd Packages/MyAppKit
+swift package init
+```
+
+**2. Specify AnyLanguageModel package dependency**
+(in `Packages/MyAppKit/Package.swift`):
 
 ```swift
 // swift-tools-version: 6.1
@@ -135,7 +144,7 @@ let package = Package(
     dependencies: [
         .package(
             url: "https://github.com/mattt/AnyLanguageModel", 
-            branch: "main", 
+            from: "0.4.0",
             traits: ["MLX"]
         )
     ],
@@ -150,19 +159,21 @@ let package = Package(
 )
 ```
 
-**2. Export the AnyLanguageModel module**
-(in `MyAppKit/Sources/MyAppKit/Export.swift`):
+**3. Export the AnyLanguageModel module**
+(in `Sources/MyAppKit/Export.swift`):
 
 ```swift
 @_exported import AnyLanguageModel
 ```
 
-**3. Add the local package to your Xcode project** 
+**4. Add the local package to your Xcode project** 
 as a dependency using "Add Local..." in the project settings.
 
-Your app can now import `MyAppKit` to access `AnyLanguageModel` with MLX support enabled.
+Your app can now import `AnyLanguageModel` with MLX support enabled.
 
-For a working example of this, see the [chat-ui-swift](https://github.com/mattt/chat-ui-swift) project.
+> [!TIP]
+> For a working example of package traits in an Xcode app project, 
+> see [chat-ui-swift](https://github.com/mattt/chat-ui-swift).
 
 ## Usage
 
