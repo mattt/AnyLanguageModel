@@ -11,8 +11,6 @@ All you need to do is change your import statement:
 ```
 
 ```swift
-import AnyLanguageModel
-
 struct WeatherTool: Tool {
     let name = "getWeather"
     let description = "Retrieve the latest weather information for a city"
@@ -69,11 +67,11 @@ Add this package to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/mattt/AnyLanguageModel.git", from: "0.3.0")
+    .package(url: "https://github.com/mattt/AnyLanguageModel", from: "0.4.0")
 ]
 ```
 
-### Conditional Dependencies
+### Package Traits
 
 AnyLanguageModel uses [Swift 6.1 traits](https://docs.swift.org/swiftpm/documentation/packagemanagerdocs/packagetraits/)
 to conditionally include heavy dependencies,
@@ -103,6 +101,83 @@ dependencies: [
 ]
 ```
 
+### Using Traits in Xcode Projects
+
+Xcode doesn't yet provide a built-in way to declare package dependencies with traits.
+As a workaround,
+you can create an internal Swift package that acts as a shim,
+exporting the `AnyLanguageModel` module with the desired traits enabled.
+Your Xcode project can then add this internal package as a local dependency.
+
+For example,
+to use AnyLanguageModel with MLX support in an Xcode app project:
+
+**1. Create a local Swift package**
+(in root directory containing Xcode project):
+
+```shell
+mkdir -p Packages/MyAppKit
+cd Packages/MyAppKit
+swift package init
+```
+
+**2. Specify AnyLanguageModel package dependency**
+(in `Packages/MyAppKit/Package.swift`):
+
+```swift
+// swift-tools-version: 6.1
+import PackageDescription
+
+let package = Package(
+    name: "MyAppKit",
+    platforms: [
+        .macOS(.v14),
+        .iOS(.v17),
+        .visionOS(.v1),
+    ],
+    products: [
+        .library(
+            name: "MyAppKit",
+            targets: ["MyAppKit"]
+        )
+    ],
+    dependencies: [
+        .package(
+            url: "https://github.com/mattt/AnyLanguageModel",
+            from: "0.4.0",
+            traits: ["MLX"]
+        )
+    ],
+    targets: [
+        .target(
+            name: "MyAppKit",
+            dependencies: [
+                .product(name: "AnyLanguageModel", package: "AnyLanguageModel")
+            ]
+        )
+    ]
+)
+```
+
+**3. Export the AnyLanguageModel module**
+(in `Sources/MyAppKit/Export.swift`):
+
+```swift
+@_exported import AnyLanguageModel
+```
+
+**4. Add the local package to your Xcode project**:
+
+Open your project settings,
+navigate to the "Package Dependencies" tab,
+and click "+" → "Add Local..." to select the `Packages/MyAppKit` directory.
+
+Your app can now import `AnyLanguageModel` with MLX support enabled.
+
+> [!TIP]
+> For a working example of package traits in an Xcode app project,
+> see [chat-ui-swift](https://github.com/mattt/chat-ui-swift).
+
 ## Usage
 
 ### Apple Foundation Models
@@ -119,7 +194,7 @@ let response = try await session.respond {
 }
 ```
 
-> [!NOTE]  
+> [!NOTE]
 > Image inputs are not yet supported by Apple Foundation Models.
 
 ### Core ML
@@ -146,7 +221,7 @@ Enable the trait in Package.swift:
 )
 ```
 
-> [!NOTE]  
+> [!NOTE]
 > Image inputs are not currently supported with `CoreMLLanguageModel`.
 
 ### MLX
@@ -213,7 +288,7 @@ Enable the trait in Package.swift:
 )
 ```
 
-> [!NOTE]  
+> [!NOTE]
 > Image inputs are not currently supported with `LlamaLanguageModel`.
 
 ### OpenAI
@@ -424,3 +499,8 @@ export OPENAI_API_KEY=your_openai_key
 # Run all tests with traits enabled
 swift test --traits CoreML,MLX,Llama
 ```
+
+## License
+
+This project is available under the MIT license.
+See the LICENSE file for more info.
