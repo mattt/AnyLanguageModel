@@ -739,8 +739,22 @@ extension LanguageModelSession {
         init(stream: AsyncThrowingStream<Snapshot, any Error>) {
             // Fallback values when consumers call collect() before any snapshots arrive
             // These will be replaced by the last yielded snapshot during collect()
-            self.content = (try? Content(GeneratedContent(""))) ?? ("" as! Content)
-            self.rawContent = GeneratedContent("")
+            if Content.self == String.self {
+                self.content = "" as! Content
+                self.rawContent = GeneratedContent("")
+            } else {
+                // For structured types, create from empty properties dictionary
+                // We need to create an instance that can call asPartiallyGenerated() without crashing
+                let emptyContent = GeneratedContent(properties: [:])
+                if let instance = try? Content(emptyContent) {
+                    self.content = instance
+                } else {
+                    // Fallback: try with an empty string content
+                    let fallbackContent = GeneratedContent("")
+                    self.content = (try? Content(fallbackContent)) ?? ("" as! Content)
+                }
+                self.rawContent = emptyContent
+            }
             self.streaming = stream
         }
 

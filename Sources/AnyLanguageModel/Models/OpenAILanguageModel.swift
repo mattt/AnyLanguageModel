@@ -344,21 +344,18 @@ public struct OpenAILanguageModel: LanguageModel {
                                         raw = GeneratedContent(accumulatedText)
                                         content = (accumulatedText as! Content).asPartiallyGenerated()
                                     } else {
-                                        // Try to parse as JSON, falling back to string if incomplete
-                                        raw =
-                                            (try? GeneratedContent(json: accumulatedText))
-                                            ?? GeneratedContent(accumulatedText)
-                                        if let parsed = try? type.init(raw) {
-                                            content = parsed.asPartiallyGenerated()
+                                        // Try to parse as JSON for structured types
+                                        if let jsonContent = try? GeneratedContent(json: accumulatedText),
+                                           let _ = try? type.init(jsonContent) {
+                                            // Successfully parsed JSON into the structured type
+                                            raw = jsonContent
+                                            // Create PartiallyGenerated from the raw content
+                                            content = try? Content.PartiallyGenerated(jsonContent)
                                         } else {
-                                            // Fallback: try to create from empty properties, or skip this chunk
-                                            if let emptyParsed = try? type.init(GeneratedContent(properties: [:])) {
-                                                content = emptyParsed.asPartiallyGenerated()
-                                            } else {
-                                                // Last resort: skip this chunk
-                                                raw = GeneratedContent(accumulatedText)
-                                                content = nil
-                                            }
+                                            // Can't parse yet, try with empty content as placeholder
+                                            let emptyContent = GeneratedContent(properties: [:])
+                                            raw = emptyContent
+                                            content = try? Content.PartiallyGenerated(emptyContent)
                                         }
                                     }
 
@@ -435,21 +432,18 @@ public struct OpenAILanguageModel: LanguageModel {
                                             raw = GeneratedContent(accumulatedText)
                                             content = (accumulatedText as! Content).asPartiallyGenerated()
                                         } else {
-                                            // Try to parse as JSON, falling back to string if incomplete
-                                            raw =
-                                                (try? GeneratedContent(json: accumulatedText))
-                                                ?? GeneratedContent(accumulatedText)
-                                            if let parsed = try? type.init(raw) {
-                                                content = parsed.asPartiallyGenerated()
+                                            // Try to parse as JSON for structured types
+                                            if let jsonContent = try? GeneratedContent(json: accumulatedText),
+                                               let _ = try? type.init(jsonContent) {
+                                                // Successfully parsed JSON into the structured type
+                                                raw = jsonContent
+                                                // Create PartiallyGenerated from the raw content
+                                                content = try? Content.PartiallyGenerated(jsonContent)
                                             } else {
-                                                // Fallback: try to create from empty properties, or use string fallback
-                                                if let emptyParsed = try? type.init(GeneratedContent(properties: [:])) {
-                                                    content = emptyParsed.asPartiallyGenerated()
-                                                } else {
-                                                    // Last resort: skip this chunk
-                                                    raw = GeneratedContent(accumulatedText)
-                                                    content = nil
-                                                }
+                                                // Can't parse yet, try with empty content as placeholder
+                                                let emptyContent = GeneratedContent(properties: [:])
+                                                raw = emptyContent
+                                                content = try? Content.PartiallyGenerated(emptyContent)
                                             }
                                         }
 
