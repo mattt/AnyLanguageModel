@@ -101,6 +101,69 @@ dependencies: [
 ]
 ```
 
+### Using Traits in Xcode Projects
+
+Xcode doesn't yet provide a built-in way to declare package dependencies with traits.
+As a workaround,
+you can create an internal Swift package that acts as a shim,
+exporting the `AnyLanguageModel` module with the desired traits enabled.
+Your Xcode project can then add this internal package as a local dependency.
+
+For example,
+to use AnyLanguageModel with MLX support in an Xcode app project:
+
+**1. Create a local Swift package** 
+(e.g., `MyAppKit/Package.swift`):
+
+```swift
+// swift-tools-version: 6.1
+import PackageDescription
+
+let package = Package(
+    name: "MyAppKit",
+    platforms: [
+        .macOS(.v14),
+        .iOS(.v17),
+        .visionOS(.v1),
+    ],
+    products: [
+        .library(
+            name: "MyAppKit",
+            targets: ["MyAppKit"]
+        )
+    ],
+    dependencies: [
+        .package(
+            url: "https://github.com/mattt/AnyLanguageModel", 
+            branch: "main", 
+            traits: ["MLX"]
+        )
+    ],
+    targets: [
+        .target(
+            name: "MyAppKit",
+            dependencies: [
+                .product(name: "AnyLanguageModel", package: "AnyLanguageModel")
+            ]
+        )
+    ]
+)
+```
+
+**2. Export the AnyLanguageModel module**
+(in `MyAppKit/Sources/MyAppKit/Export.swift`):
+
+```swift
+@_exported import AnyLanguageModel
+```
+
+**3. Add the local package to your Xcode project** 
+as a dependency using "Add Local..." in the project settings.
+
+Your app can now import `MyAppKit` to access `AnyLanguageModel` with MLX support enabled.
+
+For a working example of this, see the [chat-ui-swift](https://github.com/mattt/chat-ui-swift) project.
+
 ## Usage
 
 ### Apple Foundation Models
