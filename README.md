@@ -71,7 +71,7 @@ dependencies: [
 ]
 ```
 
-### Conditional Dependencies
+### Package Traits
 
 AnyLanguageModel uses [Swift 6.1 traits](https://docs.swift.org/swiftpm/documentation/packagemanagerdocs/packagetraits/)
 to conditionally include heavy dependencies,
