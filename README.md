@@ -11,8 +11,6 @@ All you need to do is change your import statement:
 ```
 
 ```swift
-import AnyLanguageModel
-
 struct WeatherTool: Tool {
     let name = "getWeather"
     let description = "Retrieve the latest weather information for a city"
