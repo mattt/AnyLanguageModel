@@ -112,10 +112,10 @@ Your Xcode project can then add this internal package as a local dependency.
 For example,
 to use AnyLanguageModel with MLX support in an Xcode app project:
 
-**1. Create a local Swift package**:
+**1. Create a local Swift package**
+(in root directory containing Xcode project):
 
 ```shell
-# In root directory containing Xcode project
 mkdir -p Packages/MyAppKit
 cd Packages/MyAppKit
 swift package init
@@ -166,8 +166,11 @@ let package = Package(
 @_exported import AnyLanguageModel
 ```
 
-**4. Add the local package to your Xcode project** 
-as a dependency using "Add Local..." in the project settings.
+**4. Add the local package to your Xcode project**:
+
+Open your project settings,
+navigate to the "Package Dependencies" tab,
+and click "+" → "Add Local..." to select the `Packages/MyAppKit` directory.
 
 Your app can now import `AnyLanguageModel` with MLX support enabled.
 
