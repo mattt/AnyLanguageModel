@@ -85,7 +85,7 @@ This results in smaller binary sizes and faster build times.
 - `CoreML`: Enables Core ML model support
   (depends on `huggingface/swift-transformers`)
 - `MLX`: Enables MLX model support
-  (depends on `ml-explore/mlx-swift-examples`)
+  (depends on `ml-explore/mlx-swift-lm`)
 - `Llama`: Enables llama.cpp support
   (requires `mattt/llama.swift`)
 
