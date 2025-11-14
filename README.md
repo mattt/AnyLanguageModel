@@ -143,7 +143,7 @@ let package = Package(
     ],
     dependencies: [
         .package(
-            url: "https://github.com/mattt/AnyLanguageModel", 
+            url: "https://github.com/mattt/AnyLanguageModel",
             from: "0.4.0",
             traits: ["MLX"]
         )
@@ -175,7 +175,7 @@ and click "+" → "Add Local..." to select the `Packages/MyAppKit` directory.
 Your app can now import `AnyLanguageModel` with MLX support enabled.
 
 > [!TIP]
-> For a working example of package traits in an Xcode app project, 
+> For a working example of package traits in an Xcode app project,
 > see [chat-ui-swift](https://github.com/mattt/chat-ui-swift).
 
 ## Usage
@@ -194,7 +194,7 @@ let response = try await session.respond {
 }
 ```
 
-> [!NOTE]  
+> [!NOTE]
 > Image inputs are not yet supported by Apple Foundation Models.
 
 ### Core ML
@@ -221,7 +221,7 @@ Enable the trait in Package.swift:
 )
 ```
 
-> [!NOTE]  
+> [!NOTE]
 > Image inputs are not currently supported with `CoreMLLanguageModel`.
 
 ### MLX
@@ -288,7 +288,7 @@ Enable the trait in Package.swift:
 )
 ```
 
-> [!NOTE]  
+> [!NOTE]
 > Image inputs are not currently supported with `LlamaLanguageModel`.
 
 ### OpenAI
