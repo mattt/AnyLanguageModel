@@ -496,3 +496,8 @@ export OPENAI_API_KEY=your_openai_key
 # Run all tests with traits enabled
 swift test --traits CoreML,MLX,Llama
 ```
+
+## License
+
+This project is available under the MIT license.
+See the LICENSE file for more info.
