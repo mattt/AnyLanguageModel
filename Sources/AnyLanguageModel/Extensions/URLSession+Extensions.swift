@@ -160,21 +160,14 @@ extension URLSession {
                     }
 
                     let decoder = JSONDecoder()
-                    let parser = EventSource.Parser()
 
-                    for try await byte in asyncBytes {
-                        await parser.consume(byte)
-
-                        while let event = await parser.getNextEvent() {
-                            guard let data = event.data.data(using: .utf8) else { continue }
-
-                            if let decoded = try? decoder.decode(T.self, from: data) {
-                                continuation.yield(decoded)
-                            }
+                    for try await event in asyncBytes.events {
+                        guard let data = event.data.data(using: .utf8) else { continue }
+                        if let decoded = try? decoder.decode(T.self, from: data) {
+                            continuation.yield(decoded)
                         }
                     }
-                    await parser.finish()
-                    
+
                     continuation.finish()
                 } catch {
                     continuation.finish(throwing: error)
