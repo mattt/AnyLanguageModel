@@ -178,6 +178,82 @@ Your app can now import `AnyLanguageModel` with MLX support enabled.
 > For a working example of package traits in an Xcode app project,
 > see [chat-ui-swift](https://github.com/mattt/chat-ui-swift).
 
+## API Credentials and Security
+
+When using third-party language model providers like OpenAI, Anthropic, or Google Gemini,
+you must handle API credentials securely.
+
+> [!CAUTION]
+> **Never hardcode API credentials in your app**.
+> Malicious actors can reverse‑engineer your application binary
+> or observe outgoing network requests
+> (for example, on a compromised device or via a debugging proxy)
+> to extract embedded credentials.
+> There have been documented cases of attackers successfully exfiltrating
+> API keys from mobile apps and racking up thousands of dollars in charges.
+
+Here are two approaches for managing API credentials in production apps:
+
+### Bring Your Own Key (BYO)
+
+Users provide their own API keys,
+which are stored securely in the system Keychain
+and sent directly to the provider in API requests.
+
+**Security considerations**:
+
+- Keychain data is encrypted using hardware-backed keys
+  (protected by the Secure Enclave on supported devices)
+- An attacker would need access to a running process to intercept credentials
+- TLS encryption protects credentials in transit on the network
+- Users can only compromise their own keys, not other users' keys
+
+**Trade-offs**:
+
+- Apple App Review has often rejected apps using this model
+- Reviewers may be unable to test functionality — even with provided credentials
+- Apple may require in-app purchase integration for usage credits
+- Some users may find it inconvenient to obtain and enter API keys
+
+### Proxy Server
+
+Instead of connecting directly to the provider,
+route requests through your own authenticated service endpoint.
+API credentials are stored securely on your server,
+never in the client app.
+
+Authenticate users with [OAuth 2.1](https://oauth.net/2.1/) or similar,
+issuing short-lived, scoped bearer tokens for client requests.
+If an attacker extracts tokens from your app,
+they're limited in scope and expire automatically.
+
+**Security considerations**:
+
+- API keys never leave your server infrastructure
+- Client tokens can be scoped
+  (e.g., rate-limited, feature-restricted)
+- Client tokens can be revoked or expired independently
+- Compromised tokens have limited blast radius
+
+**Trade-offs**:
+
+- Additional infrastructure complexity
+  (server, authentication, monitoring)
+- Operational costs
+  (hosting, maintenance, support)
+- Network latency from additional hop
+
+Fortunately, there are platforms and services that simplify proxy implementation,
+handling authentication, rate limiting, and billing for you.
+
+> [!TIP]
+> For development and testing, it's fine to use API keys from environment variables.
+> Just make sure production builds use one of the secure approaches above.
+
+For more information about security best practices for your app,
+see OWASP's
+[Mobile Application Security Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Mobile_Application_Security_Cheat_Sheet.html).
+
 ## Usage
 
 ### Apple Foundation Models
