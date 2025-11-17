@@ -142,7 +142,11 @@ extension URLSession {
                         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
                     }
 
-                    let (asyncBytes, response) = try await self.bytes(for: request)
+                    #if canImport(FoundationNetworking)
+                        let (asyncBytes, response) = try await self.linuxBytes(for: request)
+                    #else
+                        let (asyncBytes, response) = try await self.bytes(for: request)
+                    #endif
 
                     guard let httpResponse = response as? HTTPURLResponse else {
                         throw URLSessionError.invalidResponse
@@ -180,6 +184,118 @@ extension URLSession {
         }
     }
 }
+
+#if canImport(FoundationNetworking)
+    private extension URLSession {
+        func linuxBytes(for request: URLRequest) async throws -> (AsyncThrowingStream<UInt8, Error>, URLResponse) {
+            let delegate = LinuxBytesDelegate()
+            let delegateQueue = OperationQueue()
+            delegateQueue.maxConcurrentOperationCount = 1
+
+            let session = URLSession(
+                configuration: self.configuration,
+                delegate: delegate,
+                delegateQueue: delegateQueue
+            )
+
+            let byteStream = AsyncThrowingStream<UInt8, Error> { continuation in
+                delegate.attach(
+                    continuation,
+                    session: session
+                )
+            }
+
+            let response = try await delegate.start(
+                request: request,
+                session: session
+            )
+
+            return (byteStream, response)
+        }
+    }
+
+    private final class LinuxBytesDelegate: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+        private var responseContinuation: CheckedContinuation<URLResponse, Error>?
+        private var byteContinuation: AsyncThrowingStream<UInt8, Error>.Continuation?
+        private weak var task: URLSessionDataTask?
+        private weak var session: URLSession?
+
+        func attach(
+            _ continuation: AsyncThrowingStream<UInt8, Error>.Continuation,
+            session: URLSession
+        ) {
+            byteContinuation = continuation
+            self.session = session
+            continuation.onTermination = { [weak self] _ in
+                guard let self else { return }
+                self.task?.cancel()
+                self.session?.invalidateAndCancel()
+            }
+        }
+
+        func start(
+            request: URLRequest,
+            session: URLSession
+        ) async throws -> URLResponse {
+            try await withCheckedThrowingContinuation { continuation in
+                responseContinuation = continuation
+                let task = session.dataTask(with: request)
+                self.task = task
+                task.resume()
+            }
+        }
+
+        func urlSession(
+            _ session: URLSession,
+            dataTask: URLSessionDataTask,
+            didReceive response: URLResponse,
+            completionHandler: @escaping @Sendable (URLSession.ResponseDisposition) -> Void
+        ) {
+            if let continuation = responseContinuation {
+                continuation.resume(returning: response)
+                responseContinuation = nil
+            }
+            completionHandler(.allow)
+        }
+
+        func urlSession(
+            _ session: URLSession,
+            dataTask: URLSessionDataTask,
+            didReceive data: Data
+        ) {
+            guard let continuation = byteContinuation else { return }
+            for byte in data {
+                continuation.yield(byte)
+            }
+        }
+
+        func urlSession(
+            _ session: URLSession,
+            task: URLSessionTask,
+            didCompleteWithError error: (any Error)?
+        ) {
+            if let continuation = responseContinuation {
+                if let error {
+                    continuation.resume(throwing: error)
+                } else if let response = task.response {
+                    continuation.resume(returning: response)
+                } else {
+                    continuation.resume(throwing: URLSessionError.invalidResponse)
+                }
+                responseContinuation = nil
+            }
+
+            if let error {
+                byteContinuation?.finish(throwing: error)
+            } else {
+                byteContinuation?.finish()
+            }
+            byteContinuation = nil
+
+            session.invalidateAndCancel()
+        }
+    }
+#endif
 
 enum URLSessionError: Error, CustomStringConvertible {
     case invalidResponse
