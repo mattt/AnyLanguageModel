@@ -183,7 +183,7 @@ Your app can now import `AnyLanguageModel` with MLX support enabled.
 When using third-party language model providers like OpenAI, Anthropic, or Google Gemini,
 you must handle API credentials securely.
 
-> [!IMPORTANT]
+> [!CAUTION]
 > **Never hardcode API credentials in your app**.
 > Malicious actors can reverse‑engineer your application binary
 > or observe outgoing network requests
