@@ -40,11 +40,11 @@ struct OpenAILanguageModelTests {
         @Test func withInstructions() async throws {
             let session = LanguageModelSession(
                 model: model,
-                instructions: "You are a helpful assistant. Be concise."
+                instructions: "Your name is Alice."
             )
 
-            let response = try await session.respond(to: "What is 2+2?")
-            #expect(!response.content.isEmpty)
+            let response = try await session.respond(to: "What is your name?")
+            #expect(response.content.contains("Alice"))
         }
 
         @Test func streaming() async throws {
@@ -118,13 +118,16 @@ struct OpenAILanguageModelTests {
         }
 
         @Test func conversationContext() async throws {
-            let session = LanguageModelSession(model: model)
+            let session = LanguageModelSession(model: model, instructions: "Your name is Alice.")
 
             let firstResponse = try await session.respond(to: "My favorite color is blue")
             #expect(!firstResponse.content.isEmpty)
 
             let secondResponse = try await session.respond(to: "What did I just tell you?")
-            #expect(!secondResponse.content.isEmpty)
+            #expect(secondResponse.content.contains("blue"))
+
+            let thirdResponse = try await session.respond(to: "What is your name?")
+            #expect(thirdResponse.content.contains("Alice"))
         }
 
         @Test func withTools() async throws {
