@@ -165,6 +165,8 @@ public struct OpenAILanguageModel: LanguageModel {
         }
 
         let text = choice.message.content ?? ""
+        entries.append(.response(.init(assetIDs: [], segments: [.text(.init(content: text))])))
+
         return LanguageModelSession.Response(
             content: text as! Content,
             rawContent: GeneratedContent(text),
@@ -211,6 +213,8 @@ public struct OpenAILanguageModel: LanguageModel {
         }
 
         let text = resp.outputText ?? extractTextFromOutput(resp.output) ?? ""
+        entries.append(.response(.init(assetIDs: [], segments: [.text(.init(content: text))])))
+
         return LanguageModelSession.Response(
             content: text as! Content,
             rawContent: GeneratedContent(text),
@@ -433,52 +437,77 @@ private enum Responses {
         options: GenerationOptions,
         stream: Bool
     ) -> JSONValue {
-        // Build input blocks from the user message content
-        let userMessage = messages.first { $0.role == .user }
-
         var body: [String: JSONValue] = [
             "model": .string(model),
             "stream": .bool(stream),
         ]
 
-        if let userMessage {
-            // Wrap user content into a single top-level message as required by Responses API
-            let contentBlocks: [JSONValue]
-            switch userMessage.content {
-            case .text(let text):
-                contentBlocks = [
-                    .object(["type": .string("input_text"), "text": .string(text)])
-                ]
-            case .blocks(let blocks):
-                contentBlocks = blocks.map { block in
-                    switch block {
-                    case .text(let text):
-                        return .object(["type": .string("input_text"), "text": .string(text)])
-                    case .imageURL(let url):
-                        return .object([
-                            "type": .string("input_image"),
-                            "image_url": .object(["url": .string(url)]),
+        var items: [JSONValue] = []
+        for message in messages {
+            switch message.role {
+            case .assistant:
+                switch message.content {
+                case .text(let text):
+                    items.append(.object([
+                        "type": .string("message"),
+                        "role": "assistant",
+                        "content": .string(text)
+                    ]))
+                case .blocks(let blocks):
+                    let contents: [JSONValue] = blocks.compactMap { block in
+                        switch block {
+                        case .text(let text):
+                            return .object([
+                                "type": .string("output_text"),
+                                "text": .string(text)
+                            ])
+                        case .imageURL(let url):
+                            return nil
+                        }
+                    }
+                    items.append(.object([
+                        "type": .string("message"),
+                        "role": "assistant",
+                        "content": .array(contents)
+                    ]))
+                }
+
+            case .user, .system:
+                let contents: [JSONValue]
+                switch message.content {
+                case .text(let text):
+                    contents = [
+                        .object([
+                            "type": .string("input_text"),
+                            "text": .string(text)
                         ])
+                    ]
+                case .blocks(let blocks):
+                    contents = blocks.map { block in
+                        switch block {
+                        case .text(let text):
+                            return .object([
+                                "type": .string("input_text"),
+                                "text": .string(text)
+                            ])
+                        case .imageURL(let url):
+                            return .object([
+                                "type": .string("input_image"),
+                                "image_url": .object(["url": .string(url)]),
+                            ])
+                        }
                     }
                 }
+                items.append(.object([
+                    "type": .string("message"),
+                    "role": .string(message.role.rawValue),
+                    "content": .array(contents),
+                ]))
+            case .tool:
+                continue
             }
-
-            body["input"] = .array([
-                .object([
-                    "type": .string("message"),
-                    "role": .string("user"),
-                    "content": .array(contentBlocks),
-                ])
-            ])
-        } else {
-            body["input"] = .array([
-                .object([
-                    "type": .string("message"),
-                    "role": .string("user"),
-                    "content": .array([]),
-                ])
-            ])
         }
+        body["input"] = .array(items)
 
         if let tools {
             body["tools"] = .array(tools.map { $0.jsonValue(for: .responses) })
