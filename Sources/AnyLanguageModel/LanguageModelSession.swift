@@ -217,6 +217,7 @@ public final class LanguageModelSession: @unchecked Sendable {
                 responseFormat: nil
             )
         )
+        transcript.append(promptEntry)
 
         return wrapStream(
             model.streamResponse(
