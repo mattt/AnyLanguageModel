@@ -444,68 +444,7 @@ private enum Responses {
 
         var items: [JSONValue] = []
         for message in messages {
-            switch message.role {
-            case .assistant:
-                switch message.content {
-                case .text(let text):
-                    items.append(.object([
-                        "type": .string("message"),
-                        "role": "assistant",
-                        "content": .string(text)
-                    ]))
-                case .blocks(let blocks):
-                    let contents: [JSONValue] = blocks.compactMap { block in
-                        switch block {
-                        case .text(let text):
-                            return .object([
-                                "type": .string("output_text"),
-                                "text": .string(text)
-                            ])
-                        case .imageURL(let url):
-                            return nil
-                        }
-                    }
-                    items.append(.object([
-                        "type": .string("message"),
-                        "role": "assistant",
-                        "content": .array(contents)
-                    ]))
-                }
-
-            case .user, .system:
-                let contents: [JSONValue]
-                switch message.content {
-                case .text(let text):
-                    contents = [
-                        .object([
-                            "type": .string("input_text"),
-                            "text": .string(text)
-                        ])
-                    ]
-                case .blocks(let blocks):
-                    contents = blocks.map { block in
-                        switch block {
-                        case .text(let text):
-                            return .object([
-                                "type": .string("input_text"),
-                                "text": .string(text)
-                            ])
-                        case .imageURL(let url):
-                            return .object([
-                                "type": .string("input_image"),
-                                "image_url": .object(["url": .string(url)]),
-                            ])
-                        }
-                    }
-                }
-                items.append(.object([
-                    "type": .string("message"),
-                    "role": .string(message.role.rawValue),
-                    "content": .array(contents),
-                ]))
-            case .tool:
-                continue
-            }
+            items.append(message.jsonValue(for: .responses))
         }
         body["input"] = .array(items)
 
@@ -563,10 +502,18 @@ private struct OpenAIMessage: Hashable, Codable, Sendable {
                 ])
             case .responses:
                 // Responses API uses array of content blocks
-                return .object([
-                    "role": .string(role.rawValue),
-                    "content": .array([.object(["type": .string("text"), "text": .string(text)])]),
-                ])
+                switch role {
+                case .user, .system, .tool:
+                    return .object([
+                        "role": .string(role.rawValue),
+                        "content": .array([.object(["type": .string("input_text"), "text": .string(text)])]),
+                    ])
+                case .assistant:
+                    return .object([
+                        "role": .string(role.rawValue),
+                        "content": .array([.object(["type": .string("output_text"), "text": .string(text)])]),
+                    ])
+                }
             }
         case .blocks(let blocks):
             switch apiVariant {
@@ -580,7 +527,7 @@ private struct OpenAIMessage: Hashable, Codable, Sendable {
                 // Responses expects message content blocks
                 return .object([
                     "role": .string(role.rawValue),
-                    "content": .array(blocks.map { $0.jsonValueForResponses }),
+                    "content": .array(blocks.map { $0.jsonValueForResponses(role: role) }),
                 ])
             }
         }
@@ -603,16 +550,29 @@ private enum Block: Hashable, Codable, Sendable {
         }
     }
 
-    var jsonValueForResponses: JSONValue {
+    func jsonValueForResponses(role: OpenAIMessage.Role) -> JSONValue {
         switch self {
         case .text(let text):
-            return .object(["type": .string("text"), "text": .string(text)])
+            switch role {
+            case .user, .system, .tool:
+                return .object(["type": .string("input_text"), "text": .string(text)])
+            case .assistant:
+                return .object(["type": .string("output_text"), "text": .string(text)])
+            }
         case .imageURL(let url):
             // Responses API uses input_image at top-level input, but inside messages we mirror block
-            return .object([
-                "type": .string("input_image"),
-                "image_url": .object(["url": .string(url)]),
-            ])
+            switch role {
+            case .user, .system, .tool:
+                return .object([
+                    "type": .string("input_image"),
+                    "image_url": .string(url),
+                ])
+            case .assistant:
+                return .object([
+                    "type": .string("output_image"),
+                    "image_url": .string(url),
+                ])
+            }
         }
     }
 }
