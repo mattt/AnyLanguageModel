@@ -2,7 +2,7 @@ import Foundation
 import JSONSchema
 
 #if canImport(FoundationNetworking)
-    import FoundationNetworking
+import FoundationNetworking
 #endif
 
 /// A language model that connects to OpenAI-compatible APIs.
@@ -131,46 +131,58 @@ public struct OpenAILanguageModel: LanguageModel {
         options: GenerationOptions,
         session: LanguageModelSession
     ) async throws -> LanguageModelSession.Response<Content> where Content: Generable {
-        let params = ChatCompletions.createRequestBody(
-            model: model,
-            messages: messages,
-            tools: tools,
-            options: options,
-            stream: false
-        )
-
-        let url = baseURL.appendingPathComponent("chat/completions")
-        let body = try JSONEncoder().encode(params)
-        let resp: ChatCompletions.Response = try await urlSession.fetch(
-            .post,
-            url: url,
-            headers: [
-                "Authorization": "Bearer \(tokenProvider())"
-            ],
-            body: body
-        )
 
         var entries: [Transcript.Entry] = []
+        var text = ""
+        var messages = messages
 
-        guard let choice = resp.choices.first else {
-            return LanguageModelSession.Response(
-                content: "" as! Content,
-                rawContent: GeneratedContent(""),
-                transcriptEntries: ArraySlice(entries)
+        // Loop until no more tool calls
+        while true {
+            let params = ChatCompletions.createRequestBody(
+                model: model,
+                messages: messages,
+                tools: tools,
+                options: options,
+                stream: false
             )
-        }
 
-        if let toolCalls = choice.message.toolCalls, !toolCalls.isEmpty {
-            let invocations = try await resolveToolCalls(toolCalls, session: session)
-            if !invocations.isEmpty {
-                entries.append(.toolCalls(Transcript.ToolCalls(invocations.map { $0.call })))
-                for invocation in invocations {
-                    entries.append(.toolOutput(invocation.output))
+            let url = baseURL.appendingPathComponent("chat/completions")
+            let body = try JSONEncoder().encode(params)
+            let resp: ChatCompletions.Response = try await urlSession.fetch(
+                .post,
+                url: url,
+                headers: [
+                    "Authorization": "Bearer \(tokenProvider())"
+                ],
+                body: body
+            )
+
+            guard let choice = resp.choices.first else {
+                return LanguageModelSession.Response(
+                    content: "" as! Content,
+                    rawContent: GeneratedContent(""),
+                    transcriptEntries: ArraySlice(entries)
+                )
+            }
+
+            if let toolCalls = choice.message.toolCalls, !toolCalls.isEmpty {
+                let invocations = try await resolveToolCalls(toolCalls, session: session)
+                if !invocations.isEmpty {
+                    entries.append(.toolCalls(Transcript.ToolCalls(invocations.map { $0.call })))
+                    for invocation in invocations {
+                        let output =  invocation.output
+                        entries.append(.toolOutput(output))
+
+                        let toolSegments: [Transcript.Segment] = output.segments
+                        messages.append(OpenAIMessage(role: .tool(id: invocation.call.id), content: .blocks(convertSegmentsToOpenAIBlocks(toolSegments))))
+                    }
+                    continue
                 }
             }
-        }
 
-        let text = choice.message.content ?? ""
+            text = choice.message.content ?? ""
+            break
+        }
         return LanguageModelSession.Response(
             content: text as! Content,
             rawContent: GeneratedContent(text),
@@ -184,39 +196,56 @@ public struct OpenAILanguageModel: LanguageModel {
         options: GenerationOptions,
         session: LanguageModelSession
     ) async throws -> LanguageModelSession.Response<Content> where Content: Generable {
-        let params = Responses.createRequestBody(
-            model: model,
-            messages: messages,
-            tools: tools,
-            options: options,
-            stream: false
-        )
+        var entries: [Transcript.Entry] = []
+        var text = ""
+        var messages = messages
 
         let url = baseURL.appendingPathComponent("responses")
-        let body = try JSONEncoder().encode(params)
-        let resp: Responses.Response = try await urlSession.fetch(
-            .post,
-            url: url,
-            headers: [
-                "Authorization": "Bearer \(tokenProvider())"
-            ],
-            body: body
-        )
 
-        var entries: [Transcript.Entry] = []
+        // Loop until no more tool calls
+        while true {
+            let params = Responses.createRequestBody(
+                model: model,
+                messages: messages,
+                tools: tools,
+                options: options,
+                stream: false
+            )
 
-        let toolCalls = extractToolCallsFromOutput(resp.output)
-        if !toolCalls.isEmpty {
-            let invocations = try await resolveToolCalls(toolCalls, session: session)
-            if !invocations.isEmpty {
-                entries.append(.toolCalls(Transcript.ToolCalls(invocations.map { $0.call })))
-                for invocation in invocations {
-                    entries.append(.toolOutput(invocation.output))
+            var encoder = JSONEncoder()
+            encoder.outputFormatting = .prettyPrinted
+            let body = try encoder.encode(params)
+            let resp: Responses.Response = try await urlSession.fetch(
+                .post,
+                url: url,
+                headers: [
+                    "Authorization": "Bearer \(tokenProvider())"
+                ],
+                body: body
+            )
+
+            let toolCalls = extractToolCallsFromOutput(resp.output)
+            if !toolCalls.isEmpty {
+                //messages = []
+                let invocations = try await resolveToolCalls(toolCalls, session: session)
+                if !invocations.isEmpty {
+                    entries.append(.toolCalls(Transcript.ToolCalls(invocations.map { $0.call })))
+                    for invocation in invocations {
+                        let output =  invocation.output
+                        entries.append(.toolOutput(output))
+
+                        let toolSegments: [Transcript.Segment] = output.segments
+                        let msg = OpenAIMessage(role: .tool(id: invocation.call.id), content: .blocks(convertSegmentsToOpenAIBlocks(toolSegments)))
+                        messages.append(msg)
+                    }
+                    continue
                 }
             }
-        }
 
-        let text = resp.outputText ?? extractTextFromOutput(resp.output) ?? ""
+            text = resp.outputText ?? extractTextFromOutput(resp.output) ?? ""
+
+            break
+        }
         return LanguageModelSession.Response(
             content: text as! Content,
             rawContent: GeneratedContent(text),
@@ -275,14 +304,14 @@ public struct OpenAILanguageModel: LanguageModel {
                         let body = try JSONEncoder().encode(params)
 
                         let events: AsyncThrowingStream<OpenAIResponsesServerEvent, any Error> =
-                            urlSession.fetchEventStream(
-                                .post,
-                                url: url,
-                                headers: [
-                                    "Authorization": "Bearer \(tokenProvider())"
-                                ],
-                                body: body
-                            )
+                        urlSession.fetchEventStream(
+                            .post,
+                            url: url,
+                            headers: [
+                                "Authorization": "Bearer \(tokenProvider())"
+                            ],
+                            body: body
+                        )
 
                         var accumulatedText = ""
 
@@ -338,14 +367,14 @@ public struct OpenAILanguageModel: LanguageModel {
                         let body = try JSONEncoder().encode(params)
 
                         let events: AsyncThrowingStream<OpenAIChatCompletionsChunk, any Error> =
-                            urlSession.fetchEventStream(
-                                .post,
-                                url: url,
-                                headers: [
-                                    "Authorization": "Bearer \(tokenProvider())"
-                                ],
-                                body: body
-                            )
+                        urlSession.fetchEventStream(
+                            .post,
+                            url: url,
+                            headers: [
+                                "Authorization": "Bearer \(tokenProvider())"
+                            ],
+                            body: body
+                        )
 
                         var accumulatedText = ""
 
@@ -446,65 +475,102 @@ private enum Responses {
         stream: Bool
     ) -> JSONValue {
         // Build input blocks from the user message content
-        let systemMessage = messages.first { $0.role == .system }
-        let userMessage = messages.first { $0.role == .user }
 
         var body: [String: JSONValue] = [
             "model": .string(model),
             "stream": .bool(stream),
         ]
 
-        if let userMessage {
-            // Wrap user content into a single top-level message as required by Responses API
-            let contentBlocks: [JSONValue]
-            switch userMessage.content {
-            case .text(let text):
-                contentBlocks = [
-                    .object(["type": .string("input_text"), "text": .string(text)])
-                ]
-            case .blocks(let blocks):
-                contentBlocks = blocks.map { block in
-                    switch block {
-                    case .text(let text):
-                        return .object(["type": .string("input_text"), "text": .string(text)])
-                    case .imageURL(let url):
-                        return .object([
-                            "type": .string("input_image"),
-                            "image_url": .object(["url": .string(url)]),
-                        ])
+        var outputs: [JSONValue] = []
+        for msg in messages {
+            switch msg.role {
+            case .user:
+
+                let userMessage = msg
+                // Wrap user content into a single top-level message as required by Responses API
+                let contentBlocks: [JSONValue]
+                switch userMessage.content {
+                case .text(let text):
+                    contentBlocks = [
+                        .object(["type": .string("input_text"), "text": .string(text)])
+                    ]
+                case .blocks(let blocks):
+                    contentBlocks = blocks.map { block in
+                        switch block {
+                        case .text(let text):
+                            return .object(["type": .string("input_text"), "text": .string(text)])
+                        case .imageURL(let url):
+                            return .object([
+                                "type": .string("input_image"),
+                                "image_url": .object(["url": .string(url)]),
+                            ])
+                        }
                     }
                 }
-            }
-
-            body["input"] = .array([
-                .object([
+                let object = JSONValue.object([
                     "type": .string("message"),
                     "role": .string("user"),
                     "content": .array(contentBlocks),
                 ])
-            ])
-        } else {
-            body["input"] = .array([
-                .object([
-                    "type": .string("message"),
-                    "role": .string("user"),
-                    "content": .array([]),
-                ])
-            ])
-        }
+                outputs.append(object)
 
-        if let systemMessage {
-            switch systemMessage.content {
-            case .text(let text):
-                body["instructions"] = .string(text)
-            case .blocks(let blocks):
-                // Concatenate text blocks for instructions; ignore images
-                let text = blocks.compactMap { if case .text(let t) = $0 { return t } else { return nil } }.joined(
-                    separator: "\n"
-                )
-                if !text.isEmpty { body["instructions"] = .string(text) }
+            case .tool(let id):
+                let toolMessage = msg
+                // Wrap user content into a single top-level message as required by Responses API
+                let contentBlocks: [JSONValue]
+                switch toolMessage.content {
+                case .text(let text):
+                    contentBlocks = [
+                        .object(["type": .string("input_text"), "text": .string(text)])
+                    ]
+                case .blocks(let blocks):
+                    contentBlocks = blocks.map { block in
+                        switch block {
+                        case .text(let text):
+                            return .object(["type": .string("input_text"), "text": .string(text)])
+                        case .imageURL(let url):
+                            return .object([
+                                "type": .string("input_image"),
+                                "image_url": .object(["url": .string(url)]),
+                            ])
+                        }
+                    }
+                }
+                if contentBlocks.count > 1 {
+                    outputs.append(.object([
+                        "type": .string("function_call_output"),
+                        "call_id": .string(id),
+                        "output": .array(contentBlocks),
+                    ]))
+                } else {
+                    if let object = contentBlocks.first {
+                        outputs.append(.object([
+                            "type": .string("function_call_output"),
+                            "call_id": .string(id),
+                            "output":  object
+                        ]))
+                    }
+                }
+
+            case .system:
+                let systemMessage = msg
+                switch systemMessage.content {
+                case .text(let text):
+                    body["instructions"] = .string(text)
+                case .blocks(let blocks):
+                    // Concatenate text blocks for instructions; ignore images
+                    let text = blocks.compactMap { if case .text(let t) = $0 { return t } else { return nil } }.joined(
+                        separator: "\n"
+                    )
+                    if !text.isEmpty { body["instructions"] = .string(text) }
+                }
+
+            case .assistant:
+                break
             }
         }
+
+        body["input"] = .array(outputs)
 
         if let tools {
             body["tools"] = .array(tools.map { $0.jsonValue(for: .responses) })
@@ -538,7 +604,18 @@ private enum Responses {
 // MARK: - Supporting Types
 
 private struct OpenAIMessage: Hashable, Codable, Sendable {
-    enum Role: String, Hashable, Codable, Sendable { case system, user, assistant, tool }
+    enum Role: Hashable, Codable, Sendable {
+        case system, user, assistant, tool(id: String)
+
+        var description: String {
+            switch self {
+            case .system: return "system"
+            case .user: return "user"
+            case .assistant: return "assistant"
+            case .tool(id: let id): return "tool"
+            }
+        }
+    }
 
     enum Content: Hashable, Codable, Sendable {
         case text(String)
@@ -555,13 +632,13 @@ private struct OpenAIMessage: Hashable, Codable, Sendable {
             case .chatCompletions:
                 // Chat Completions uses simple string content
                 return .object([
-                    "role": .string(role.rawValue),
+                    "role": .string(role.description),
                     "content": .string(text),
                 ])
             case .responses:
                 // Responses API uses array of content blocks
                 return .object([
-                    "role": .string(role.rawValue),
+                    "role": .string(role.description),
                     "content": .array([.object(["type": .string("text"), "text": .string(text)])]),
                 ])
             }
@@ -570,13 +647,13 @@ private struct OpenAIMessage: Hashable, Codable, Sendable {
             case .chatCompletions:
                 // Chat Completions accepts array of content parts
                 return .object([
-                    "role": .string(role.rawValue),
+                    "role": .string(role.description),
                     "content": .array(blocks.map { $0.jsonValueForChatCompletions }),
                 ])
             case .responses:
                 // Responses expects message content blocks
                 return .object([
-                    "role": .string(role.rawValue),
+                    "role": .string(role.description),
                     "content": .array(blocks.map { $0.jsonValueForResponses }),
                 ])
             }
@@ -891,15 +968,15 @@ private func extractTextFromOutput(_ output: [JSONValue]?) -> String? {
     var textParts: [String] = []
     for block in output {
         if case let .object(obj) = block,
-            case let .string(type)? = obj["type"],
-            type == "message",
-            case let .array(contentBlocks)? = obj["content"]
+           case let .string(type)? = obj["type"],
+           type == "message",
+           case let .array(contentBlocks)? = obj["content"]
         {
             for contentBlock in contentBlocks {
                 if case let .object(contentObj) = contentBlock,
-                    case let .string(contentType)? = contentObj["type"],
-                    contentType == "output_text",
-                    case let .string(text)? = contentObj["text"]
+                   case let .string(contentType)? = contentObj["type"],
+                   contentType == "output_text",
+                   case let .string(text)? = contentObj["text"]
                 {
                     textParts.append(text)
                 }
@@ -916,12 +993,12 @@ private func extractToolCallsFromOutput(_ output: [JSONValue]?) -> [OpenAIToolCa
     var toolCalls: [OpenAIToolCall] = []
     for block in output {
         if case let .object(obj) = block,
-            case let .string(type)? = obj["type"]
+           case let .string(type)? = obj["type"]
         {
             // Handle direct function_call at top level
             if type == "function_call" {
                 guard let id = obj["id"].flatMap({ if case .string(let s) = $0 { return s } else { return nil } }),
-                    let name = obj["name"].flatMap({ if case .string(let s) = $0 { return s } else { return nil } })
+                      let name = obj["name"].flatMap({ if case .string(let s) = $0 { return s } else { return nil } })
                 else { continue }
 
                 let argsString: String?
@@ -949,8 +1026,8 @@ private func extractToolCallsFromOutput(_ output: [JSONValue]?) -> [OpenAIToolCa
             else if type == "message", case let .array(contentBlocks)? = obj["content"] {
                 for contentBlock in contentBlocks {
                     if case let .object(contentObj) = contentBlock,
-                        case let .string(contentType)? = contentObj["type"],
-                        (contentType == "tool_call" || contentType == "tool_use")
+                       case let .string(contentType)? = contentObj["type"],
+                       (contentType == "tool_call" || contentType == "tool_use")
                     {
                         guard
                             let id = contentObj["id"].flatMap({
@@ -998,3 +1075,5 @@ private func extractToolCallsFromOutput(_ output: [JSONValue]?) -> [OpenAIToolCa
 
     return toolCalls
 }
+
+
