@@ -15,6 +15,7 @@ import Foundation
     import MLX
     import MLXVLM
     import Tokenizers
+    import Hub
 
     /// A language model that runs locally using MLX.
     ///
@@ -32,11 +33,17 @@ import Foundation
         /// The model identifier from the MLX community on Hugging Face.
         public let modelId: String
 
+        /// The optional Hub API instance for downloading models.
+        public let hub: HubApi?
+
         /// Creates an MLX language model.
         ///
-        /// - Parameter modelId: The Hugging Face model identifier (for example, "mlx-community/Llama-3.2-3B-Instruct-4bit").
-        public init(modelId: String) {
+        /// - Parameters:
+        ///   - modelId: The Hugging Face model identifier (for example, "mlx-community/Llama-3.2-3B-Instruct-4bit").
+        ///   - hub: An optional Hub API instance for downloading models. If not provided, the default Hub API is used.
+        public init(modelId: String, hub: HubApi? = nil) {
             self.modelId = modelId
+            self.hub = hub
         }
 
         public func respond<Content>(
@@ -51,7 +58,12 @@ import Foundation
                 fatalError("MLXLanguageModel only supports generating String content")
             }
 
-            let context = try await loadModel(id: modelId)
+            let context: ModelContext
+            if let hub = hub {
+                context = try await loadModel(hub: hub, id: modelId)
+            } else {
+                context = try await loadModel(id: modelId)
+            }
 
             // Convert session tools to MLX ToolSpec format
             let toolSpecs: [ToolSpec]? =
