@@ -3,6 +3,8 @@
     import Foundation
     import PartialJSONDecoder
 
+    import JSONSchema
+
     /// A language model that uses Apple Intelligence.
     ///
     /// Use this model to generate text using on-device language models provided by Apple.
@@ -278,9 +280,202 @@
     }
 
     @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
+public struct FoundationModelsToolBridge<ArgumentsType, OutputType, ToolType : FoundationModels.Tool<String, String> > : FoundationModels.Tool where ArgumentsType : FoundationModels.ConvertibleFromGeneratedContent, OutputType : FoundationModels.PromptRepresentable, ToolType: FoundationModels.Tool {
+        public typealias Arguments = ArgumentsType
+        public typealias Output = OutputType
+
+        /// The name of the tool
+        public var name: String {
+            tool.name
+        }
+
+        /// The description of the tool
+        public var description: String {
+            tool.description
+        }
+
+        /// Whether to include the schema in instructions
+        public var includesSchemaInInstructions: Bool {
+            tool.includesSchemaInInstructions
+        }
+
+        public func call(arguments: ArgumentsType) async throws -> OutputType {
+            let t = arguments as! any ConvertibleToGeneratedContent
+            let str = t.generatedContent as! ToolType.Arguments
+            let result = try await tool.call(arguments: str)
+            return result as! OutputType
+        }
+        
+        public var parameters: FoundationModels.GenerationSchema {
+            do {
+                let data = try JSONEncoder().encode(tool.parameters)
+                if let parameters = try? JSONDecoder().decode(FoundationModels.GenerationSchema.self, from: data) {
+                    return parameters
+                }
+            } catch {
+                // Swallow encoding errors and fall back below
+            }
+            // Fallback schema when bridging fails
+            return FoundationModels.GenerationSchema(type: String.self, properties: [])
+        }
+
+        let tool: ToolType
+
+        public init(tool: ToolType) {
+            self.tool = tool
+        }
+    }
+
+    @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
     extension Array where Element == (any Tool) {
         fileprivate func toFoundationModels() -> [any FoundationModels.Tool] {
-            return []
+            self.map { tool in
+                return AnyToolWrapper(tool: tool)
+            }
+        }
+    }
+    
+    // MARK: - Tool Wrapper
+    /// A type-erased wrapper that bridges any Tool to FoundationModels.Tool
+    @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
+private struct AnyToolWrapper: FoundationModels.Tool {
+        public typealias Arguments = FoundationModels.GeneratedContent
+        public typealias Output = String
+
+        public let name: String
+        public let description: String
+        public let parameters: FoundationModels.GenerationSchema
+        public let includesSchemaInInstructions: Bool
+        
+        private let wrappedTool: Tool
+
+        init(tool: any Tool) {
+            self.wrappedTool = tool
+            self.name = tool.name
+            self.description = tool.description
+            self.includesSchemaInInstructions = tool.includesSchemaInInstructions
+
+
+            var properties : [FoundationModels.GenerationSchema.Property] = []
+
+            // Handle the case where the schema has a root reference
+            let resolvedSchema = tool.parameters.withResolvedRoot() ?? tool.parameters
+            let rawParameters = try? JSONValue(resolvedSchema)
+            if let value = rawParameters?.objectValue {
+                let requiredKeys = value["required"]?.arrayValue?.map { $0.stringValue } ?? []
+                if let params = value["properties"] {
+                    if let v = params.objectValue {
+                        for (key, value) in v {
+                            if let type = value.objectValue {
+                                if let typeName = type["type"]?.stringValue {
+                                    properties.append(.init(
+                                        name: key,
+                                        description: key,
+                                        typeName: typeName,
+                                        isOptional: requiredKeys.contains(key) == false
+                                        ))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            self.parameters = FoundationModels.GenerationSchema(
+                type: String.self,
+                description: "Parameters for \(tool.name)",
+                properties: properties
+            )
+        }
+        
+        public func call(arguments: FoundationModels.GeneratedContent) async throws -> Output {
+
+            let output = try await wrappedTool.callFunction(arguments: arguments)
+            // Since we can't call the tool's call method directly on an existential type,
+            // we need to use makeOutputSegments which internally calls the tool
+            // and then extract the result from the segments
+            do {
+                // Convert segments to a string representation
+                let result = output as! Output
+
+                return result
+            } catch {
+                // Return error information as string
+                return "Tool call failed: \(error.localizedDescription)" as! Output
+            }
+        }
+    }
+
+    @available(macOS 26.0, *)
+    extension FoundationModels.GeneratedContent {
+        internal init(_ content: AnyLanguageModel.GeneratedContent) throws {
+            try self.init(json: content.jsonString)
+        }
+    }
+
+    @available(macOS 26.0, *)
+    extension AnyLanguageModel.GeneratedContent {
+        internal init(_ content: FoundationModels.GeneratedContent) throws {
+            try self.init(json: content.jsonString)
+        }
+    }
+
+    @available(macOS 26.0, *)
+    extension Tool
+    {
+        func callFunction(arguments: FoundationModels.GeneratedContent) async throws -> Output {
+
+            let content = try GeneratedContent(arguments)
+            return try await call(arguments: Self.Arguments(content))
+        }
+    }
+
+    @available(macOS 26.0, *)
+    extension FoundationModels.GenerationSchema.Property {
+        internal init(name: String,
+                      description: String? = nil,
+                      typeName: String,
+                      isOptional: Bool = false
+        ) {
+            let isOptionalSuffix = isOptional ? "?" : ""
+            let typeName = typeName + isOptionalSuffix
+            switch typeName {
+            case "string":
+                self.init(name: name,
+                          description: description,
+                          type: String.self)
+
+            case "string?":
+                self.init(name: name,
+                          description: description,
+                          type: String?.self)
+
+            case "int":
+                self.init(name: name,
+                          description: description,
+                          type: Int.self)
+
+            case "int?":
+                self.init(name: name,
+                          description: description,
+                          type: Int?.self)
+
+            case "bool":
+                self.init(name: name,
+                          description: description,
+                          type: Bool.self)
+
+            case "bool?":
+                self.init(name: name,
+                          description: description,
+                          type: Bool?.self)
+
+
+            default :
+                self.init(name: name,
+                          description: description,
+                          type: String.self)
+            }
         }
     }
 
@@ -290,4 +485,8 @@
     private enum SystemLanguageModelError: Error {
         case streamingFailed
     }
+
+
 #endif
+
+
