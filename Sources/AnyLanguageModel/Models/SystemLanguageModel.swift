@@ -368,9 +368,10 @@ private struct AnyToolWrapper: FoundationModels.Tool {
                         for (key, value) in v {
                             if let type = value.objectValue {
                                 if let typeName = type["type"]?.stringValue {
+                                    let description = type[description]?.stringValue
                                     properties.append(.init(
                                         name: key,
-                                        description: key,
+                                        description: description,
                                         typeName: typeName,
                                         isOptional: requiredKeys.contains(key) == false
                                         ))
