@@ -30,33 +30,25 @@ import Foundation
         /// This model is always available.
         public typealias UnavailableReason = Never
 
-        /// The model identifier from the MLX community on Hugging Face.
+        /// The model identifier.
         public let modelId: String
 
-        /// The optional Hub API instance for downloading models.
+        /// The Hub API instance for downloading models.
         public let hub: HubApi?
 
-        /// The optional local directory containing the model files.
-        public let modelDirectory: URL?
+        /// The local directory containing the model files.
+        public let directory: URL?
 
-        /// Creates an MLX language model from a Hugging Face model identifier.
+        /// Creates an MLX language model.
         ///
         /// - Parameters:
-        ///   - modelId: The Hugging Face model identifier (for example, "mlx-community/Llama-3.2-3B-Instruct-4bit").
+        ///   - modelId: The model identifier (for example, "mlx-community/Llama-3.2-3B-Instruct-4bit").
         ///   - hub: An optional Hub API instance for downloading models. If not provided, the default Hub API is used.
-        public init(modelId: String, hub: HubApi? = nil) {
+        ///   - directory: An optional local directory URL containing the model files. If provided, the model is loaded from this directory instead of downloading.
+        public init(modelId: String, hub: HubApi? = nil, directory: URL? = nil) {
             self.modelId = modelId
             self.hub = hub
-            self.modelDirectory = nil
-        }
-
-        /// Creates an MLX language model from a local directory.
-        ///
-        /// - Parameter modelDirectory: The local directory URL containing the model files.
-        public init(modelDirectory: URL) {
-            self.modelId = modelDirectory.lastPathComponent
-            self.hub = nil
-            self.modelDirectory = modelDirectory
+            self.directory = directory
         }
 
         public func respond<Content>(
@@ -72,12 +64,10 @@ import Foundation
             }
 
             let context: ModelContext
-            if let directory = modelDirectory {
-                context = try await loadModel(modelDirectory: directory)
-            } else if let hub = hub {
-                context = try await loadModel(hub: hub, id: modelId)
+            if let directory {
+                context = try await loadModel(directory: directory)
             } else {
-                context = try await loadModel(id: modelId)
+                context = try await loadModel(hub: hub ?? HubApi(), id: modelId)
             }
 
             // Convert session tools to MLX ToolSpec format
