@@ -66,8 +66,10 @@ import Foundation
             let context: ModelContext
             if let directory {
                 context = try await loadModel(directory: directory)
+            } else if let hub {
+                context = try await loadModel(hub: hub, id: modelId)
             } else {
-                context = try await loadModel(hub: hub ?? HubApi(), id: modelId)
+                context = try await loadModel(id: modelId)
             }
 
             // Convert session tools to MLX ToolSpec format
