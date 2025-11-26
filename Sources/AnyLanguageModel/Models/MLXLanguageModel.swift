@@ -36,7 +36,10 @@ import Foundation
         /// The optional Hub API instance for downloading models.
         public let hub: HubApi?
 
-        /// Creates an MLX language model.
+        /// The optional local directory containing the model files.
+        public let modelDirectory: URL?
+
+        /// Creates an MLX language model from a Hugging Face model identifier.
         ///
         /// - Parameters:
         ///   - modelId: The Hugging Face model identifier (for example, "mlx-community/Llama-3.2-3B-Instruct-4bit").
@@ -44,6 +47,16 @@ import Foundation
         public init(modelId: String, hub: HubApi? = nil) {
             self.modelId = modelId
             self.hub = hub
+            self.modelDirectory = nil
+        }
+
+        /// Creates an MLX language model from a local directory.
+        ///
+        /// - Parameter modelDirectory: The local directory URL containing the model files.
+        public init(modelDirectory: URL) {
+            self.modelId = modelDirectory.lastPathComponent
+            self.hub = nil
+            self.modelDirectory = modelDirectory
         }
 
         public func respond<Content>(
@@ -59,7 +72,9 @@ import Foundation
             }
 
             let context: ModelContext
-            if let hub = hub {
+            if let directory = modelDirectory {
+                context = try await loadModel(modelDirectory: directory)
+            } else if let hub = hub {
                 context = try await loadModel(hub: hub, id: modelId)
             } else {
                 context = try await loadModel(id: modelId)
