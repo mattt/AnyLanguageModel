@@ -194,7 +194,7 @@ public final class LanguageModelSession: @unchecked Sendable {
                 options: options
             )
 
-            // Add response entry to transcript (like streaming does)
+            // Add response entry to transcript
             let textContent: String
             if case .string(let str) = response.rawContent.kind {
                 textContent = str
@@ -541,7 +541,7 @@ extension LanguageModelSession {
                 options: options
             )
 
-            // Add response entry to transcript (like streaming does)
+            // Add response entry to transcript
             let textContent: String
             if case .string(let str) = response.rawContent.kind {
                 textContent = str

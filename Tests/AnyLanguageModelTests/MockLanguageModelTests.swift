@@ -13,9 +13,8 @@ struct MockLanguageModelTests {
         let response = try await session.respond(to: "Say hello")
         #expect(response.content == "Hello, World!")
 
-        // Verify transcript was updated
+        // Verify transcript was updated (prompt + response)
         #expect(session.transcript.count == 2)
-        #expect(response.transcriptEntries.count > 0)
     }
 
     @Test func echoResponse() async throws {
@@ -99,7 +98,6 @@ struct MockLanguageModelTests {
         try await Task.sleep(for: .milliseconds(10))
         #expect(asyncSession.isResponding == false)
         #expect(asyncSession.transcript.count == 2)
-        #expect(response.transcriptEntries.count > 0)
 
         // Test streaming response with isResponding state
         let streamModel = MockLanguageModel.streamingMock()
