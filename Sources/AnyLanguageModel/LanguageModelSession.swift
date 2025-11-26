@@ -194,9 +194,25 @@ public final class LanguageModelSession: @unchecked Sendable {
                 options: options
             )
 
-            // Add response entries to transcript
+            // Add response entry to transcript (like streaming does)
+            let textContent: String
+            if case .string(let str) = response.rawContent.kind {
+                textContent = str
+            } else {
+                textContent = response.rawContent.jsonString
+            }
+
+            let responseEntry = Transcript.Entry.response(
+                Transcript.Response(
+                    assetIDs: [],
+                    segments: [.text(.init(content: textContent))]
+                )
+            )
+
+            // Add tool entries and response to transcript
             await MainActor.run {
                 self.transcript.append(contentsOf: response.transcriptEntries)
+                self.transcript.append(responseEntry)
             }
 
             return response
@@ -525,9 +541,25 @@ extension LanguageModelSession {
                 options: options
             )
 
-            // Add response entries to transcript
+            // Add response entry to transcript (like streaming does)
+            let textContent: String
+            if case .string(let str) = response.rawContent.kind {
+                textContent = str
+            } else {
+                textContent = response.rawContent.jsonString
+            }
+
+            let responseEntry = Transcript.Entry.response(
+                Transcript.Response(
+                    assetIDs: [],
+                    segments: [.text(.init(content: textContent))]
+                )
+            )
+
+            // Add tool entries and response to transcript
             await MainActor.run {
                 self.transcript.append(contentsOf: response.transcriptEntries)
+                self.transcript.append(responseEntry)
             }
 
             return response
