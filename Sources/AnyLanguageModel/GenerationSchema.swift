@@ -408,14 +408,15 @@ public struct GenerationSchema: Sendable, Codable, CustomDebugStringConvertible 
     private static func convertDynamic(
         _ dynamic: DynamicGenerationSchema,
         nameMap: [String: DynamicGenerationSchema],
-        defs: inout [String: Node]
+        defs: inout [String: Node],
+        dynamicProp: DynamicGenerationSchema.Property? = nil
     ) throws -> Node {
         switch dynamic.body {
         case .object(let name, let desc, let properties):
             var props: [String: Node] = [:]
             var required: Set<String> = []
             for prop in properties {
-                props[prop.name] = try convertDynamic(prop.schema, nameMap: nameMap, defs: &defs)
+                props[prop.name] = try convertDynamic(prop.schema, nameMap: nameMap, defs: &defs, dynamicProp: prop)
                 if !prop.isOptional {
                     required.insert(prop.name)
                 }
@@ -452,20 +453,20 @@ public struct GenerationSchema: Sendable, Codable, CustomDebugStringConvertible 
 
         case .array(let item, let min, let max):
             let itemNode = try convertDynamic(item, nameMap: nameMap, defs: &defs)
-            return .array(ArrayNode(description: nil, items: itemNode, minItems: min, maxItems: max))
+            return .array(ArrayNode(description: dynamicProp?.description, items: itemNode, minItems: min, maxItems: max))
 
         case .scalar(let scalar):
             switch scalar {
             case .bool:
                 return .boolean
             case .string:
-                return .string(StringNode(description: nil, pattern: nil, enumChoices: nil))
+                return .string(StringNode(description: dynamicProp?.description, pattern: nil, enumChoices: nil))
             case .number:
-                return .number(NumberNode(description: nil, minimum: nil, maximum: nil, integerOnly: false))
+                return .number(NumberNode(description: dynamicProp?.description, minimum: nil, maximum: nil, integerOnly: false))
             case .integer:
-                return .number(NumberNode(description: nil, minimum: nil, maximum: nil, integerOnly: true))
+                return .number(NumberNode(description: dynamicProp?.description, minimum: nil, maximum: nil, integerOnly: true))
             case .decimal:
-                return .number(NumberNode(description: nil, minimum: nil, maximum: nil, integerOnly: false))
+                return .number(NumberNode(description: dynamicProp?.description, minimum: nil, maximum: nil, integerOnly: false))
             }
 
         case .reference(let name):
