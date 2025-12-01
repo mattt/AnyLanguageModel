@@ -639,6 +639,118 @@ struct OllamaCustomOptionsTests {
     }
 }
 
+@Suite("Gemini CustomGenerationOptions")
+struct GeminiCustomOptionsTests {
+    typealias Thinking = GeminiLanguageModel.CustomGenerationOptions.Thinking
+    typealias ServerTool = GeminiLanguageModel.CustomGenerationOptions.ServerTool
+
+    @Test func initialization() {
+        let options = GeminiLanguageModel.CustomGenerationOptions(
+            thinking: .dynamic,
+            serverTools: [.googleSearch, .codeExecution]
+        )
+
+        #expect(options.thinking == .dynamic)
+        #expect(options.serverTools?.count == 2)
+    }
+
+    @Test func thinkingModes() {
+        let disabled = GeminiLanguageModel.CustomGenerationOptions(thinking: .disabled)
+        let dynamic = GeminiLanguageModel.CustomGenerationOptions(thinking: .dynamic)
+        let budgeted = GeminiLanguageModel.CustomGenerationOptions(thinking: .budget(1024))
+
+        #expect(disabled.thinking == .disabled)
+        #expect(dynamic.thinking == .dynamic)
+        #expect(budgeted.thinking == .budget(1024))
+    }
+
+    @Test func thinkingExpressibleByLiteral() {
+        let fromBool: Thinking = true
+        let fromBoolFalse: Thinking = false
+        let fromInt: Thinking = 2048
+
+        #expect(fromBool == .dynamic)
+        #expect(fromBoolFalse == .disabled)
+        #expect(fromInt == .budget(2048))
+    }
+
+    @Test func serverToolTypes() {
+        let options = GeminiLanguageModel.CustomGenerationOptions(
+            serverTools: [
+                .googleSearch,
+                .urlContext,
+                .codeExecution,
+                .googleMaps(latitude: 37.7749, longitude: -122.4194),
+            ]
+        )
+
+        #expect(options.serverTools?.count == 4)
+    }
+
+    @Test func equality() {
+        let options1 = GeminiLanguageModel.CustomGenerationOptions(
+            thinking: .dynamic,
+            serverTools: [.googleSearch]
+        )
+        let options2 = GeminiLanguageModel.CustomGenerationOptions(
+            thinking: .dynamic,
+            serverTools: [.googleSearch]
+        )
+
+        #expect(options1 == options2)
+    }
+
+    @Test func inequality() {
+        let options1 = GeminiLanguageModel.CustomGenerationOptions(thinking: .dynamic)
+        let options2 = GeminiLanguageModel.CustomGenerationOptions(thinking: .disabled)
+        let options3 = GeminiLanguageModel.CustomGenerationOptions(thinking: .budget(1024))
+
+        #expect(options1 != options2)
+        #expect(options1 != options3)
+        #expect(options2 != options3)
+    }
+
+    @Test func hashable() {
+        let options = GeminiLanguageModel.CustomGenerationOptions(
+            thinking: .dynamic,
+            serverTools: [.googleSearch]
+        )
+
+        var set = Set<GeminiLanguageModel.CustomGenerationOptions>()
+        set.insert(options)
+        #expect(set.contains(options))
+    }
+
+    @Test func integrationWithGenerationOptions() {
+        var options = GenerationOptions(temperature: 0.7)
+        options[custom: GeminiLanguageModel.self] = .init(
+            thinking: .dynamic,
+            serverTools: [.googleSearch, .codeExecution]
+        )
+
+        let retrieved = options[custom: GeminiLanguageModel.self]
+        #expect(retrieved?.thinking == .dynamic)
+        #expect(retrieved?.serverTools?.count == 2)
+    }
+
+    @Test func nilValuesUseModelDefaults() {
+        let options = GeminiLanguageModel.CustomGenerationOptions()
+
+        #expect(options.thinking == nil)
+        #expect(options.serverTools == nil)
+    }
+
+    @Test func serverToolEquality() {
+        let tool1 = ServerTool.googleMaps(latitude: 37.7749, longitude: -122.4194)
+        let tool2 = ServerTool.googleMaps(latitude: 37.7749, longitude: -122.4194)
+        let tool3 = ServerTool.googleMaps(latitude: 40.7128, longitude: -74.0060)
+
+        #expect(tool1 == tool2)
+        #expect(tool1 != tool3)
+        #expect(ServerTool.googleSearch == ServerTool.googleSearch)
+    }
+}
+
 #if Llama
     @Suite("Llama CustomGenerationOptions")
     struct LlamaCustomOptionsTests {
