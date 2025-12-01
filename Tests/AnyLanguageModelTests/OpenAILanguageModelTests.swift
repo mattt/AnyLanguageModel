@@ -89,6 +89,26 @@ struct OpenAILanguageModelTests {
             #expect(!response.content.isEmpty)
         }
 
+        @Test func withCustomGenerationOptions() async throws {
+            let session = LanguageModelSession(model: model)
+
+            var options = GenerationOptions(
+                temperature: 0.7,
+                maximumResponseTokens: 50
+            )
+
+            // Set custom options (extraBody will be merged into the request)
+            options[custom: OpenAILanguageModel.self] = .init(
+                extraBody: ["user": .string("test-user-id")]
+            )
+
+            let response = try await session.respond(
+                to: "Say hello",
+                options: options
+            )
+            #expect(!response.content.isEmpty)
+        }
+
         @Test func multimodalWithImageURL() async throws {
             let transcript = Transcript(entries: [
                 .prompt(
@@ -204,6 +224,26 @@ struct OpenAILanguageModelTests {
 
             let response = try await session.respond(
                 to: "Tell me a fact",
+                options: options
+            )
+            #expect(!response.content.isEmpty)
+        }
+
+        @Test func withCustomGenerationOptions() async throws {
+            let session = LanguageModelSession(model: model)
+
+            var options = GenerationOptions(
+                temperature: 0.7,
+                maximumResponseTokens: 50
+            )
+
+            // Set custom options (extraBody will be merged into the request)
+            options[custom: OpenAILanguageModel.self] = .init(
+                extraBody: ["user": "test-user-id"]
+            )
+
+            let response = try await session.respond(
+                to: "Say hello",
                 options: options
             )
             #expect(!response.content.isEmpty)

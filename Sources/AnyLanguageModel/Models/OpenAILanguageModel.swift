@@ -46,7 +46,7 @@ public struct OpenAILanguageModel: LanguageModel {
     ///     extraBody: ["reasoning": .object(["enabled": .bool(true)])]
     /// )
     /// ```
-    public struct CustomGenerationOptions: AnyLanguageModel.CustomGenerationOptions {
+    public struct CustomGenerationOptions: AnyLanguageModel.CustomGenerationOptions, Codable {
         /// Additional parameters to include in the request body.
         ///
         /// These parameters are merged into the top-level request JSON,
