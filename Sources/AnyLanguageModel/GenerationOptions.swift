@@ -183,7 +183,7 @@ public struct GenerationOptions: Sendable, Equatable, Codable {
 ///     }
 /// }
 /// ```
-public protocol CustomGenerationOptions: Hashable, Sendable {}
+public protocol CustomGenerationOptions: Equatable, Sendable {}
 
 extension Never: CustomGenerationOptions {}
 
