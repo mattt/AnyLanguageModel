@@ -80,7 +80,7 @@ public struct OpenAILanguageModel: LanguageModel {
         to prompt: Prompt,
         generating type: Content.Type,
         includeSchemaInPrompt: Bool,
-        options: any GenerationOptionsProtocol
+        options: GenerationOptions
     ) async throws -> LanguageModelSession.Response<Content> where Content: Generable {
         // For now, only String is supported
         guard type == String.self else {
@@ -128,7 +128,7 @@ public struct OpenAILanguageModel: LanguageModel {
     private func respondWithChatCompletions<Content>(
         messages: [OpenAIMessage],
         tools: [OpenAITool]?,
-        options: any GenerationOptionsProtocol,
+        options: GenerationOptions,
         session: LanguageModelSession
     ) async throws -> LanguageModelSession.Response<Content> where Content: Generable {
         let params = ChatCompletions.createRequestBody(
@@ -181,7 +181,7 @@ public struct OpenAILanguageModel: LanguageModel {
     private func respondWithResponses<Content>(
         messages: [OpenAIMessage],
         tools: [OpenAITool]?,
-        options: any GenerationOptionsProtocol,
+        options: GenerationOptions,
         session: LanguageModelSession
     ) async throws -> LanguageModelSession.Response<Content> where Content: Generable {
         let params = Responses.createRequestBody(
@@ -229,7 +229,7 @@ public struct OpenAILanguageModel: LanguageModel {
         to prompt: Prompt,
         generating type: Content.Type,
         includeSchemaInPrompt: Bool,
-        options: any GenerationOptionsProtocol
+        options: GenerationOptions
     ) -> sending LanguageModelSession.ResponseStream<Content> where Content: Generable {
         // For now, only String is supported
         guard type == String.self else {
@@ -386,7 +386,7 @@ private enum ChatCompletions {
         model: String,
         messages: [OpenAIMessage],
         tools: [OpenAITool]?,
-        options: any GenerationOptionsProtocol,
+        options: GenerationOptions,
         stream: Bool
     ) -> JSONValue {
         var body: [String: JSONValue] = [
@@ -442,7 +442,7 @@ private enum Responses {
         model: String,
         messages: [OpenAIMessage],
         tools: [OpenAITool]?,
-        options: any GenerationOptionsProtocol,
+        options: GenerationOptions,
         stream: Bool
     ) -> JSONValue {
         // Build input blocks from the user message content

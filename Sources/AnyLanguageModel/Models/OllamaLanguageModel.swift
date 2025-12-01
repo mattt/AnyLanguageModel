@@ -55,7 +55,7 @@ public struct OllamaLanguageModel: LanguageModel {
         to prompt: Prompt,
         generating type: Content.Type,
         includeSchemaInPrompt: Bool,
-        options: any GenerationOptionsProtocol
+        options: GenerationOptions
     ) async throws -> LanguageModelSession.Response<Content> where Content: Generable {
         // For now, only String is supported
         guard type == String.self else {
@@ -115,7 +115,7 @@ public struct OllamaLanguageModel: LanguageModel {
         to prompt: Prompt,
         generating type: Content.Type,
         includeSchemaInPrompt: Bool,
-        options: any GenerationOptionsProtocol
+        options: GenerationOptions
     ) -> sending LanguageModelSession.ResponseStream<Content> where Content: Generable {
         // For now, only String is supported
         guard type == String.self else {
@@ -253,7 +253,7 @@ private func resolveToolCalls(
 
 // MARK: - Conversions
 
-private func convertOptions(_ options: any GenerationOptionsProtocol) -> [String: JSONValue]? {
+private func convertOptions(_ options: GenerationOptions) -> [String: JSONValue]? {
     var ollamaOptions: [String: JSONValue] = [:]
 
     // Handle temperature

@@ -3,12 +3,6 @@ import Foundation
 public protocol LanguageModel: Sendable {
     associatedtype UnavailableReason
 
-    /// The generation options type this model accepts.
-    ///
-    /// Models can define custom options types with extended properties
-    /// by setting this to a custom type conforming to ``GenerationOptionsProtocol``.
-    associatedtype GenerationOptions: GenerationOptionsProtocol = AnyLanguageModel.GenerationOptions
-
     var availability: Availability<UnavailableReason> { get }
 
     func prewarm(
@@ -21,7 +15,7 @@ public protocol LanguageModel: Sendable {
         to prompt: Prompt,
         generating type: Content.Type,
         includeSchemaInPrompt: Bool,
-        options: any GenerationOptionsProtocol
+        options: GenerationOptions
     ) async throws -> LanguageModelSession.Response<Content> where Content: Generable
 
     func streamResponse<Content>(
@@ -29,7 +23,7 @@ public protocol LanguageModel: Sendable {
         to prompt: Prompt,
         generating type: Content.Type,
         includeSchemaInPrompt: Bool,
-        options: any GenerationOptionsProtocol
+        options: GenerationOptions
     ) -> sending LanguageModelSession.ResponseStream<Content> where Content: Generable
 
     func logFeedbackAttachment(

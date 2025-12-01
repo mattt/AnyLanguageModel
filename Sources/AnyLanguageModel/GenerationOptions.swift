@@ -1,24 +1,3 @@
-/// A protocol that defines the common interface for generation options.
-///
-/// Types conforming to this protocol provide the basic options that control
-/// how a language model generates its response to a prompt.
-public protocol GenerationOptionsProtocol: Sendable, Equatable {
-    /// A sampling strategy for how the model picks tokens when generating a response.
-    var sampling: GenerationOptions.SamplingMode? { get }
-
-    /// Temperature influences the confidence of the model's response.
-    var temperature: Double? { get }
-
-    /// The maximum number of tokens the model is allowed to produce in its response.
-    var maximumResponseTokens: Int? { get }
-
-    /// Creates options from another conforming type.
-    ///
-    /// This initializer allows converting between different options types,
-    /// copying the common properties.
-    init(from other: any GenerationOptionsProtocol)
-}
-
 /// Options that control how the model generates its response to a prompt.
 ///
 /// Create a ``GenerationOptions`` structure when you want to adjust
@@ -26,7 +5,7 @@ public protocol GenerationOptionsProtocol: Sendable, Equatable {
 /// perform various adjustments on how the model chooses output tokens,
 /// to specify the penalties for repeating tokens or generating
 /// longer responses.
-public struct GenerationOptions: GenerationOptionsProtocol, Codable {
+public struct GenerationOptions: Sendable, Equatable, Codable {
 
     /// A sampling strategy for how the model picks tokens when generating a
     /// response.
@@ -86,15 +65,6 @@ public struct GenerationOptions: GenerationOptionsProtocol, Codable {
         self.sampling = sampling
         self.temperature = temperature
         self.maximumResponseTokens = maximumResponseTokens
-    }
-
-    /// Creates generation options from another conforming type.
-    ///
-    /// - Parameter other: The options to copy common properties from.
-    public init(from other: any GenerationOptionsProtocol) {
-        self.sampling = other.sampling
-        self.temperature = other.temperature
-        self.maximumResponseTokens = other.maximumResponseTokens
     }
 
     public static func == (a: GenerationOptions, b: GenerationOptions) -> Bool {

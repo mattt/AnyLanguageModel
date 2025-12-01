@@ -90,7 +90,7 @@ public struct AnthropicLanguageModel: LanguageModel {
         to prompt: Prompt,
         generating type: Content.Type,
         includeSchemaInPrompt: Bool,
-        options: any GenerationOptionsProtocol
+        options: GenerationOptions
     ) async throws -> LanguageModelSession.Response<Content> where Content: Generable {
         // For now, only String is supported
         guard type == String.self else {
@@ -164,7 +164,7 @@ public struct AnthropicLanguageModel: LanguageModel {
         to prompt: Prompt,
         generating type: Content.Type,
         includeSchemaInPrompt: Bool,
-        options: any GenerationOptionsProtocol
+        options: GenerationOptions
     ) -> sending LanguageModelSession.ResponseStream<Content> where Content: Generable {
         // For now, only String is supported
         guard type == String.self else {
@@ -264,7 +264,7 @@ private func createMessageParams(
     system: String?,
     messages: [AnthropicMessage],
     tools: [AnthropicTool]?,
-    options: any GenerationOptionsProtocol
+    options: GenerationOptions
 ) throws -> [String: JSONValue] {
     var params: [String: JSONValue] = [
         "model": .string(model),

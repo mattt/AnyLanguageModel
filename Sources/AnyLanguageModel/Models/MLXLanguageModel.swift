@@ -44,7 +44,7 @@ import Foundation
             to prompt: Prompt,
             generating type: Content.Type,
             includeSchemaInPrompt: Bool,
-            options: any GenerationOptionsProtocol
+            options: GenerationOptions
         ) async throws -> LanguageModelSession.Response<Content> where Content: Generable {
             // For now, only String is supported
             guard type == String.self else {
@@ -147,7 +147,7 @@ import Foundation
             to prompt: Prompt,
             generating type: Content.Type,
             includeSchemaInPrompt: Bool,
-            options: any GenerationOptionsProtocol
+            options: GenerationOptions
         ) -> sending LanguageModelSession.ResponseStream<Content> where Content: Generable {
             // For now, only String is supported
             guard type == String.self else {
@@ -165,7 +165,7 @@ import Foundation
 
     // MARK: - Options Mapping
 
-    private func toGenerateParameters(_ options: any GenerationOptionsProtocol) -> MLXLMCommon.GenerateParameters {
+    private func toGenerateParameters(_ options: GenerationOptions) -> MLXLMCommon.GenerateParameters {
         MLXLMCommon.GenerateParameters(
             maxTokens: options.maximumResponseTokens,
             maxKVSize: nil,
