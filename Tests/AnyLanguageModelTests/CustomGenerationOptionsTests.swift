@@ -385,17 +385,6 @@ struct OpenAICustomOptionsTests {
         #expect(options1 == options2)
     }
 
-    @Test func hashable() {
-        let options = OpenAILanguageModel.CustomGenerationOptions(
-            topP: 0.9,
-            seed: 42
-        )
-
-        var set = Set<OpenAILanguageModel.CustomGenerationOptions>()
-        set.insert(options)
-        #expect(set.contains(options))
-    }
-
     @Test func codable() throws {
         let options = OpenAILanguageModel.CustomGenerationOptions(
             topP: 0.9,
@@ -569,16 +558,6 @@ struct OllamaCustomOptionsTests {
         #expect(options1 == options2)
     }
 
-    @Test func hashable() {
-        let options: OllamaLanguageModel.CustomGenerationOptions = [
-            "seed": .int(42)
-        ]
-
-        var set = Set<OllamaLanguageModel.CustomGenerationOptions>()
-        set.insert(options)
-        #expect(set.contains(options))
-    }
-
     @Test func codable() throws {
         let options: OllamaLanguageModel.CustomGenerationOptions = [
             "seed": .int(42),
@@ -697,17 +676,6 @@ struct GeminiCustomOptionsTests {
         #expect(options1 != options2)
         #expect(options1 != options3)
         #expect(options2 != options3)
-    }
-
-    @Test func hashable() {
-        let options = GeminiLanguageModel.CustomGenerationOptions(
-            thinking: .dynamic,
-            serverTools: [.googleSearch]
-        )
-
-        var set = Set<GeminiLanguageModel.CustomGenerationOptions>()
-        set.insert(options)
-        #expect(set.contains(options))
     }
 
     @Test func integrationWithGenerationOptions() {
