@@ -55,7 +55,7 @@ import AnyLanguageModel
             let model: SystemLanguageModel = SystemLanguageModel()
             let session = LanguageModelSession(model: model)
 
-            let stream = session.streamResponse(to: "Say 'Hello' slowly")
+            let stream = session.streamResponse(to: "Count to 20 in Italian")
 
             var snapshots: [LanguageModelSession.ResponseStream<String>.Snapshot] = []
             for try await snapshot in stream {
