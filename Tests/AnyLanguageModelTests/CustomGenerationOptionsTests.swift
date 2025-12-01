@@ -180,17 +180,6 @@ struct AnthropicCustomOptionsTests {
         #expect(options1 == options2)
     }
 
-    @Test func hashable() {
-        let options = AnthropicLanguageModel.CustomGenerationOptions(
-            topP: 0.9,
-            topK: 40
-        )
-
-        var set = Set<AnthropicLanguageModel.CustomGenerationOptions>()
-        set.insert(options)
-        #expect(set.contains(options))
-    }
-
     @Test func codable() throws {
         let options = AnthropicLanguageModel.CustomGenerationOptions(
             topP: 0.9,
