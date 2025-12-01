@@ -29,9 +29,356 @@ public struct OpenAILanguageModel: LanguageModel {
         /// When selected, use the Chat Completions API.
         /// https://platform.openai.com/docs/api-reference/chat/create
         case chatCompletions
+
         /// When selected, use the Responses API.
         /// https://platform.openai.com/docs/api-reference/responses
         case responses
+    }
+
+    /// Custom generation options specific to OpenAI-compatible APIs.
+    ///
+    /// Use this type to pass additional parameters that are not part of the
+    /// standard ``GenerationOptions``, such as sampling parameters, penalties,
+    /// and vendor-specific extensions.
+    ///
+    /// ```swift
+    /// var options = GenerationOptions(temperature: 0.7)
+    /// options[custom: OpenAILanguageModel.self] = .init(
+    ///     topP: 0.9,
+    ///     frequencyPenalty: 0.5,
+    ///     presencePenalty: 0.5,
+    ///     stopSequences: ["END"]
+    /// )
+    /// ```
+    ///
+    /// - Important: Custom sampling parameters in this type are sent directly to the API
+    ///   and do not override equivalent settings in ``GenerationOptions``. Both values
+    ///   will be included in the request if set; the API determines which takes precedence.
+    public struct CustomGenerationOptions: AnyLanguageModel.CustomGenerationOptions, Codable {
+        // MARK: - Sampling Parameters
+
+        /// An alternative to sampling with temperature, called nucleus sampling.
+        ///
+        /// The model considers the results of the tokens with `topP` probability mass.
+        /// So `0.1` means only the tokens comprising the top 10% probability mass
+        /// are considered.
+        ///
+        /// We generally recommend altering this or `temperature` but not both.
+        ///
+        /// Range: `0.0` to `1.0`. Defaults to `1.0`.
+        public var topP: Double?
+
+        /// Number between `-2.0` and `2.0`. Positive values penalize new tokens based
+        /// on their existing frequency in the text so far, decreasing the model's
+        /// likelihood to repeat the same line verbatim.
+        public var frequencyPenalty: Double?
+
+        /// Number between `-2.0` and `2.0`. Positive values penalize new tokens based
+        /// on whether they appear in the text so far, increasing the model's likelihood
+        /// to talk about new topics.
+        public var presencePenalty: Double?
+
+        /// Up to 4 sequences where the API will stop generating further tokens.
+        /// The returned text will not contain the stop sequence.
+        ///
+        /// Not supported with latest reasoning models (o3 and o4-mini).
+        public var stopSequences: [String]?
+
+        /// Modify the likelihood of specified tokens appearing in the completion.
+        ///
+        /// Maps token IDs to an associated bias value from `-100` to `100`.
+        /// Values between `-1` and `1` should decrease or increase likelihood of selection;
+        /// values like `-100` or `100` should result in a ban or exclusive selection.
+        public var logitBias: [Int: Int]?
+
+        /// If specified, the system will make a best effort to sample deterministically,
+        /// such that repeated requests with the same `seed` and parameters should return
+        /// the same result.
+        ///
+        /// Determinism is not guaranteed.
+        public var seed: Int?
+
+        // MARK: - Output Configuration
+
+        /// Whether to return log probabilities of the output tokens.
+        ///
+        /// If `true`, returns the log probabilities of each output token.
+        public var logprobs: Bool?
+
+        /// An integer between `0` and `20` specifying the number of most likely tokens
+        /// to return at each token position, each with an associated log probability.
+        ///
+        /// `logprobs` must be set to `true` if this parameter is used.
+        public var topLogprobs: Int?
+
+        /// How many chat completion choices to generate for each input message.
+        ///
+        /// Note that you will be charged based on the number of generated tokens
+        /// across all choices. Keep `n` as `1` to minimize costs.
+        ///
+        /// Only applicable to Chat Completions API.
+        public var numberOfCompletions: Int?
+
+        /// Constrains the verbosity of the model's response.
+        ///
+        /// Lower values will result in more concise responses, while higher values
+        /// will result in more verbose responses.
+        public var verbosity: Verbosity?
+
+        // MARK: - Reasoning Configuration
+
+        /// Constrains effort on reasoning for reasoning models.
+        ///
+        /// Reducing reasoning effort can result in faster responses and fewer tokens
+        /// used on reasoning in a response.
+        public var reasoningEffort: ReasoningEffort?
+
+        /// Configuration options for reasoning models (Responses API).
+        ///
+        /// Use this for `gpt-5` and `o-series` models to configure reasoning behavior.
+        public var reasoning: ReasoningConfiguration?
+
+        // MARK: - Tool Configuration
+
+        /// Whether to allow the model to run tool calls in parallel.
+        ///
+        /// Defaults to `true`.
+        public var parallelToolCalls: Bool?
+
+        /// The maximum number of total calls to built-in tools that can be processed
+        /// in a response.
+        ///
+        /// This maximum number applies across all built-in tool calls, not per
+        /// individual tool. Any further attempts to call a tool by the model will
+        /// be ignored.
+        ///
+        /// Only applicable to Responses API.
+        public var maxToolCalls: Int?
+
+        // MARK: - Service Configuration
+
+        /// Specifies the processing type used for serving the request.
+        public var serviceTier: ServiceTier?
+
+        /// Whether to store the generated model response for later retrieval via API.
+        ///
+        /// Chat Completions defaults to `false`. Responses API defaults to `true`.
+        public var store: Bool?
+
+        /// Set of up to 16 key-value pairs that can be attached to an object.
+        ///
+        /// This can be useful for storing additional information about the object
+        /// in a structured format, and querying for objects via API or the dashboard.
+        ///
+        /// Keys have a maximum length of 64 characters.
+        /// Values have a maximum length of 512 characters.
+        public var metadata: [String: String]?
+
+        /// A stable identifier used to help detect users of your application
+        /// that may be violating OpenAI's usage policies.
+        ///
+        /// The IDs should be a string that uniquely identifies each user.
+        /// We recommend hashing their username or email address to avoid
+        /// sending any identifying information.
+        public var safetyIdentifier: String?
+
+        /// Used by OpenAI to cache responses for similar requests to optimize
+        /// your cache hit rates.
+        public var promptCacheKey: String?
+
+        /// The retention policy for the prompt cache.
+        ///
+        /// Set to `"24h"` to enable extended prompt caching, which keeps cached
+        /// prefixes active for longer, up to a maximum of 24 hours.
+        public var promptCacheRetention: String?
+
+        // MARK: - Truncation
+
+        /// The truncation strategy to use for the model response.
+        ///
+        /// Only applicable to Responses API.
+        public var truncation: Truncation?
+
+        // MARK: - Extra Body
+
+        /// Additional parameters to include in the request body.
+        ///
+        /// These parameters are merged into the top-level request JSON,
+        /// allowing you to pass vendor-specific options like `reasoning`
+        /// for Grok models via OpenRouter, or any parameters not explicitly
+        /// modeled in this type.
+        public var extraBody: [String: JSONValue]?
+
+        // MARK: - Nested Types
+
+        /// The verbosity level for model responses.
+        public enum Verbosity: String, Hashable, Codable, Sendable {
+            /// Produces more concise responses.
+            case low
+            /// The default verbosity level.
+            case medium
+            /// Produces more verbose responses.
+            case high
+        }
+
+        /// The reasoning effort level for reasoning models.
+        public enum ReasoningEffort: String, Hashable, Codable, Sendable {
+            /// No reasoning (supported by gpt-5.1).
+            case none
+            /// Minimal reasoning effort.
+            case minimal
+            /// Low reasoning effort.
+            case low
+            /// Medium reasoning effort (default for most models).
+            case medium
+            /// High reasoning effort.
+            case high
+        }
+
+        /// Configuration options for reasoning models (Responses API).
+        public struct ReasoningConfiguration: Hashable, Codable, Sendable {
+            /// The reasoning effort level.
+            public var effort: ReasoningEffort?
+
+            /// Optional summary mode for reasoning output.
+            ///
+            /// When set, provides a summary of the reasoning process.
+            public var summary: String?
+
+            enum CodingKeys: String, CodingKey {
+                case effort
+                case summary
+            }
+
+            /// Creates a reasoning configuration.
+            ///
+            /// - Parameters:
+            ///   - effort: The reasoning effort level.
+            ///   - summary: Optional summary mode.
+            public init(effort: ReasoningEffort? = nil, summary: String? = nil) {
+                self.effort = effort
+                self.summary = summary
+            }
+        }
+
+        /// The service tier for request processing.
+        public enum ServiceTier: String, Hashable, Codable, Sendable {
+            /// Uses the service tier configured in the Project settings.
+            case auto
+            /// Standard pricing and performance.
+            case `default`
+            /// Flex processing tier.
+            case flex
+            /// Priority processing tier.
+            case priority
+        }
+
+        /// The truncation strategy for model responses.
+        public enum Truncation: String, Hashable, Codable, Sendable {
+            /// If the input exceeds the model's context window size, truncate
+            /// the response by dropping items from the beginning.
+            case auto
+            /// If the input size exceeds the context window, fail with a 400 error.
+            case disabled
+        }
+
+        enum CodingKeys: String, CodingKey {
+            case topP = "top_p"
+            case frequencyPenalty = "frequency_penalty"
+            case presencePenalty = "presence_penalty"
+            case stopSequences = "stop"
+            case logitBias = "logit_bias"
+            case seed
+            case logprobs
+            case topLogprobs = "top_logprobs"
+            case numberOfCompletions = "n"
+            case verbosity
+            case reasoningEffort = "reasoning_effort"
+            case reasoning
+            case parallelToolCalls = "parallel_tool_calls"
+            case maxToolCalls = "max_tool_calls"
+            case serviceTier = "service_tier"
+            case store
+            case metadata
+            case safetyIdentifier = "safety_identifier"
+            case promptCacheKey = "prompt_cache_key"
+            case promptCacheRetention = "prompt_cache_retention"
+            case truncation
+            case extraBody = "extra_body"
+        }
+
+        /// Creates custom generation options for OpenAI-compatible APIs.
+        ///
+        /// - Parameters:
+        ///   - topP: Nucleus sampling probability threshold.
+        ///   - frequencyPenalty: Penalty for token frequency (-2.0 to 2.0).
+        ///   - presencePenalty: Penalty for token presence (-2.0 to 2.0).
+        ///   - stopSequences: Up to 4 sequences that stop generation.
+        ///   - logitBias: Token ID to bias value mapping.
+        ///   - seed: Seed for deterministic sampling.
+        ///   - logprobs: Whether to return log probabilities.
+        ///   - topLogprobs: Number of most likely tokens to return (0-20).
+        ///   - numberOfCompletions: Number of completions to generate.
+        ///   - verbosity: Response verbosity level.
+        ///   - reasoningEffort: Reasoning effort for reasoning models.
+        ///   - reasoning: Reasoning configuration (Responses API).
+        ///   - parallelToolCalls: Whether to allow parallel tool calls.
+        ///   - maxToolCalls: Maximum number of tool calls (Responses API).
+        ///   - serviceTier: Service tier for request processing.
+        ///   - store: Whether to store the response.
+        ///   - metadata: Key-value pairs for additional information.
+        ///   - safetyIdentifier: User identifier for safety detection.
+        ///   - promptCacheKey: Key for response caching.
+        ///   - promptCacheRetention: Cache retention policy.
+        ///   - truncation: Truncation strategy (Responses API).
+        ///   - extraBody: Additional parameters for the request body.
+        public init(
+            topP: Double? = nil,
+            frequencyPenalty: Double? = nil,
+            presencePenalty: Double? = nil,
+            stopSequences: [String]? = nil,
+            logitBias: [Int: Int]? = nil,
+            seed: Int? = nil,
+            logprobs: Bool? = nil,
+            topLogprobs: Int? = nil,
+            numberOfCompletions: Int? = nil,
+            verbosity: Verbosity? = nil,
+            reasoningEffort: ReasoningEffort? = nil,
+            reasoning: ReasoningConfiguration? = nil,
+            parallelToolCalls: Bool? = nil,
+            maxToolCalls: Int? = nil,
+            serviceTier: ServiceTier? = nil,
+            store: Bool? = nil,
+            metadata: [String: String]? = nil,
+            safetyIdentifier: String? = nil,
+            promptCacheKey: String? = nil,
+            promptCacheRetention: String? = nil,
+            truncation: Truncation? = nil,
+            extraBody: [String: JSONValue]? = nil
+        ) {
+            self.topP = topP
+            self.frequencyPenalty = frequencyPenalty
+            self.presencePenalty = presencePenalty
+            self.stopSequences = stopSequences
+            self.logitBias = logitBias
+            self.seed = seed
+            self.logprobs = logprobs
+            self.topLogprobs = topLogprobs
+            self.numberOfCompletions = numberOfCompletions
+            self.verbosity = verbosity
+            self.reasoningEffort = reasoningEffort
+            self.reasoning = reasoning
+            self.parallelToolCalls = parallelToolCalls
+            self.maxToolCalls = maxToolCalls
+            self.serviceTier = serviceTier
+            self.store = store
+            self.metadata = metadata
+            self.safetyIdentifier = safetyIdentifier
+            self.promptCacheKey = promptCacheKey
+            self.promptCacheRetention = promptCacheRetention
+            self.truncation = truncation
+            self.extraBody = extraBody
+        }
     }
 
     /// The base URL for the API endpoint.
@@ -403,7 +750,85 @@ private enum ChatCompletions {
             body["temperature"] = .double(temperature)
         }
         if let maxTokens = options.maximumResponseTokens {
-            body["max_tokens"] = .int(maxTokens)
+            body["max_completion_tokens"] = .int(maxTokens)
+        }
+
+        // Apply custom options
+        if let customOptions = options[custom: OpenAILanguageModel.self] {
+            // Sampling parameters
+            if let topP = customOptions.topP {
+                body["top_p"] = .double(topP)
+            }
+            if let frequencyPenalty = customOptions.frequencyPenalty {
+                body["frequency_penalty"] = .double(frequencyPenalty)
+            }
+            if let presencePenalty = customOptions.presencePenalty {
+                body["presence_penalty"] = .double(presencePenalty)
+            }
+            if let stopSequences = customOptions.stopSequences, !stopSequences.isEmpty {
+                body["stop"] = .array(stopSequences.map { .string($0) })
+            }
+            if let logitBias = customOptions.logitBias, !logitBias.isEmpty {
+                body["logit_bias"] = .object(
+                    Dictionary(uniqueKeysWithValues: logitBias.map { (String($0.key), JSONValue.int($0.value)) })
+                )
+            }
+            if let seed = customOptions.seed {
+                body["seed"] = .int(seed)
+            }
+
+            // Output configuration
+            if let logprobs = customOptions.logprobs {
+                body["logprobs"] = .bool(logprobs)
+            }
+            if let topLogprobs = customOptions.topLogprobs {
+                body["top_logprobs"] = .int(topLogprobs)
+            }
+            if let n = customOptions.numberOfCompletions {
+                body["n"] = .int(n)
+            }
+            if let verbosity = customOptions.verbosity {
+                body["verbosity"] = .string(verbosity.rawValue)
+            }
+
+            // Reasoning configuration
+            if let reasoningEffort = customOptions.reasoningEffort {
+                body["reasoning_effort"] = .string(reasoningEffort.rawValue)
+            }
+
+            // Tool configuration
+            if let parallelToolCalls = customOptions.parallelToolCalls {
+                body["parallel_tool_calls"] = .bool(parallelToolCalls)
+            }
+
+            // Service configuration
+            if let serviceTier = customOptions.serviceTier {
+                body["service_tier"] = .string(serviceTier.rawValue)
+            }
+            if let store = customOptions.store {
+                body["store"] = .bool(store)
+            }
+            if let metadata = customOptions.metadata, !metadata.isEmpty {
+                body["metadata"] = .object(
+                    Dictionary(uniqueKeysWithValues: metadata.map { ($0.key, JSONValue.string($0.value)) })
+                )
+            }
+            if let safetyIdentifier = customOptions.safetyIdentifier {
+                body["safety_identifier"] = .string(safetyIdentifier)
+            }
+            if let promptCacheKey = customOptions.promptCacheKey {
+                body["prompt_cache_key"] = .string(promptCacheKey)
+            }
+            if let promptCacheRetention = customOptions.promptCacheRetention {
+                body["prompt_cache_retention"] = .string(promptCacheRetention)
+            }
+
+            // Merge extraBody last to allow overrides
+            if let extraBody = customOptions.extraBody {
+                for (key, value) in extraBody {
+                    body[key] = value
+                }
+            }
         }
 
         return .object(body)
@@ -515,6 +940,75 @@ private enum Responses {
         }
         if let maxTokens = options.maximumResponseTokens {
             body["max_output_tokens"] = .int(maxTokens)
+        }
+
+        // Apply custom options
+        if let customOptions = options[custom: OpenAILanguageModel.self] {
+            // Sampling parameters
+            if let topP = customOptions.topP {
+                body["top_p"] = .double(topP)
+            }
+
+            // Output configuration
+            if let topLogprobs = customOptions.topLogprobs {
+                body["top_logprobs"] = .int(topLogprobs)
+            }
+
+            // Reasoning configuration
+            if let reasoning = customOptions.reasoning {
+                var reasoningObj: [String: JSONValue] = [:]
+                if let effort = reasoning.effort {
+                    reasoningObj["effort"] = .string(effort.rawValue)
+                }
+                if let summary = reasoning.summary {
+                    reasoningObj["summary"] = .string(summary)
+                }
+                if !reasoningObj.isEmpty {
+                    body["reasoning"] = .object(reasoningObj)
+                }
+            }
+
+            // Tool configuration
+            if let parallelToolCalls = customOptions.parallelToolCalls {
+                body["parallel_tool_calls"] = .bool(parallelToolCalls)
+            }
+            if let maxToolCalls = customOptions.maxToolCalls {
+                body["max_tool_calls"] = .int(maxToolCalls)
+            }
+
+            // Service configuration
+            if let serviceTier = customOptions.serviceTier {
+                body["service_tier"] = .string(serviceTier.rawValue)
+            }
+            if let store = customOptions.store {
+                body["store"] = .bool(store)
+            }
+            if let metadata = customOptions.metadata, !metadata.isEmpty {
+                body["metadata"] = .object(
+                    Dictionary(uniqueKeysWithValues: metadata.map { ($0.key, JSONValue.string($0.value)) })
+                )
+            }
+            if let safetyIdentifier = customOptions.safetyIdentifier {
+                body["safety_identifier"] = .string(safetyIdentifier)
+            }
+            if let promptCacheKey = customOptions.promptCacheKey {
+                body["prompt_cache_key"] = .string(promptCacheKey)
+            }
+            if let promptCacheRetention = customOptions.promptCacheRetention {
+                body["prompt_cache_retention"] = .string(promptCacheRetention)
+            }
+
+            // Truncation
+            if let truncation = customOptions.truncation {
+                body["truncation"] = .string(truncation.rawValue)
+            }
+
+            // Merge extraBody last to allow overrides
+            if let extraBody = customOptions.extraBody {
+                for (key, value) in extraBody {
+                    body[key] = value
+                }
+            }
         }
 
         return .object(body)

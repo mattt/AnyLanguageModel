@@ -3,6 +3,13 @@ import Foundation
 public protocol LanguageModel: Sendable {
     associatedtype UnavailableReason
 
+    /// The type of custom generation options this model accepts.
+    ///
+    /// Models can define their own custom options types with extended properties
+    /// by setting this to a custom type conforming to ``CustomGenerationOptions``.
+    /// The default is `Never`, indicating no custom options are supported.
+    associatedtype CustomGenerationOptions: AnyLanguageModel.CustomGenerationOptions = Never
+
     var availability: Availability<UnavailableReason> { get }
 
     func prewarm(

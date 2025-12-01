@@ -364,6 +364,20 @@ Enable the trait in Package.swift:
 )
 ```
 
+Custom generation options for llama.cpp provide fine-grained
+control over sampling parameters:
+
+```swift
+var options = GenerationOptions(temperature: 0.8)
+options[custom: LlamaLanguageModel.self] = .init(
+    repeatPenalty: 1.2,
+    repeatLastN: 128,
+    frequencyPenalty: 0.1,
+    presencePenalty: 0.1,
+    mirostat: .v2(tau: 5.0, eta: 0.1)  // Adaptive perplexity control
+)
+```
+
 > [!NOTE]
 > Image inputs are not currently supported with `LlamaLanguageModel`.
 
@@ -404,6 +418,24 @@ let model = OpenAILanguageModel(
 )
 ```
 
+Use custom generation options for advanced parameters like sampling controls,
+reasoning effort (for o-series models), and vendor-specific extensions:
+
+```swift
+var options = GenerationOptions(temperature: 0.8)
+options[custom: OpenAILanguageModel.self] = .init(
+    topP: 0.9,
+    frequencyPenalty: 0.5,
+    presencePenalty: 0.3,
+    stopSequences: ["END"],
+    reasoningEffort: .high,        // For reasoning models (o3, o4-mini)
+    serviceTier: .priority,
+    extraBody: [                   // Vendor-specific parameters
+        "custom_param": .string("value")
+    ]
+)
+```
+
 ### Anthropic
 
 Uses the [Messages API](https://docs.claude.com/en/api/messages) with Claude models:
@@ -434,6 +466,21 @@ let response = try await session.respond(
 print(response.content)
 ```
 
+Use custom generation options for Anthropic-specific parameters like
+extended thinking, tool choice control, and sampling parameters:
+
+```swift
+var options = GenerationOptions(temperature: 0.7)
+options[custom: AnthropicLanguageModel.self] = .init(
+    topP: 0.9,
+    topK: 40,
+    stopSequences: ["END", "STOP"],
+    thinking: .init(budgetTokens: 4096),  // Extended thinking
+    toolChoice: .auto,                     // Tool selection control
+    serviceTier: .priority
+)
+```
+
 ### Google Gemini
 
 Uses the [Gemini API](https://ai.google.dev/api/generate-content) with Gemini models:
@@ -462,33 +509,38 @@ print(response.content)
 
 Gemini models use an internal ["thinking process"](https://ai.google.dev/gemini-api/docs/thinking)
 that improves reasoning and multi-step planning.
-You can configure how much Gemini should "think" using the `thinking` parameter:
+Configure thinking mode through custom generation options:
 
 ```swift
-// Enable thinking
-var model = GeminiLanguageModel(
-    apiKey: apiKey,
-    model: "gemini-2.5-flash",
-    thinking: true /* or `.dynamic` */,
-)
+var options = GenerationOptions()
 
-// Set an explicit number of tokens for its thinking budget
-model.thinking = .budget(1024)
+// Enable thinking with dynamic budget allocation
+options[custom: GeminiLanguageModel.self] = .init(thinking: .dynamic)
 
-// Revert to default configuration without thinking
-model.thinking = false /* or `.disabled` */
+// Or set an explicit number of tokens for its thinking budget
+options[custom: GeminiLanguageModel.self] = .init(thinking: .budget(1024))
+
+// Disable thinking (default)
+options[custom: GeminiLanguageModel.self] = .init(thinking: .disabled)
+
+let response = try await session.respond(to: "Solve this problem", options: options)
 ```
 
 Gemini supports [server-side tools](https://ai.google.dev/gemini-api/docs/google-search)
 that execute transparently on Google's infrastructure:
 
 ```swift
-let model = GeminiLanguageModel(
-    apiKey: apiKey,
-    model: "gemini-2.5-flash",
+var options = GenerationOptions()
+options[custom: GeminiLanguageModel.self] = .init(
     serverTools: [
-        .googleMaps(latitude: 35.6580, longitude: 139.7016) // Optional location
+        .googleSearch,
+        .googleMaps(latitude: 35.6580, longitude: 139.7016)
     ]
+)
+
+let response = try await session.respond(
+    to: "What coffee shops are nearby?",
+    options: options
 )
 ```
 
@@ -527,7 +579,7 @@ let response = try await session.respond {
 }
 ```
 
-For local models, make sure you’re using a vision‑capable model
+For local models, make sure you're using a vision‑capable model
 (for example, a `-vl` variant).
 You can combine multiple images:
 
@@ -542,6 +594,18 @@ let response = try await session.respond(
     ]
 )
 print(response.content)
+```
+
+Pass any model-specific parameters using custom generation options:
+
+```swift
+var options = GenerationOptions(temperature: 0.8)
+options[custom: OllamaLanguageModel.self] = [
+    "seed": .int(42),
+    "repeat_penalty": .double(1.2),
+    "num_ctx": .int(4096),
+    "stop": .array([.string("###")])
+]
 ```
 
 ## Testing

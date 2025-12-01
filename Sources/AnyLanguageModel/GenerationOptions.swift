@@ -1,3 +1,5 @@
+import JSONSchema
+
 /// Options that control how the model generates its response to a prompt.
 ///
 /// Create a ``GenerationOptions`` structure when you want to adjust
@@ -6,77 +8,6 @@
 /// to specify the penalties for repeating tokens or generating
 /// longer responses.
 public struct GenerationOptions: Sendable, Equatable, Codable {
-
-    /// A sampling strategy for how the model picks tokens when generating a
-    /// response.
-    ///
-    /// When you execute a prompt on a model, the model produces a probability
-    /// for every token in its vocabulary. The sampling strategy controls how
-    /// the model narrows down the list of tokens to consider during that process.
-    /// A strategy that picks the single most likely token yields a predictable
-    /// response every time, but other strategies offer results that often
-    /// sound more natural to a person.
-    ///
-    /// - Note: Leaving the `sampling` nil lets the system choose a
-    ///   a reasonable default on your behalf.
-    public var sampling: SamplingMode?
-
-    /// Temperature influences the confidence of the models response.
-    ///
-    /// The value of this property must be a number between `0` and `1` inclusive.
-    ///
-    /// Temperature is an adjustment applied to the probability distribution
-    /// prior to sampling. A value of `1` results in no adjustment. Values less
-    /// than `1` will make the probability distribution sharper, with already
-    /// likely tokens becoming even more likely.
-    ///
-    /// The net effect is that low temperatures manifest as more stable and
-    /// predictable responses, while high temperatures give the model more
-    /// creative license.
-    ///
-    /// - Note: Leaving `temperature` nil lets the system choose a reasonable
-    ///   default on your behalf.
-    public var temperature: Double?
-
-    /// The maximum number of tokens the model is allowed to produce in its response.
-    ///
-    /// If the model produce `maximumResponseTokens` before it naturally completes its response,
-    /// the response will be terminated early. No error will be thrown. This property
-    /// can be used to protect against unexpectedly verbose responses and runaway generations.
-    ///
-    /// If no value is specified, then the model is allowed to produce the longest answer
-    /// its context size supports. If the response exceeds that limit without terminating,
-    /// an error will be thrown.
-    public var maximumResponseTokens: Int?
-
-    /// Creates generation options that control token sampling behavior.
-    ///
-    /// - Parameters:
-    ///   - sampling: A strategy to use for sampling from a distribution.
-    ///   - temperature: Increasing temperature makes it possible for the model to produce less likely
-    ///     responses. Must be between `0` and `1`, inclusive.
-    ///   - maximumResponseTokens: The maximum number of tokens the model is allowed
-    ///     to produce before being artificially halted. Must be positive.
-    public init(
-        sampling: SamplingMode? = nil,
-        temperature: Double? = nil,
-        maximumResponseTokens: Int? = nil
-    ) {
-        self.sampling = sampling
-        self.temperature = temperature
-        self.maximumResponseTokens = maximumResponseTokens
-    }
-
-    public static func == (a: GenerationOptions, b: GenerationOptions) -> Bool {
-        a.sampling == b.sampling && a.temperature == b.temperature
-            && a.maximumResponseTokens == b.maximumResponseTokens
-    }
-}
-
-// MARK: - GenerationOptions.SamplingMode
-
-extension GenerationOptions {
-
     /// A type that defines how values are sampled from a probability distribution.
     ///
     /// A model builds its response to a prompt in a loop. At each iteration in the
@@ -146,5 +77,218 @@ extension GenerationOptions {
         public static func random(probabilityThreshold: Double, seed: UInt64? = nil) -> SamplingMode {
             SamplingMode(mode: .nucleus(probabilityThreshold, seed: seed))
         }
+    }
+
+    /// A sampling strategy for how the model picks tokens when generating a
+    /// response.
+    ///
+    /// When you execute a prompt on a model, the model produces a probability
+    /// for every token in its vocabulary. The sampling strategy controls how
+    /// the model narrows down the list of tokens to consider during that process.
+    /// A strategy that picks the single most likely token yields a predictable
+    /// response every time, but other strategies offer results that often
+    /// sound more natural to a person.
+    ///
+    /// - Note: Leaving the `sampling` nil lets the system choose a
+    ///   a reasonable default on your behalf.
+    public var sampling: SamplingMode?
+
+    /// Temperature influences the confidence of the models response.
+    ///
+    /// The value of this property must be a number between `0` and `1` inclusive.
+    ///
+    /// Temperature is an adjustment applied to the probability distribution
+    /// prior to sampling. A value of `1` results in no adjustment. Values less
+    /// than `1` will make the probability distribution sharper, with already
+    /// likely tokens becoming even more likely.
+    ///
+    /// The net effect is that low temperatures manifest as more stable and
+    /// predictable responses, while high temperatures give the model more
+    /// creative license.
+    ///
+    /// - Note: Leaving `temperature` nil lets the system choose a reasonable
+    ///   default on your behalf.
+    public var temperature: Double?
+
+    /// The maximum number of tokens the model is allowed to produce in its response.
+    ///
+    /// If the model produce `maximumResponseTokens` before it naturally completes its response,
+    /// the response will be terminated early. No error will be thrown. This property
+    /// can be used to protect against unexpectedly verbose responses and runaway generations.
+    ///
+    /// If no value is specified, then the model is allowed to produce the longest answer
+    /// its context size supports. If the response exceeds that limit without terminating,
+    /// an error will be thrown.
+    public var maximumResponseTokens: Int?
+
+    /// Storage for model-specific custom options.
+    private var customOptionsStorage: CustomOptionsStorage = .init()
+
+    /// Accesses model-specific custom generation options.
+    ///
+    /// Use this subscript to set or retrieve custom options that are specific
+    /// to a particular language model implementation.
+    ///
+    /// ```swift
+    /// var options = GenerationOptions(temperature: 0.7)
+    /// options[custom: OpenAILanguageModel.self] = .init(
+    ///     extraBody: ["reasoning": ["enabled": true]]
+    /// )
+    /// ```
+    ///
+    /// - Parameter modelType: The language model type to get or set custom options for.
+    /// - Returns: The custom options for the specified model type, or `nil` if none are set.
+    public subscript<Model: LanguageModel>(
+        custom modelType: Model.Type
+    ) -> Model.CustomGenerationOptions? {
+        get {
+            customOptionsStorage[Model.self]
+        }
+        set {
+            customOptionsStorage[Model.self] = newValue
+        }
+    }
+
+    /// Creates generation options that control token sampling behavior.
+    ///
+    /// - Parameters:
+    ///   - sampling: A strategy to use for sampling from a distribution.
+    ///   - temperature: Increasing temperature makes it possible for the model to produce less likely
+    ///     responses. Must be between `0` and `1`, inclusive.
+    ///   - maximumResponseTokens: The maximum number of tokens the model is allowed
+    ///     to produce before being artificially halted. Must be positive.
+    public init(
+        sampling: SamplingMode? = nil,
+        temperature: Double? = nil,
+        maximumResponseTokens: Int? = nil
+    ) {
+        self.sampling = sampling
+        self.temperature = temperature
+        self.maximumResponseTokens = maximumResponseTokens
+    }
+}
+
+// MARK: - Custom Generation Options
+
+/// A protocol for model-specific generation options.
+///
+/// Conform to this protocol to define custom options that are specific to a
+/// particular language model implementation. These options can be accessed
+/// through the ``GenerationOptions`` subscript.
+///
+/// ```swift
+/// extension MyLanguageModel {
+///     public struct CustomGenerationOptions: AnyLanguageModel.CustomGenerationOptions {
+///         public var customParameter: String?
+///     }
+/// }
+/// ```
+public protocol CustomGenerationOptions: Equatable, Sendable {}
+
+extension Never: CustomGenerationOptions {}
+
+extension Dictionary: CustomGenerationOptions where Key == String, Value == JSONValue {}
+
+/// Storage for model-specific custom options.
+private struct CustomOptionsStorage: Sendable, Equatable, Codable {
+    private var storage: [ObjectIdentifier: AnyCustomOptions] = [:]
+
+    init() {}
+
+    subscript<Model: LanguageModel>(modelType: Model.Type) -> Model.CustomGenerationOptions? {
+        get {
+            guard let wrapper = storage[ObjectIdentifier(modelType)] else {
+                return nil
+            }
+            return wrapper.value as? Model.CustomGenerationOptions
+        }
+        set {
+            if let newValue {
+                storage[ObjectIdentifier(modelType)] = AnyCustomOptions(newValue)
+            } else {
+                storage.removeValue(forKey: ObjectIdentifier(modelType))
+            }
+        }
+    }
+
+    static func == (lhs: CustomOptionsStorage, rhs: CustomOptionsStorage) -> Bool {
+        guard lhs.storage.count == rhs.storage.count else { return false }
+        for (key, lhsWrapper) in lhs.storage {
+            guard let rhsWrapper = rhs.storage[key],
+                lhsWrapper.isEqual(to: rhsWrapper)
+            else {
+                return false
+            }
+        }
+        return true
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        // Encode custom options that conform to Encodable, keyed by type name
+        var container = encoder.container(keyedBy: TypeNameCodingKey.self)
+        for (_, wrapper) in storage {
+            if let encodeImpl = wrapper.encodeImpl {
+                let key = TypeNameCodingKey(wrapper.typeName)
+                let nestedEncoder = container.superEncoder(forKey: key)
+                try encodeImpl(nestedEncoder)
+            }
+        }
+    }
+
+    init(from decoder: any Decoder) throws {
+        // Custom options cannot be decoded without a type registry.
+        // The encoded type names are preserved but the values are lost on round-trip.
+        self.storage = [:]
+    }
+}
+
+// MARK: - AnyCustomOptions
+
+/// A type-erased wrapper for custom generation options.
+private struct AnyCustomOptions: Sendable {
+    let value: any CustomGenerationOptions
+    let typeName: String
+    let equalsImpl: @Sendable (any CustomGenerationOptions) -> Bool
+    let encodeImpl: (@Sendable (any Encoder) throws -> Void)?
+
+    init<T: CustomGenerationOptions>(_ value: T) {
+        self.value = value
+        self.typeName = String(reflecting: T.self)
+        self.equalsImpl = { other in
+            guard let otherTyped = other as? T else { return false }
+            return value == otherTyped
+        }
+
+        // Conditionally capture encode if T conforms to Encodable.
+        // We capture `value` (which is Sendable) and cast inside the closure.
+        if value is any Encodable {
+            self.encodeImpl = { encoder in
+                // Safe: we checked conformance above, and value is Sendable
+                try (value as! any Encodable).encode(to: encoder)
+            }
+        } else {
+            self.encodeImpl = nil
+        }
+    }
+
+    func isEqual(to other: AnyCustomOptions) -> Bool {
+        equalsImpl(other.value)
+    }
+}
+
+private struct TypeNameCodingKey: CodingKey {
+    var stringValue: String
+    var intValue: Int? { nil }
+
+    init(_ typeName: String) {
+        self.stringValue = typeName
+    }
+
+    init?(stringValue: String) {
+        self.stringValue = stringValue
+    }
+
+    init?(intValue: Int) {
+        nil
     }
 }

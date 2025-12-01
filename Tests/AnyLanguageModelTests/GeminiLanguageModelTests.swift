@@ -62,18 +62,14 @@ struct GeminiLanguageModelTests {
     }
 
     @Test func withGenerationOptions() async throws {
-        // Use a model with thinking disabled to avoid consuming all tokens on thinking
-        let modelWithoutThinking = GeminiLanguageModel(
-            apiKey: geminiAPIKey!,
-            model: "gemini-2.5-flash",
-            thinking: false
-        )
-        let session = LanguageModelSession(model: modelWithoutThinking)
+        let session = LanguageModelSession(model: model)
 
-        let options = GenerationOptions(
+        // Disable thinking to avoid consuming all tokens on reasoning
+        var options = GenerationOptions(
             temperature: 0.7,
             maximumResponseTokens: 2048
         )
+        options[custom: GeminiLanguageModel.self] = .init(thinking: .disabled)
 
         let response = try await session.respond(
             to: "Tell me a fact",
@@ -107,16 +103,17 @@ struct GeminiLanguageModelTests {
     }
 
     @Test func withServerTools() async throws {
-        let model = GeminiLanguageModel(
-            apiKey: geminiAPIKey!,
-            model: "gemini-2.5-flash",
-            serverTools: [
-                .googleMaps(latitude: 37.7749, longitude: -122.4194)
-            ]
+        let session = LanguageModelSession(model: model)
+
+        var options = GenerationOptions()
+        options[custom: GeminiLanguageModel.self] = .init(
+            serverTools: [.googleMaps(latitude: 37.7749, longitude: -122.4194)]
         )
 
-        let session = LanguageModelSession(model: model)
-        let response = try await session.respond(to: "What coffee shops are nearby?")
+        let response = try await session.respond(
+            to: "What coffee shops are nearby?",
+            options: options
+        )
         #expect(!response.content.isEmpty)
     }
 

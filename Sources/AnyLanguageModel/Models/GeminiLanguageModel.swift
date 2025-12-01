@@ -14,34 +14,101 @@ public struct GeminiLanguageModel: LanguageModel {
 
     public static let defaultAPIVersion = "v1beta"
 
-    public enum Thinking: Sendable, ExpressibleByBooleanLiteral, ExpressibleByIntegerLiteral {
-        case disabled
-        case dynamic
-        case budget(Int)
+    /// Custom generation options specific to Gemini models.
+    ///
+    /// Use this type to configure Gemini-specific features like thinking mode
+    /// and server-side tools through ``GenerationOptions``.
+    ///
+    /// ```swift
+    /// var options = GenerationOptions(temperature: 0.7)
+    /// options[custom: GeminiLanguageModel.self] = .init(
+    ///     thinking: .dynamic,
+    ///     serverTools: [.googleSearch]
+    /// )
+    /// ```
+    public struct CustomGenerationOptions: AnyLanguageModel.CustomGenerationOptions {
+        /// Configures thinking (extended reasoning) behavior for Gemini models.
+        ///
+        /// Use this type to enable or configure thinking mode, which allows the model
+        /// to perform extended reasoning before generating a response.
+        public enum Thinking: Sendable, Hashable, ExpressibleByBooleanLiteral, ExpressibleByIntegerLiteral {
+            /// Thinking is disabled.
+            case disabled
+            /// Thinking is enabled with dynamic budget allocation.
+            case dynamic
+            /// Thinking is enabled with a specific token budget.
+            case budget(Int)
 
-        var budgetValue: Int? {
-            switch self {
-            case .disabled: return 0
-            case .dynamic: return -1
-            case .budget(let value): return value
+            var budgetValue: Int? {
+                switch self {
+                case .disabled: return 0
+                case .dynamic: return -1
+                case .budget(let value): return value
+                }
+            }
+
+            public init(booleanLiteral value: Bool) {
+                self = value ? .dynamic : .disabled
+            }
+
+            public init(integerLiteral value: Int) {
+                self = .budget(value)
             }
         }
 
-        public init(booleanLiteral value: Bool) {
-            self = value ? .dynamic : .disabled
+        /// Server-side tools available for Gemini models.
+        ///
+        /// These tools are executed by Google's servers and provide access to
+        /// external services like search, code execution, and maps.
+        public enum ServerTool: Sendable, Hashable {
+            /// Google Search for real-time information retrieval.
+            case googleSearch
+            /// URL context for fetching and analyzing web page content.
+            case urlContext
+            /// Code execution sandbox for running code snippets.
+            case codeExecution
+            /// Google Maps for location-based queries.
+            /// - Parameters:
+            ///   - latitude: Optional latitude for location context.
+            ///   - longitude: Optional longitude for location context.
+            case googleMaps(latitude: Double?, longitude: Double?)
         }
 
-        public init(integerLiteral value: Int) {
-            self = .budget(value)
+        /// The thinking mode configuration.
+        ///
+        /// When set, this enables extended reasoning before the model generates
+        /// its response. Use `.dynamic` for automatic budget allocation, or
+        /// `.budget(_:)` for a specific token budget.
+        public var thinking: Thinking?
+
+        /// Server-side tools to enable for this request.
+        ///
+        /// These tools are executed by Google's servers and can provide
+        /// access to real-time information (Google Search), web content
+        /// (URL context), code execution, and location services (Google Maps).
+        public var serverTools: [ServerTool]?
+
+        /// Creates custom generation options for Gemini models.
+        ///
+        /// - Parameters:
+        ///   - thinking: The thinking mode configuration. When `nil`, uses the model's default.
+        ///   - serverTools: Server-side tools to enable. When `nil`, uses the model's default.
+        public init(
+            thinking: Thinking? = nil,
+            serverTools: [ServerTool]? = nil
+        ) {
+            self.thinking = thinking
+            self.serverTools = serverTools
         }
     }
 
-    public enum ServerTool: Sendable, Equatable {
-        case googleSearch
-        case urlContext
-        case codeExecution
-        case googleMaps(latitude: Double?, longitude: Double?)
-    }
+    /// Deprecated. Use ``CustomGenerationOptions/Thinking`` instead.
+    @available(*, deprecated, renamed: "CustomGenerationOptions.Thinking")
+    public typealias Thinking = CustomGenerationOptions.Thinking
+
+    /// Deprecated. Use ``CustomGenerationOptions/ServerTool`` instead.
+    @available(*, deprecated, renamed: "CustomGenerationOptions.ServerTool")
+    public typealias ServerTool = CustomGenerationOptions.ServerTool
 
     public let baseURL: URL
 
@@ -51,19 +118,55 @@ public struct GeminiLanguageModel: LanguageModel {
 
     public let model: String
 
-    public var thinking: Thinking
+    /// The thinking mode for this model.
+    ///
+    /// - Important: This property is deprecated. Use ``GenerationOptions`` with
+    ///   custom options instead:
+    ///   ```swift
+    ///   var options = GenerationOptions()
+    ///   options[custom: GeminiLanguageModel.self] = .init(thinking: .dynamic)
+    ///   ```
+    @available(*, deprecated, message: "Use GenerationOptions with custom options instead")
+    public var thinking: Thinking {
+        get { _thinking }
+        set { _thinking = newValue }
+    }
 
-    public var serverTools: [ServerTool]
+    /// Internal storage for the deprecated thinking property.
+    internal var _thinking: CustomGenerationOptions.Thinking
+
+    /// Server-side tools enabled for this model.
+    ///
+    /// - Important: This property is deprecated. Use ``GenerationOptions`` with
+    ///   custom options instead:
+    ///   ```swift
+    ///   var options = GenerationOptions()
+    ///   options[custom: GeminiLanguageModel.self] = .init(serverTools: [.googleSearch])
+    ///   ```
+    @available(*, deprecated, message: "Use GenerationOptions with custom options instead")
+    public var serverTools: [CustomGenerationOptions.ServerTool] {
+        get { _serverTools }
+        set { _serverTools = newValue }
+    }
+
+    /// Internal storage for the deprecated serverTools property.
+    internal var _serverTools: [CustomGenerationOptions.ServerTool]
 
     private let urlSession: URLSession
 
+    /// Creates a new Gemini language model.
+    ///
+    /// - Parameters:
+    ///   - baseURL: The base URL for the Gemini API.
+    ///   - tokenProvider: A closure that provides the API key.
+    ///   - apiVersion: The API version to use.
+    ///   - model: The model identifier.
+    ///   - session: The URL session for network requests.
     public init(
         baseURL: URL = defaultBaseURL,
         apiKey tokenProvider: @escaping @autoclosure @Sendable () -> String,
         apiVersion: String = defaultAPIVersion,
         model: String,
-        thinking: Thinking = .disabled,
-        serverTools: [ServerTool] = [],
         session: URLSession = URLSession(configuration: .default)
     ) {
         var baseURL = baseURL
@@ -75,8 +178,50 @@ public struct GeminiLanguageModel: LanguageModel {
         self.tokenProvider = tokenProvider
         self.apiVersion = apiVersion
         self.model = model
-        self.thinking = thinking
-        self.serverTools = serverTools
+        self._thinking = .disabled
+        self._serverTools = []
+        self.urlSession = session
+    }
+
+    /// Creates a new Gemini language model with thinking and server tools configuration.
+    ///
+    /// - Parameters:
+    ///   - baseURL: The base URL for the Gemini API.
+    ///   - tokenProvider: A closure that provides the API key.
+    ///   - apiVersion: The API version to use.
+    ///   - model: The model identifier.
+    ///   - thinking: The thinking mode configuration.
+    ///   - serverTools: Server-side tools to enable.
+    ///   - session: The URL session for network requests.
+    ///
+    /// - Important: This initializer is deprecated. Use the initializer without
+    ///   `thinking` and `serverTools` parameters, and pass these options through
+    ///   ``GenerationOptions`` instead.
+    @available(
+        *,
+        deprecated,
+        message: "Use init without thinking/serverTools and pass them via GenerationOptions custom options"
+    )
+    public init(
+        baseURL: URL = defaultBaseURL,
+        apiKey tokenProvider: @escaping @autoclosure @Sendable () -> String,
+        apiVersion: String = defaultAPIVersion,
+        model: String,
+        thinking: CustomGenerationOptions.Thinking = .disabled,
+        serverTools: [CustomGenerationOptions.ServerTool] = [],
+        session: URLSession = URLSession(configuration: .default)
+    ) {
+        var baseURL = baseURL
+        if !baseURL.path.hasSuffix("/") {
+            baseURL = baseURL.appendingPathComponent("")
+        }
+
+        self.baseURL = baseURL
+        self.tokenProvider = tokenProvider
+        self.apiVersion = apiVersion
+        self.model = model
+        self._thinking = thinking
+        self._serverTools = serverTools
         self.urlSession = session
     }
 
@@ -91,6 +236,11 @@ public struct GeminiLanguageModel: LanguageModel {
             fatalError("GeminiLanguageModel only supports generating String content")
         }
 
+        // Extract effective configuration from custom options or fall back to model defaults
+        let customOptions = options[custom: GeminiLanguageModel.self]
+        let effectiveThinking = customOptions?.thinking ?? _thinking
+        let effectiveServerTools = customOptions?.serverTools ?? _serverTools
+
         let url =
             baseURL
             .appendingPathComponent(apiVersion)
@@ -102,7 +252,7 @@ public struct GeminiLanguageModel: LanguageModel {
             GeminiContent(role: .user, parts: convertSegmentsToGeminiParts(userSegments))
         ]
 
-        let geminiTools = try buildTools(from: session.tools)
+        let geminiTools = try buildTools(from: session.tools, serverTools: effectiveServerTools)
 
         var allEntries: [Transcript.Entry] = []
 
@@ -112,7 +262,7 @@ public struct GeminiLanguageModel: LanguageModel {
                 contents: contents,
                 tools: geminiTools,
                 options: options,
-                thinking: thinking
+                thinking: effectiveThinking
             )
 
             let body = try JSONEncoder().encode(params)
@@ -196,6 +346,11 @@ public struct GeminiLanguageModel: LanguageModel {
             fatalError("GeminiLanguageModel only supports generating String content")
         }
 
+        // Extract effective configuration from custom options or fall back to model defaults
+        let customOptions = options[custom: GeminiLanguageModel.self]
+        let effectiveThinking = customOptions?.thinking ?? _thinking
+        let effectiveServerTools = customOptions?.serverTools ?? _serverTools
+
         let userSegments = extractPromptSegments(from: session, fallbackText: prompt.description)
         let contents = [
             GeminiContent(role: .user, parts: convertSegmentsToGeminiParts(userSegments))
@@ -208,21 +363,19 @@ public struct GeminiLanguageModel: LanguageModel {
         streamURL.append(queryItems: [URLQueryItem(name: "alt", value: "sse")])
         let url = streamURL
 
-        let thinking = self.thinking
-
         let stream: AsyncThrowingStream<LanguageModelSession.ResponseStream<Content>.Snapshot, any Error> = .init {
             continuation in
             let task = Task { @Sendable in
                 do {
                     let headers = buildHeaders()
 
-                    let geminiTools = try buildTools(from: session.tools)
+                    let geminiTools = try buildTools(from: session.tools, serverTools: effectiveServerTools)
 
                     let params = try createGenerateContentParams(
                         contents: contents,
                         tools: geminiTools,
                         options: options,
-                        thinking: thinking
+                        thinking: effectiveThinking
                     )
 
                     let body = try JSONEncoder().encode(params)
@@ -274,7 +427,9 @@ public struct GeminiLanguageModel: LanguageModel {
         return headers
     }
 
-    private func buildTools(from tools: [any Tool]) throws -> [GeminiTool]? {
+    private func buildTools(from tools: [any Tool], serverTools: [CustomGenerationOptions.ServerTool]) throws
+        -> [GeminiTool]?
+    {
         var geminiTools: [GeminiTool] = []
 
         if !tools.isEmpty {
@@ -305,7 +460,7 @@ private func createGenerateContentParams(
     contents: [GeminiContent],
     tools: [GeminiTool]?,
     options: GenerationOptions,
-    thinking: GeminiLanguageModel.Thinking
+    thinking: GeminiLanguageModel.CustomGenerationOptions.Thinking
 ) throws -> [String: JSONValue] {
     var params: [String: JSONValue] = [
         "contents": try JSONValue(contents)
