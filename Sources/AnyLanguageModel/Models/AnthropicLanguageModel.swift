@@ -28,6 +28,231 @@ import OrderedCollections
 /// )
 /// ```
 public struct AnthropicLanguageModel: LanguageModel {
+    /// Custom generation options specific to Anthropic's Claude API.
+    ///
+    /// Use this type to pass additional parameters that are not part of the
+    /// standard ``GenerationOptions``, such as Anthropic-specific sampling
+    /// parameters and metadata.
+    ///
+    /// ```swift
+    /// var options = GenerationOptions(temperature: 0.7)
+    /// options[custom: AnthropicLanguageModel.self] = .init(
+    ///     topP: 0.9,
+    ///     topK: 40,
+    ///     stopSequences: ["END", "STOP"]
+    /// )
+    /// ```
+    public struct CustomGenerationOptions: AnyLanguageModel.CustomGenerationOptions, Codable {
+        /// Use nucleus sampling with probability mass `topP`.
+        ///
+        /// In nucleus sampling, tokens are sorted by probability and added to a
+        /// pool until the cumulative probability exceeds `topP`. A token is then
+        /// sampled from the pool. We recommend altering either `temperature` or
+        /// `topP`, but not both.
+        ///
+        /// Recommended range: `0.0` to `1.0`. Defaults to `nil` (not specified).
+        public var topP: Double?
+
+        /// Only sample from the top K options for each subsequent token.
+        ///
+        /// Used to remove "long tail" low probability responses. We recommend
+        /// using `topP` instead, or combining `topK` with `topP`.
+        ///
+        /// Recommended range: `0` to `500`. Defaults to `nil` (not specified).
+        public var topK: Int?
+
+        /// Custom text sequences that will cause the model to stop generating.
+        ///
+        /// Our models will normally stop when they have naturally completed their turn,
+        /// which will result in a response `stop_reason` of `"end_turn"`.
+        ///
+        /// If you want the model to stop generating when it encounters custom strings
+        /// of text, you can use the `stop_sequences` parameter. If the model encounters
+        /// one of the custom sequences, the response `stop_reason` value will be
+        /// `"stop_sequence"` and the response `stop_sequence` value will contain the
+        /// matched stop sequence.
+        public var stopSequences: [String]?
+
+        /// An object describing metadata about the request.
+        public var metadata: Metadata?
+
+        /// How the model should use the provided tools.
+        ///
+        /// Use this to control whether the model can use tools and which tools it prefers.
+        public var toolChoice: ToolChoice?
+
+        /// Configuration for extended thinking.
+        ///
+        /// When enabled, the model will use internal reasoning before responding,
+        /// which can improve performance on complex tasks.
+        public var thinking: Thinking?
+
+        /// Specifies the tier of service to use for the request.
+        ///
+        /// The default is "auto", which will use the priority tier if available
+        /// and fall back to standard.
+        public var serviceTier: ServiceTier?
+
+        /// Additional parameters to include in the request body.
+        ///
+        /// These parameters are merged into the top-level request JSON,
+        /// allowing you to pass additional options not explicitly modeled.
+        public var extraBody: [String: JSONValue]?
+
+        // MARK: - Nested Types
+
+        /// Metadata about the request.
+        public struct Metadata: Hashable, Codable, Sendable {
+            /// An external identifier for the user who is associated with the request.
+            ///
+            /// This should be a UUID, hash value, or other opaque identifier.
+            /// Anthropic may use this ID to help detect abuse. Do not include any
+            /// identifying information such as name, email address, or phone number.
+            public var userID: String?
+
+            enum CodingKeys: String, CodingKey {
+                case userID = "user_id"
+            }
+
+            /// Creates metadata for an Anthropic request.
+            ///
+            /// - Parameter userID: An external identifier for the user.
+            public init(userID: String? = nil) {
+                self.userID = userID
+            }
+        }
+
+        /// Controls how the model uses tools.
+        public enum ToolChoice: Hashable, Codable, Sendable {
+            /// The model automatically decides whether to use tools.
+            case auto
+
+            /// The model must use one of the provided tools.
+            case any
+
+            /// The model must use the specified tool.
+            case tool(name: String)
+
+            /// The model will not be allowed to use tools.
+            case disabled
+
+            enum CodingKeys: String, CodingKey {
+                case type
+                case name
+                case disableParallelToolUse = "disable_parallel_tool_use"
+            }
+
+            public init(from decoder: any Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                let type = try container.decode(String.self, forKey: .type)
+
+                switch type {
+                case "auto":
+                    self = .auto
+                case "any":
+                    self = .any
+                case "tool":
+                    let name = try container.decode(String.self, forKey: .name)
+                    self = .tool(name: name)
+                case "none":
+                    self = .disabled
+                default:
+                    self = .auto
+                }
+            }
+
+            public func encode(to encoder: any Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+
+                switch self {
+                case .auto:
+                    try container.encode("auto", forKey: .type)
+                case .any:
+                    try container.encode("any", forKey: .type)
+                case .tool(let name):
+                    try container.encode("tool", forKey: .type)
+                    try container.encode(name, forKey: .name)
+                case .disabled:
+                    try container.encode("none", forKey: .type)
+                }
+            }
+        }
+
+        /// Configuration for extended thinking.
+        public struct Thinking: Hashable, Codable, Sendable {
+            /// The type of thinking to use.
+            public var type: ThinkingType
+
+            /// The maximum number of tokens to use for thinking.
+            ///
+            /// This budget is the maximum number of tokens the model can use for its
+            /// internal reasoning process. Larger budgets can improve response quality
+            /// for complex tasks but increase latency and cost.
+            public var budgetTokens: Int
+
+            /// The type of thinking mode.
+            public enum ThinkingType: String, Hashable, Codable, Sendable {
+                /// Enables extended thinking.
+                case enabled
+            }
+
+            enum CodingKeys: String, CodingKey {
+                case type
+                case budgetTokens = "budget_tokens"
+            }
+
+            /// Creates a thinking configuration.
+            ///
+            /// - Parameter budgetTokens: The maximum number of tokens to use for thinking.
+            public init(budgetTokens: Int) {
+                self.type = .enabled
+                self.budgetTokens = budgetTokens
+            }
+        }
+
+        /// The tier of service for processing the request.
+        public enum ServiceTier: String, Hashable, Codable, Sendable {
+            /// Automatically select the best available tier.
+            case auto
+
+            /// Standard tier processing.
+            case standard
+
+            /// Priority tier processing with faster response times.
+            case priority
+        }
+
+        /// Creates custom generation options for Anthropic's Claude API.
+        ///
+        /// - Parameters:
+        ///   - topP: Use nucleus sampling with this probability mass.
+        ///   - topK: Only sample from the top K options for each token.
+        ///   - stopSequences: Custom text sequences that will cause the model to stop generating.
+        ///   - metadata: An object describing metadata about the request.
+        ///   - toolChoice: How the model should use the provided tools.
+        ///   - thinking: Configuration for extended thinking.
+        ///   - serviceTier: The tier of service to use for the request.
+        ///   - extraBody: Additional parameters to include in the request body.
+        public init(
+            topP: Double? = nil,
+            topK: Int? = nil,
+            stopSequences: [String]? = nil,
+            metadata: Metadata? = nil,
+            toolChoice: ToolChoice? = nil,
+            thinking: Thinking? = nil,
+            serviceTier: ServiceTier? = nil,
+            extraBody: [String: JSONValue]? = nil
+        ) {
+            self.topP = topP
+            self.topK = topK
+            self.stopSequences = stopSequences
+            self.metadata = metadata
+            self.toolChoice = toolChoice
+            self.thinking = thinking
+            self.serviceTier = serviceTier
+            self.extraBody = extraBody
+        }
+    }
     /// The reason the model is unavailable.
     /// This model is always available.
     public typealias UnavailableReason = Never
@@ -280,6 +505,59 @@ private func createMessageParams(
     }
     if let temperature = options.temperature {
         params["temperature"] = .double(temperature)
+    }
+
+    // Apply Anthropic-specific custom options
+    if let customOptions = options[custom: AnthropicLanguageModel.self] {
+        if let topP = customOptions.topP {
+            params["top_p"] = .double(topP)
+        }
+        if let topK = customOptions.topK {
+            params["top_k"] = .int(topK)
+        }
+        if let stopSequences = customOptions.stopSequences, !stopSequences.isEmpty {
+            params["stop_sequences"] = .array(stopSequences.map { .string($0) })
+        }
+        if let metadata = customOptions.metadata {
+            var metadataObject: [String: JSONValue] = [:]
+            if let userID = metadata.userID {
+                metadataObject["user_id"] = .string(userID)
+            }
+            if !metadataObject.isEmpty {
+                params["metadata"] = .object(metadataObject)
+            }
+        }
+        if let toolChoice = customOptions.toolChoice {
+            switch toolChoice {
+            case .auto:
+                params["tool_choice"] = .object(["type": .string("auto")])
+            case .any:
+                params["tool_choice"] = .object(["type": .string("any")])
+            case .tool(let name):
+                params["tool_choice"] = .object([
+                    "type": .string("tool"),
+                    "name": .string(name),
+                ])
+            case .disabled:
+                params["tool_choice"] = .object(["type": .string("none")])
+            }
+        }
+        if let thinking = customOptions.thinking {
+            params["thinking"] = .object([
+                "type": .string(thinking.type.rawValue),
+                "budget_tokens": .int(thinking.budgetTokens),
+            ])
+        }
+        if let serviceTier = customOptions.serviceTier {
+            params["service_tier"] = .string(serviceTier.rawValue)
+        }
+
+        // Merge custom extraBody into the request
+        if let extraBody = customOptions.extraBody {
+            for (key, value) in extraBody {
+                params[key] = value
+            }
+        }
     }
 
     return params

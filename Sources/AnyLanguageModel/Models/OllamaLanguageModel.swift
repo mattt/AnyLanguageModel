@@ -18,6 +18,25 @@ public struct OllamaLanguageModel: LanguageModel {
     /// This model is always available.
     public typealias UnavailableReason = Never
 
+    /// Custom generation options specific to Ollama.
+    ///
+    /// Use this type to pass additional model parameters that are not part
+    /// of the standard ``GenerationOptions``.
+    ///
+    /// Available options are model-specific and defined in the model's Modelfile.
+    /// Common options include `seed`, `repeat_penalty`, `stop`, and others.
+    ///
+    /// ```swift
+    /// var options = GenerationOptions(temperature: 0.7)
+    /// options[custom: OllamaLanguageModel.self] = [
+    ///     "seed": 42,
+    ///     "repeat_penalty": 1.2
+    /// ]
+    /// ```
+    ///
+    /// - SeeAlso: [Ollama API](https://github.com/ollama/ollama/blob/main/docs/api.md)
+    public typealias CustomGenerationOptions = [String: JSONValue]
+
     /// The default base URL for Ollama.
     public static let defaultBaseURL = URL(string: "http://localhost:11434")!
 
@@ -288,6 +307,13 @@ private func convertOptions(_ options: GenerationOptions) -> [String: JSONValue]
             if let seed = seed {
                 ollamaOptions["seed"] = .int(Int(seed))
             }
+        }
+    }
+
+    // Merge custom Ollama options
+    if let customOptions: [String: JSONValue] = options[custom: OllamaLanguageModel.self] {
+        for (key, value) in customOptions {
+            ollamaOptions[key] = value
         }
     }
 

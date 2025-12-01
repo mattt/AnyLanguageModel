@@ -140,14 +140,54 @@ import Testing
             #expect(!response.content.isEmpty)
         }
 
+        @Test func withCustomGenerationOptions() async throws {
+            let session = LanguageModelSession(model: model)
+
+            var options = GenerationOptions(
+                temperature: 0.8,
+                maximumResponseTokens: 50
+            )
+
+            // Set llama.cpp-specific custom options
+            options[custom: LlamaLanguageModel.self] = .init(
+                repeatPenalty: 1.2,
+                repeatLastN: 128,
+                frequencyPenalty: 0.1,
+                presencePenalty: 0.1
+            )
+
+            let response = try await session.respond(
+                to: "Tell me a short fact",
+                options: options
+            )
+            #expect(!response.content.isEmpty)
+        }
+
+        @Test func withMirostatSampling() async throws {
+            let session = LanguageModelSession(model: model)
+
+            var options = GenerationOptions(
+                temperature: 0.8,
+                maximumResponseTokens: 50
+            )
+
+            // Use mirostat v2 for adaptive perplexity control
+            options[custom: LlamaLanguageModel.self] = .init(
+                mirostat: .v2(tau: 5.0, eta: 0.1)
+            )
+
+            let response = try await session.respond(
+                to: "Tell me a short fact",
+                options: options
+            )
+            #expect(!response.content.isEmpty)
+        }
+
         @Test func multimodal_rejectsImageURL() async throws {
             let session = LanguageModelSession(model: model)
-            let prompt = Transcript.Prompt(segments: [
-                .text(.init(content: "Describe this image")),
-                .image(.init(url: testImageURL)),
-            ])
+            let imageSegment = Transcript.ImageSegment(url: testImageURL)
             do {
-                _ = try await session.respond(to: prompt)
+                _ = try await session.respond(to: "Describe this image", image: imageSegment)
                 Issue.record("Expected error when image segments are present")
             } catch let error as LlamaLanguageModelError {
                 #expect(error == .unsupportedFeature)
@@ -156,14 +196,9 @@ import Testing
 
         @Test func multimodal_rejectsImageData() async throws {
             let session = LanguageModelSession(model: model)
-
-            let data = Data(png1x1)
-            let prompt = Transcript.Prompt(segments: [
-                .text(.init(content: "Describe this image")),
-                .image(.init(data: data, mimeType: "image/png")),
-            ])
+            let imageSegment = Transcript.ImageSegment(data: testImageData, mimeType: "image/png")
             do {
-                _ = try await session.respond(to: prompt)
+                _ = try await session.respond(to: "Describe this image", image: imageSegment)
                 Issue.record("Expected error when image segments are present")
             } catch let error as LlamaLanguageModelError {
                 #expect(error == .unsupportedFeature)
