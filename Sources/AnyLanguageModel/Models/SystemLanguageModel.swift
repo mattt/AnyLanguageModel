@@ -68,7 +68,7 @@
             to prompt: Prompt,
             generating type: Content.Type,
             includeSchemaInPrompt: Bool,
-            options: GenerationOptions
+            options: any GenerationOptionsProtocol
         ) async throws -> LanguageModelSession.Response<Content> where Content: Generable {
             let fmPrompt = prompt.toFoundationModels()
             let fmOptions = options.toFoundationModels()
@@ -105,7 +105,7 @@
             to prompt: Prompt,
             generating type: Content.Type,
             includeSchemaInPrompt: Bool,
-            options: GenerationOptions
+            options: any GenerationOptionsProtocol
         ) -> sending LanguageModelSession.ResponseStream<Content> where Content: Generable {
             let fmPrompt = prompt.toFoundationModels()
             let fmOptions = options.toFoundationModels()

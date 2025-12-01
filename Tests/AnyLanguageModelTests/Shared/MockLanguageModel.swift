@@ -26,7 +26,7 @@ struct MockLanguageModel: LanguageModel {
         to prompt: Prompt,
         generating type: Content.Type,
         includeSchemaInPrompt: Bool,
-        options: GenerationOptions
+        options: any GenerationOptionsProtocol
     ) async throws -> LanguageModelSession.Response<Content> where Content: Generable {
         // For now, only String is supported
         guard type == String.self else {
@@ -55,7 +55,7 @@ struct MockLanguageModel: LanguageModel {
         to prompt: Prompt,
         generating type: Content.Type,
         includeSchemaInPrompt: Bool,
-        options: GenerationOptions
+        options: any GenerationOptionsProtocol
     ) -> sending LanguageModelSession.ResponseStream<Content> where Content: Generable {
         // For now, only String is supported
         guard type == String.self else {

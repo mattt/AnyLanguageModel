@@ -2,6 +2,81 @@ import Foundation
 #if Llama
     import Llama
 
+    /// Generation options for llama.cpp models with extended configuration.
+    ///
+    /// Use this type instead of `GenerationOptions` when you need to configure
+    /// llama.cpp-specific parameters like repeat penalty.
+    ///
+    /// ```swift
+    /// let options = LlamaGenerationOptions(
+    ///     temperature: 0.7,
+    ///     repeatPenalty: 1.2,
+    ///     repeatLastN: 64
+    /// )
+    /// ```
+    public struct LlamaGenerationOptions: GenerationOptionsProtocol, Codable {
+        /// A sampling strategy for how the model picks tokens when generating a response.
+        public var sampling: GenerationOptions.SamplingMode?
+
+        /// Temperature influences the confidence of the model's response.
+        public var temperature: Double?
+
+        /// The maximum number of tokens the model is allowed to produce in its response.
+        public var maximumResponseTokens: Int?
+
+        /// The repeat penalty for generation.
+        ///
+        /// Values greater than 1.0 penalize tokens that have appeared recently,
+        /// reducing repetition. A value of 1.0 disables the penalty.
+        public var repeatPenalty: Float?
+
+        /// The number of tokens to consider for repeat penalty.
+        ///
+        /// The model will look back this many tokens to check for repetition.
+        public var repeatLastN: Int32?
+
+        /// Creates llama.cpp generation options with extended configuration.
+        ///
+        /// - Parameters:
+        ///   - sampling: A strategy to use for sampling from a distribution.
+        ///   - temperature: Increasing temperature makes it possible for the model to produce less likely
+        ///     responses. Must be between `0` and `1`, inclusive.
+        ///   - maximumResponseTokens: The maximum number of tokens the model is allowed
+        ///     to produce before being artificially halted. Must be positive.
+        ///   - repeatPenalty: The penalty applied to repeated tokens. Defaults to 1.1.
+        ///   - repeatLastN: The number of tokens to consider for repeat penalty. Defaults to 64.
+        public init(
+            sampling: GenerationOptions.SamplingMode? = nil,
+            temperature: Double? = nil,
+            maximumResponseTokens: Int? = nil,
+            repeatPenalty: Float? = nil,
+            repeatLastN: Int32? = nil
+        ) {
+            self.sampling = sampling
+            self.temperature = temperature
+            self.maximumResponseTokens = maximumResponseTokens
+            self.repeatPenalty = repeatPenalty
+            self.repeatLastN = repeatLastN
+        }
+
+        /// Creates llama.cpp generation options from another conforming type.
+        ///
+        /// - Parameter other: The options to copy common properties from.
+        public init(from other: any GenerationOptionsProtocol) {
+            self.sampling = other.sampling
+            self.temperature = other.temperature
+            self.maximumResponseTokens = other.maximumResponseTokens
+            // Copy extended properties if the source is also LlamaGenerationOptions
+            if let llamaOptions = other as? LlamaGenerationOptions {
+                self.repeatPenalty = llamaOptions.repeatPenalty
+                self.repeatLastN = llamaOptions.repeatLastN
+            } else {
+                self.repeatPenalty = nil
+                self.repeatLastN = nil
+            }
+        }
+    }
+
     /// A language model that runs llama.cpp models locally.
     ///
     /// Use this model to generate text using GGUF models running directly with llama.cpp.
@@ -16,6 +91,9 @@ import Foundation
         /// The reason the model is unavailable.
         /// This model is always available.
         public typealias UnavailableReason = Never
+
+        /// The generation options type for this model.
+        public typealias GenerationOptions = LlamaGenerationOptions
 
         /// The path to the GGUF model file.
         public let modelPath: String
@@ -104,8 +182,10 @@ import Foundation
             to prompt: Prompt,
             generating type: Content.Type,
             includeSchemaInPrompt: Bool,
-            options: GenerationOptions
+            options: any GenerationOptionsProtocol
         ) async throws -> LanguageModelSession.Response<Content> where Content: Generable {
+            // Convert to LlamaGenerationOptions for extended properties
+            let llamaOptions = (options as? LlamaGenerationOptions) ?? LlamaGenerationOptions(from: options)
             // For now, only String is supported
             guard type == String.self else {
                 fatalError("LlamaLanguageModel only supports generating String content")
@@ -150,7 +230,7 @@ import Foundation
             to prompt: Prompt,
             generating type: Content.Type,
             includeSchemaInPrompt: Bool,
-            options: GenerationOptions
+            options: any GenerationOptionsProtocol
         ) -> sending LanguageModelSession.ResponseStream<Content> where Content: Generable {
             // For now, only String is supported
             guard type == String.self else {
@@ -265,7 +345,7 @@ import Foundation
             return params
         }
 
-        private func createContextParams(from options: GenerationOptions) -> llama_context_params {
+        private func createContextParams(from options: any GenerationOptionsProtocol) -> llama_context_params {
             var params = llama_context_default_params()
             params.n_ctx = contextSize
             params.n_batch = batchSize
@@ -279,7 +359,7 @@ import Foundation
             model: OpaquePointer,
             prompt: String,
             maxTokens: Int,
-            options: GenerationOptions
+            options: any GenerationOptionsProtocol
         ) async throws
             -> String
         {
@@ -399,7 +479,7 @@ import Foundation
             model: OpaquePointer,
             prompt: String,
             maxTokens: Int,
-            options: GenerationOptions
+            options: any GenerationOptionsProtocol
         )
             -> AsyncThrowingStream<String, Error>
         {
@@ -420,7 +500,7 @@ import Foundation
             model: OpaquePointer,
             prompt: String,
             maxTokens: Int,
-            options: GenerationOptions,
+            options: any GenerationOptionsProtocol,
             continuation: AsyncThrowingStream<String, Error>.Continuation
         ) {
             do {

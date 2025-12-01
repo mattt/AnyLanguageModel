@@ -85,7 +85,7 @@ public struct GeminiLanguageModel: LanguageModel {
         to prompt: Prompt,
         generating type: Content.Type,
         includeSchemaInPrompt: Bool,
-        options: GenerationOptions
+        options: any GenerationOptionsProtocol
     ) async throws -> LanguageModelSession.Response<Content> where Content: Generable {
         guard type == String.self else {
             fatalError("GeminiLanguageModel only supports generating String content")
@@ -190,7 +190,7 @@ public struct GeminiLanguageModel: LanguageModel {
         to prompt: Prompt,
         generating type: Content.Type,
         includeSchemaInPrompt: Bool,
-        options: GenerationOptions
+        options: any GenerationOptionsProtocol
     ) -> sending LanguageModelSession.ResponseStream<Content> where Content: Generable {
         guard type == String.self else {
             fatalError("GeminiLanguageModel only supports generating String content")
@@ -304,7 +304,7 @@ public struct GeminiLanguageModel: LanguageModel {
 private func createGenerateContentParams(
     contents: [GeminiContent],
     tools: [GeminiTool]?,
-    options: GenerationOptions,
+    options: any GenerationOptionsProtocol,
     thinking: GeminiLanguageModel.Thinking
 ) throws -> [String: JSONValue] {
     var params: [String: JSONValue] = [

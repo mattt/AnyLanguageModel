@@ -73,7 +73,7 @@
             to prompt: Prompt,
             generating type: Content.Type,
             includeSchemaInPrompt: Bool,
-            options: GenerationOptions
+            options: any GenerationOptionsProtocol
         ) async throws -> LanguageModelSession.Response<Content> where Content: Generable {
             // For now, only String is supported
             guard type == String.self else {
@@ -117,7 +117,7 @@
             to prompt: Prompt,
             generating type: Content.Type,
             includeSchemaInPrompt: Bool,
-            options: GenerationOptions
+            options: any GenerationOptionsProtocol
         ) -> sending LanguageModelSession.ResponseStream<Content> where Content: Generable {
             // For now, only String is supported
             guard type == String.self else {
@@ -269,7 +269,7 @@
 
     // MARK: -
 
-    private func toGenerationConfig(_ options: GenerationOptions) -> GenerationConfig {
+    private func toGenerationConfig(_ options: any GenerationOptionsProtocol) -> GenerationConfig {
         var config = GenerationConfig(maxNewTokens: options.maximumResponseTokens ?? 2048)
 
         // Map temperature
