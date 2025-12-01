@@ -332,30 +332,74 @@ struct AnthropicCustomOptionsTests {
 struct OpenAICustomOptionsTests {
     @Test func initialization() {
         let options = OpenAILanguageModel.CustomGenerationOptions(
-            extraBody: [
-                "reasoning": .object(["enabled": .bool(true)]),
-                "custom_param": .string("value"),
-            ]
+            topP: 0.9,
+            frequencyPenalty: 0.5,
+            presencePenalty: 0.3,
+            stopSequences: ["END", "STOP"],
+            logitBias: [123: 50, 456: -50],
+            seed: 42,
+            logprobs: true,
+            topLogprobs: 5,
+            numberOfCompletions: 2,
+            verbosity: .medium,
+            reasoningEffort: .high,
+            reasoning: .init(effort: .medium, summary: "concise"),
+            parallelToolCalls: false,
+            maxToolCalls: 10,
+            serviceTier: .priority,
+            store: true,
+            metadata: ["key": "value"],
+            safetyIdentifier: "user-123",
+            promptCacheKey: "cache-key",
+            promptCacheRetention: "24h",
+            truncation: .auto,
+            extraBody: ["custom_param": .string("value")]
         )
 
-        #expect(options.extraBody?.count == 2)
-        #expect(options.extraBody?["reasoning"] == .object(["enabled": .bool(true)]))
+        #expect(options.topP == 0.9)
+        #expect(options.frequencyPenalty == 0.5)
+        #expect(options.presencePenalty == 0.3)
+        #expect(options.stopSequences == ["END", "STOP"])
+        #expect(options.logitBias == [123: 50, 456: -50])
+        #expect(options.seed == 42)
+        #expect(options.logprobs == true)
+        #expect(options.topLogprobs == 5)
+        #expect(options.numberOfCompletions == 2)
+        #expect(options.verbosity == .medium)
+        #expect(options.reasoningEffort == .high)
+        #expect(options.reasoning?.effort == .medium)
+        #expect(options.reasoning?.summary == "concise")
+        #expect(options.parallelToolCalls == false)
+        #expect(options.maxToolCalls == 10)
+        #expect(options.serviceTier == .priority)
+        #expect(options.store == true)
+        #expect(options.metadata == ["key": "value"])
+        #expect(options.safetyIdentifier == "user-123")
+        #expect(options.promptCacheKey == "cache-key")
+        #expect(options.promptCacheRetention == "24h")
+        #expect(options.truncation == .auto)
+        #expect(options.extraBody?["custom_param"] == .string("value"))
     }
 
     @Test func equality() {
         let options1 = OpenAILanguageModel.CustomGenerationOptions(
-            extraBody: ["key": .int(42)]
+            topP: 0.9,
+            frequencyPenalty: 0.5,
+            stopSequences: ["END"]
         )
         let options2 = OpenAILanguageModel.CustomGenerationOptions(
-            extraBody: ["key": .int(42)]
+            topP: 0.9,
+            frequencyPenalty: 0.5,
+            stopSequences: ["END"]
         )
 
         #expect(options1 == options2)
     }
 
     @Test func hashable() {
-        let options: OpenAILanguageModel.CustomGenerationOptions = OpenAILanguageModel.CustomGenerationOptions(
-            extraBody: ["key": .bool(true)]
+        let options = OpenAILanguageModel.CustomGenerationOptions(
+            topP: 0.9,
+            seed: 42
         )
 
         var set = Set<OpenAILanguageModel.CustomGenerationOptions>()
@@ -365,7 +409,18 @@ struct OpenAICustomOptionsTests {
 
     @Test func codable() throws {
         let options = OpenAILanguageModel.CustomGenerationOptions(
-            extraBody: ["key": .string("value")]
+            topP: 0.9,
+            frequencyPenalty: 0.5,
+            presencePenalty: 0.3,
+            stopSequences: ["END"],
+            seed: 42,
+            logprobs: true,
+            topLogprobs: 5,
+            reasoningEffort: .high,
+            serviceTier: .priority,
+            store: true,
+            metadata: ["key": "value"],
+            truncation: .auto
         )
 
         let data = try JSONEncoder().encode(options)
@@ -377,9 +432,126 @@ struct OpenAICustomOptionsTests {
         #expect(decoded == options)
     }
 
-    @Test func nilExtraBody() {
+    @Test func codableUsesSnakeCase() throws {
+        let options = OpenAILanguageModel.CustomGenerationOptions(
+            topP: 0.9,
+            frequencyPenalty: 0.5,
+            topLogprobs: 5,
+            reasoningEffort: .medium,
+            parallelToolCalls: true
+        )
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        let data = try encoder.encode(options)
+        let json = String(data: data, encoding: .utf8)!
+
+        #expect(json.contains("\"top_p\""))
+        #expect(json.contains("\"frequency_penalty\""))
+        #expect(json.contains("\"top_logprobs\""))
+        #expect(json.contains("\"reasoning_effort\""))
+        #expect(json.contains("\"parallel_tool_calls\""))
+    }
+
+    @Test func nilProperties() {
         let options = OpenAILanguageModel.CustomGenerationOptions()
+        #expect(options.topP == nil)
+        #expect(options.frequencyPenalty == nil)
+        #expect(options.presencePenalty == nil)
+        #expect(options.stopSequences == nil)
+        #expect(options.logitBias == nil)
+        #expect(options.seed == nil)
+        #expect(options.logprobs == nil)
+        #expect(options.topLogprobs == nil)
+        #expect(options.numberOfCompletions == nil)
+        #expect(options.verbosity == nil)
+        #expect(options.reasoningEffort == nil)
+        #expect(options.reasoning == nil)
+        #expect(options.parallelToolCalls == nil)
+        #expect(options.maxToolCalls == nil)
+        #expect(options.serviceTier == nil)
+        #expect(options.store == nil)
+        #expect(options.metadata == nil)
+        #expect(options.safetyIdentifier == nil)
+        #expect(options.promptCacheKey == nil)
+        #expect(options.promptCacheRetention == nil)
+        #expect(options.truncation == nil)
         #expect(options.extraBody == nil)
+    }
+
+    @Test func integrationWithGenerationOptions() {
+        var options = GenerationOptions(temperature: 0.8)
+        options[custom: OpenAILanguageModel.self] = .init(
+            topP: 0.9,
+            frequencyPenalty: 0.5,
+            presencePenalty: 0.3,
+            stopSequences: ["END"],
+            seed: 42,
+            reasoningEffort: .high,
+            serviceTier: .priority
+        )
+
+        let retrieved = options[custom: OpenAILanguageModel.self]
+        #expect(retrieved?.topP == 0.9)
+        #expect(retrieved?.frequencyPenalty == 0.5)
+        #expect(retrieved?.presencePenalty == 0.3)
+        #expect(retrieved?.stopSequences == ["END"])
+        #expect(retrieved?.seed == 42)
+        #expect(retrieved?.reasoningEffort == .high)
+        #expect(retrieved?.serviceTier == .priority)
+    }
+
+    @Test func verbosityValues() {
+        #expect(OpenAILanguageModel.CustomGenerationOptions.Verbosity.low.rawValue == "low")
+        #expect(OpenAILanguageModel.CustomGenerationOptions.Verbosity.medium.rawValue == "medium")
+        #expect(OpenAILanguageModel.CustomGenerationOptions.Verbosity.high.rawValue == "high")
+    }
+
+    @Test func reasoningEffortValues() {
+        #expect(OpenAILanguageModel.CustomGenerationOptions.ReasoningEffort.none.rawValue == "none")
+        #expect(OpenAILanguageModel.CustomGenerationOptions.ReasoningEffort.minimal.rawValue == "minimal")
+        #expect(OpenAILanguageModel.CustomGenerationOptions.ReasoningEffort.low.rawValue == "low")
+        #expect(OpenAILanguageModel.CustomGenerationOptions.ReasoningEffort.medium.rawValue == "medium")
+        #expect(OpenAILanguageModel.CustomGenerationOptions.ReasoningEffort.high.rawValue == "high")
+    }
+
+    @Test func serviceTierValues() {
+        #expect(OpenAILanguageModel.CustomGenerationOptions.ServiceTier.auto.rawValue == "auto")
+        #expect(OpenAILanguageModel.CustomGenerationOptions.ServiceTier.default.rawValue == "default")
+        #expect(OpenAILanguageModel.CustomGenerationOptions.ServiceTier.flex.rawValue == "flex")
+        #expect(OpenAILanguageModel.CustomGenerationOptions.ServiceTier.priority.rawValue == "priority")
+    }
+
+    @Test func truncationValues() {
+        #expect(OpenAILanguageModel.CustomGenerationOptions.Truncation.auto.rawValue == "auto")
+        #expect(OpenAILanguageModel.CustomGenerationOptions.Truncation.disabled.rawValue == "disabled")
+    }
+
+    @Test func reasoningConfigurationCodable() throws {
+        let config = OpenAILanguageModel.CustomGenerationOptions.ReasoningConfiguration(
+            effort: .high,
+            summary: "detailed"
+        )
+
+        let data = try JSONEncoder().encode(config)
+        let decoded = try JSONDecoder().decode(
+            OpenAILanguageModel.CustomGenerationOptions.ReasoningConfiguration.self,
+            from: data
+        )
+
+        #expect(decoded == config)
+    }
+
+    @Test func extraBodyStillWorks() {
+        let options = OpenAILanguageModel.CustomGenerationOptions(
+            extraBody: [
+                "reasoning": .object(["enabled": .bool(true)]),
+                "custom_param": .string("value"),
+            ]
+        )
+
+        #expect(options.extraBody?.count == 2)
+        #expect(options.extraBody?["reasoning"] == .object(["enabled": .bool(true)]))
     }
 }
 
