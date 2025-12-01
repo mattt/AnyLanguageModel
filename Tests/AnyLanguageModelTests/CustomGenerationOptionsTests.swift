@@ -383,6 +383,90 @@ struct OpenAICustomOptionsTests {
     }
 }
 
+@Suite("Ollama CustomGenerationOptions")
+struct OllamaCustomOptionsTests {
+    @Test func typealiasIsDictionary() {
+        // CustomGenerationOptions is a typealias to [String: JSONValue]
+        let options: OllamaLanguageModel.CustomGenerationOptions = [
+            "seed": .int(42),
+            "repeat_penalty": .double(1.2),
+        ]
+
+        #expect(options.count == 2)
+        #expect(options["seed"] == .int(42))
+        #expect(options["repeat_penalty"] == .double(1.2))
+    }
+
+    @Test func equality() {
+        let options1: OllamaLanguageModel.CustomGenerationOptions = [
+            "seed": .int(42)
+        ]
+        let options2: OllamaLanguageModel.CustomGenerationOptions = [
+            "seed": .int(42)
+        ]
+
+        #expect(options1 == options2)
+    }
+
+    @Test func hashable() {
+        let options: OllamaLanguageModel.CustomGenerationOptions = [
+            "seed": .int(42)
+        ]
+
+        var set = Set<OllamaLanguageModel.CustomGenerationOptions>()
+        set.insert(options)
+        #expect(set.contains(options))
+    }
+
+    @Test func codable() throws {
+        let options: OllamaLanguageModel.CustomGenerationOptions = [
+            "seed": .int(42),
+            "stop": .array([.string("END")]),
+        ]
+
+        let data = try JSONEncoder().encode(options)
+        let decoded = try JSONDecoder().decode(
+            OllamaLanguageModel.CustomGenerationOptions.self,
+            from: data
+        )
+
+        #expect(decoded == options)
+    }
+
+    @Test func integrationWithGenerationOptions() {
+        var options = GenerationOptions(temperature: 0.8)
+        options[custom: OllamaLanguageModel.self] = [
+            "seed": .int(42),
+            "repeat_penalty": .double(1.1),
+            "stop": .array([.string("END"), .string("STOP")]),
+        ]
+
+        let retrieved = options[custom: OllamaLanguageModel.self]
+        #expect(retrieved?["seed"] == .int(42))
+        #expect(retrieved?["repeat_penalty"] == .double(1.1))
+        #expect(retrieved?["stop"] == .array([.string("END"), .string("STOP")]))
+    }
+
+    @Test func emptyOptions() {
+        let options: OllamaLanguageModel.CustomGenerationOptions = [:]
+        #expect(options.isEmpty)
+    }
+
+    @Test func variousValueTypes() {
+        let options: OllamaLanguageModel.CustomGenerationOptions = [
+            "num_ctx": .int(4096),
+            "top_p": .double(0.9),
+            "penalize_newline": .bool(false),
+            "stop": .array([.string("###")]),
+        ]
+
+        #expect(options["num_ctx"] == .int(4096))
+        #expect(options["top_p"] == .double(0.9))
+        #expect(options["penalize_newline"] == .bool(false))
+        #expect(options["stop"] == .array([.string("###")]))
+    }
+}
+
 #if Llama
     @Suite("Llama CustomGenerationOptions")
     struct LlamaCustomOptionsTests {

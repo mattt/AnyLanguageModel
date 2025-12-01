@@ -1,3 +1,5 @@
+import JSONSchema
+
 /// Options that control how the model generates its response to a prompt.
 ///
 /// Create a ``GenerationOptions`` structure when you want to adjust
@@ -184,6 +186,8 @@ public struct GenerationOptions: Sendable, Equatable, Codable {
 public protocol CustomGenerationOptions: Hashable, Sendable {}
 
 extension Never: CustomGenerationOptions {}
+
+extension Dictionary: CustomGenerationOptions where Key == String, Value == JSONValue {}
 
 /// Storage for model-specific custom options.
 private struct CustomOptionsStorage: Sendable, Equatable, Codable {
