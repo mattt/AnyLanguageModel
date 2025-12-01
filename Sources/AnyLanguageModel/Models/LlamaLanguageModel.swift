@@ -17,6 +17,74 @@ import Foundation
         /// This model is always available.
         public typealias UnavailableReason = Never
 
+        /// Custom generation options specific to llama.cpp.
+        ///
+        /// Use this type to pass llama.cpp-specific sampling parameters that are
+        /// not part of the standard ``GenerationOptions``.
+        ///
+        /// ```swift
+        /// var options = GenerationOptions(temperature: 0.8)
+        /// options[custom: LlamaLanguageModel.self] = .init(
+        ///     repeatPenalty: 1.2,
+        ///     repeatLastN: 128,
+        ///     frequencyPenalty: 0.1,
+        ///     presencePenalty: 0.1,
+        ///     mirostat: .v2(tau: 5.0, eta: 0.1)
+        /// )
+        /// ```
+        public struct CustomGenerationOptions: AnyLanguageModel.CustomGenerationOptions, Codable {
+            /// The penalty applied to repeated tokens.
+            ///
+            /// Values greater than 1.0 discourage repetition, while values less than 1.0
+            /// encourage it. A value of 1.0 applies no penalty.
+            public var repeatPenalty: Float?
+
+            /// The number of recent tokens to consider for the repeat penalty.
+            ///
+            /// Only the last `repeatLastN` tokens will be checked for repetition.
+            /// Set to 0 to disable repeat penalty, or -1 to consider all tokens.
+            public var repeatLastN: Int32?
+
+            /// The frequency penalty applied during sampling.
+            ///
+            /// Positive values penalize tokens based on their frequency in the text so far,
+            /// decreasing the likelihood of repeating the same content.
+            public var frequencyPenalty: Float?
+
+            /// The presence penalty applied during sampling.
+            ///
+            /// Positive values penalize tokens that have appeared at all in the text so far,
+            /// encouraging the model to generate novel content.
+            public var presencePenalty: Float?
+
+            /// Mirostat sampling configuration for adaptive perplexity control.
+            public enum MirostatMode: Hashable, Codable, Sendable {
+                /// Mirostat v1 with target entropy (tau) and learning rate (eta).
+                case v1(tau: Float, eta: Float)
+
+                /// Mirostat v2 with target entropy (tau) and learning rate (eta).
+                case v2(tau: Float, eta: Float)
+            }
+
+            /// Mirostat sampling mode for adaptive perplexity control.
+            public var mirostat: MirostatMode?
+
+            /// Creates custom generation options for llama.cpp.
+            public init(
+                repeatPenalty: Float? = nil,
+                repeatLastN: Int32? = nil,
+                frequencyPenalty: Float? = nil,
+                presencePenalty: Float? = nil,
+                mirostat: MirostatMode? = nil
+            ) {
+                self.repeatPenalty = repeatPenalty
+                self.repeatLastN = repeatLastN
+                self.frequencyPenalty = frequencyPenalty
+                self.presencePenalty = presencePenalty
+                self.mirostat = mirostat
+            }
+        }
+
         /// The path to the GGUF model file.
         public let modelPath: String
 
@@ -322,8 +390,43 @@ import Foundation
             }
             defer { llama_sampler_free(sampler) }
 
-            // Use sampling parameters from options if provided
-            if let sampling = options.sampling {
+            // Get custom options if provided
+            let customOptions = options[custom: LlamaLanguageModel.self]
+
+            // Apply repeat/frequency/presence penalties from custom options
+            let effectiveRepeatPenalty = customOptions?.repeatPenalty ?? repeatPenalty
+            let effectiveRepeatLastN = customOptions?.repeatLastN ?? repeatLastN
+            let effectiveFrequencyPenalty = customOptions?.frequencyPenalty ?? 0.0
+            let effectivePresencePenalty = customOptions?.presencePenalty ?? 0.0
+
+            if effectiveRepeatPenalty != 1.0 || effectiveFrequencyPenalty != 0.0 || effectivePresencePenalty != 0.0 {
+                llama_sampler_chain_add(
+                    sampler,
+                    llama_sampler_init_penalties(
+                        effectiveRepeatLastN,
+                        effectiveRepeatPenalty,
+                        effectiveFrequencyPenalty,
+                        effectivePresencePenalty
+                    )
+                )
+            }
+
+            // Check for mirostat sampling (takes precedence over standard sampling)
+            if let mirostat = customOptions?.mirostat {
+                let temp = Float(options.temperature ?? Double(temperature))
+                llama_sampler_chain_add(sampler, llama_sampler_init_temp(temp))
+
+                switch mirostat {
+                case .v1(let tau, let eta):
+                    llama_sampler_chain_add(
+                        sampler,
+                        llama_sampler_init_mirostat(Int32(contextSize), seed, tau, eta, 100)
+                    )
+                case .v2(let tau, let eta):
+                    llama_sampler_chain_add(sampler, llama_sampler_init_mirostat_v2(seed, tau, eta))
+                }
+            } else if let sampling = options.sampling {
+                // Use standard sampling parameters from options
                 switch sampling.mode {
                 case .greedy:
                     llama_sampler_chain_add(sampler, llama_sampler_init_top_k(1))
@@ -466,8 +569,44 @@ import Foundation
                 }
                 defer { llama_sampler_free(sampler) }
 
-                // Use sampling parameters from options if provided
-                if let sampling = options.sampling {
+                // Get custom options if provided
+                let customOptions = options[custom: LlamaLanguageModel.self]
+
+                // Apply repeat/frequency/presence penalties from custom options
+                let effectiveRepeatPenalty = customOptions?.repeatPenalty ?? self.repeatPenalty
+                let effectiveRepeatLastN = customOptions?.repeatLastN ?? self.repeatLastN
+                let effectiveFrequencyPenalty = customOptions?.frequencyPenalty ?? 0.0
+                let effectivePresencePenalty = customOptions?.presencePenalty ?? 0.0
+
+                if effectiveRepeatPenalty != 1.0 || effectiveFrequencyPenalty != 0.0 || effectivePresencePenalty != 0.0
+                {
+                    llama_sampler_chain_add(
+                        sampler,
+                        llama_sampler_init_penalties(
+                            effectiveRepeatLastN,
+                            effectiveRepeatPenalty,
+                            effectiveFrequencyPenalty,
+                            effectivePresencePenalty
+                        )
+                    )
+                }
+
+                // Check for mirostat sampling (takes precedence over standard sampling)
+                if let mirostat = customOptions?.mirostat {
+                    let temp = Float(options.temperature ?? Double(self.temperature))
+                    llama_sampler_chain_add(sampler, llama_sampler_init_temp(temp))
+
+                    switch mirostat {
+                    case .v1(let tau, let eta):
+                        llama_sampler_chain_add(
+                            sampler,
+                            llama_sampler_init_mirostat(Int32(self.contextSize), self.seed, tau, eta, 100)
+                        )
+                    case .v2(let tau, let eta):
+                        llama_sampler_chain_add(sampler, llama_sampler_init_mirostat_v2(self.seed, tau, eta))
+                    }
+                } else if let sampling = options.sampling {
+                    // Use standard sampling parameters from options
                     switch sampling.mode {
                     case .greedy:
                         llama_sampler_chain_add(sampler, llama_sampler_init_top_k(1))
@@ -543,16 +682,7 @@ import Foundation
         // MARK: - Image Validation
 
         private func validateNoImageSegments(in session: LanguageModelSession) throws {
-            // Check for image segments in instructions
-            if let instructions = session.instructions {
-                for segment in instructions.segments {
-                    if case .image = segment {
-                        throw LlamaLanguageModelError.unsupportedFeature
-                    }
-                }
-            }
-
-            // Check for image segments in the most recent prompt
+            // Check for image segments in the most recent prompt from the transcript
             for entry in session.transcript.reversed() {
                 if case .prompt(let p) = entry {
                     for segment in p.segments {

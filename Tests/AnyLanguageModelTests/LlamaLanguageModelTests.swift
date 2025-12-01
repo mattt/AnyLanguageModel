@@ -140,6 +140,49 @@ import Testing
             #expect(!response.content.isEmpty)
         }
 
+        @Test func withCustomGenerationOptions() async throws {
+            let session = LanguageModelSession(model: model)
+
+            var options = GenerationOptions(
+                temperature: 0.8,
+                maximumResponseTokens: 50
+            )
+
+            // Set llama.cpp-specific custom options
+            options[custom: LlamaLanguageModel.self] = .init(
+                repeatPenalty: 1.2,
+                repeatLastN: 128,
+                frequencyPenalty: 0.1,
+                presencePenalty: 0.1
+            )
+
+            let response = try await session.respond(
+                to: "Tell me a short fact",
+                options: options
+            )
+            #expect(!response.content.isEmpty)
+        }
+
+        @Test func withMirostatSampling() async throws {
+            let session = LanguageModelSession(model: model)
+
+            var options = GenerationOptions(
+                temperature: 0.8,
+                maximumResponseTokens: 50
+            )
+
+            // Use mirostat v2 for adaptive perplexity control
+            options[custom: LlamaLanguageModel.self] = .init(
+                mirostat: .v2(tau: 5.0, eta: 0.1)
+            )
+
+            let response = try await session.respond(
+                to: "Tell me a short fact",
+                options: options
+            )
+            #expect(!response.content.isEmpty)
+        }
+
         @Test func multimodal_rejectsImageURL() async throws {
             let session = LanguageModelSession(model: model)
             let prompt = Transcript.Prompt(segments: [
