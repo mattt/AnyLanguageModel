@@ -34,6 +34,34 @@ public struct OpenAILanguageModel: LanguageModel {
         case responses
     }
 
+    /// Custom generation options specific to OpenAI-compatible APIs.
+    ///
+    /// Use this type to pass additional parameters that are not part of the
+    /// standard ``GenerationOptions``, such as vendor-specific extensions
+    /// supported by OpenRouter or other OpenAI-compatible services.
+    ///
+    /// ```swift
+    /// var options = GenerationOptions(temperature: 0.7)
+    /// options[custom: OpenAILanguageModel.self] = .init(
+    ///     extraBody: ["reasoning": .object(["enabled": .bool(true)])]
+    /// )
+    /// ```
+    public struct CustomGenerationOptions: AnyLanguageModel.CustomGenerationOptions {
+        /// Additional parameters to include in the request body.
+        ///
+        /// These parameters are merged into the top-level request JSON,
+        /// allowing you to pass vendor-specific options like `reasoning`
+        /// for Grok models via OpenRouter.
+        public var extraBody: [String: JSONValue]?
+
+        /// Creates custom generation options for OpenAI-compatible APIs.
+        ///
+        /// - Parameter extraBody: Additional parameters to include in the request body.
+        public init(extraBody: [String: JSONValue]? = nil) {
+            self.extraBody = extraBody
+        }
+    }
+
     /// The base URL for the API endpoint.
     public let baseURL: URL
 
@@ -406,6 +434,15 @@ private enum ChatCompletions {
             body["max_tokens"] = .int(maxTokens)
         }
 
+        // Merge custom options extraBody into the request
+        if let customOptions = options[custom: OpenAILanguageModel.self],
+            let extraBody = customOptions.extraBody
+        {
+            for (key, value) in extraBody {
+                body[key] = value
+            }
+        }
+
         return .object(body)
     }
 
@@ -515,6 +552,15 @@ private enum Responses {
         }
         if let maxTokens = options.maximumResponseTokens {
             body["max_output_tokens"] = .int(maxTokens)
+        }
+
+        // Merge custom options extraBody into the request
+        if let customOptions = options[custom: OpenAILanguageModel.self],
+            let extraBody = customOptions.extraBody
+        {
+            for (key, value) in extraBody {
+                body[key] = value
+            }
         }
 
         return .object(body)
