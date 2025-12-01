@@ -143,6 +143,191 @@ struct CustomGenerationOptionsTests {
     }
 }
 
+@Suite("Anthropic CustomGenerationOptions")
+struct AnthropicCustomOptionsTests {
+    @Test func initialization() {
+        let options = AnthropicLanguageModel.CustomGenerationOptions(
+            topP: 0.9,
+            topK: 40,
+            stopSequences: ["END", "STOP"],
+            metadata: .init(userID: "user-123"),
+            toolChoice: .auto,
+            thinking: .init(budgetTokens: 1024),
+            serviceTier: .priority,
+            extraBody: ["custom_param": .string("value")]
+        )
+
+        #expect(options.topP == 0.9)
+        #expect(options.topK == 40)
+        #expect(options.stopSequences == ["END", "STOP"])
+        #expect(options.metadata?.userID == "user-123")
+        #expect(options.toolChoice == .auto)
+        #expect(options.thinking?.budgetTokens == 1024)
+        #expect(options.serviceTier == .priority)
+        #expect(options.extraBody?["custom_param"] == .string("value"))
+    }
+
+    @Test func equality() {
+        let options1 = AnthropicLanguageModel.CustomGenerationOptions(
+            topP: 0.9,
+            topK: 40
+        )
+        let options2 = AnthropicLanguageModel.CustomGenerationOptions(
+            topP: 0.9,
+            topK: 40
+        )
+
+        #expect(options1 == options2)
+    }
+
+    @Test func hashable() {
+        let options = AnthropicLanguageModel.CustomGenerationOptions(
+            topP: 0.9,
+            topK: 40
+        )
+
+        var set = Set<AnthropicLanguageModel.CustomGenerationOptions>()
+        set.insert(options)
+        #expect(set.contains(options))
+    }
+
+    @Test func codable() throws {
+        let options = AnthropicLanguageModel.CustomGenerationOptions(
+            topP: 0.9,
+            topK: 40,
+            stopSequences: ["END"],
+            metadata: .init(userID: "user-123"),
+            toolChoice: .tool(name: "my_tool"),
+            thinking: .init(budgetTokens: 2048),
+            serviceTier: .standard
+        )
+
+        let data = try JSONEncoder().encode(options)
+        let decoded = try JSONDecoder().decode(
+            AnthropicLanguageModel.CustomGenerationOptions.self,
+            from: data
+        )
+
+        #expect(decoded == options)
+    }
+
+    @Test func nilProperties() {
+        let options = AnthropicLanguageModel.CustomGenerationOptions()
+        #expect(options.topP == nil)
+        #expect(options.topK == nil)
+        #expect(options.stopSequences == nil)
+        #expect(options.metadata == nil)
+        #expect(options.toolChoice == nil)
+        #expect(options.thinking == nil)
+        #expect(options.serviceTier == nil)
+        #expect(options.extraBody == nil)
+    }
+
+    @Test func integrationWithGenerationOptions() {
+        var options = GenerationOptions(temperature: 0.8)
+        options[custom: AnthropicLanguageModel.self] = .init(
+            topP: 0.9,
+            topK: 40,
+            stopSequences: ["END"],
+            thinking: .init(budgetTokens: 4096)
+        )
+
+        let retrieved = options[custom: AnthropicLanguageModel.self]
+        #expect(retrieved?.topP == 0.9)
+        #expect(retrieved?.topK == 40)
+        #expect(retrieved?.stopSequences == ["END"])
+        #expect(retrieved?.thinking?.budgetTokens == 4096)
+    }
+
+    @Test func metadataCodable() throws {
+        let metadata = AnthropicLanguageModel.CustomGenerationOptions.Metadata(
+            userID: "user-456"
+        )
+
+        let data = try JSONEncoder().encode(metadata)
+        let json = String(data: data, encoding: .utf8)!
+
+        // Verify the JSON uses snake_case
+        #expect(json.contains("user_id"))
+        #expect(json.contains("user-456"))
+
+        let decoded = try JSONDecoder().decode(
+            AnthropicLanguageModel.CustomGenerationOptions.Metadata.self,
+            from: data
+        )
+        #expect(decoded == metadata)
+    }
+
+    @Test func toolChoiceVariants() {
+        let auto = AnthropicLanguageModel.CustomGenerationOptions(toolChoice: .auto)
+        let any = AnthropicLanguageModel.CustomGenerationOptions(toolChoice: .any)
+        let tool = AnthropicLanguageModel.CustomGenerationOptions(toolChoice: .tool(name: "search"))
+        let disabled = AnthropicLanguageModel.CustomGenerationOptions(toolChoice: .disabled)
+
+        #expect(auto.toolChoice == .auto)
+        #expect(any.toolChoice == .any)
+        #expect(tool.toolChoice == .tool(name: "search"))
+        #expect(disabled.toolChoice == .disabled)
+
+        // Verify they're all different
+        #expect(auto != any)
+        #expect(any != tool)
+        #expect(tool != disabled)
+    }
+
+    @Test func toolChoiceCodable() throws {
+        typealias ToolChoice = AnthropicLanguageModel.CustomGenerationOptions.ToolChoice
+
+        let choices: [ToolChoice] = [
+            .auto,
+            .any,
+            .tool(name: "my_tool"),
+            .disabled,
+        ]
+
+        for choice in choices {
+            let data = try JSONEncoder().encode(choice)
+            let decoded = try JSONDecoder().decode(ToolChoice.self, from: data)
+            #expect(decoded == choice)
+        }
+    }
+
+    @Test func toolChoiceDisabledEncodesToNone() throws {
+        let choice = AnthropicLanguageModel.CustomGenerationOptions.ToolChoice.disabled
+
+        let data = try JSONEncoder().encode(choice)
+        let json = String(data: data, encoding: .utf8)!
+
+        // Verify it encodes to "none" for the API
+        #expect(json.contains("\"none\""))
+    }
+
+    @Test func thinkingCodable() throws {
+        let thinking = AnthropicLanguageModel.CustomGenerationOptions.Thinking(budgetTokens: 8192)
+
+        let encoder = JSONEncoder()
+        let data = try encoder.encode(thinking)
+        let json = String(data: data, encoding: .utf8)!
+
+        // Verify the JSON uses snake_case
+        #expect(json.contains("budget_tokens"))
+        #expect(json.contains("8192"))
+        #expect(json.contains("enabled"))
+
+        let decoded = try JSONDecoder().decode(
+            AnthropicLanguageModel.CustomGenerationOptions.Thinking.self,
+            from: data
+        )
+        #expect(decoded == thinking)
+    }
+
+    @Test func serviceTierValues() {
+        #expect(AnthropicLanguageModel.CustomGenerationOptions.ServiceTier.auto.rawValue == "auto")
+        #expect(AnthropicLanguageModel.CustomGenerationOptions.ServiceTier.standard.rawValue == "standard")
+        #expect(AnthropicLanguageModel.CustomGenerationOptions.ServiceTier.priority.rawValue == "priority")
+    }
+}
+
 @Suite("OpenAI CustomGenerationOptions")
 struct OpenAICustomOptionsTests {
     @Test func initialization() {
