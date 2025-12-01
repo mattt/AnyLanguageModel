@@ -256,50 +256,6 @@ see OWASP's
 
 ## Usage
 
-### Custom Generation Options
-
-Each language model adapter supports provider-specific options
-through the `CustomGenerationOptions` mechanism.
-Use the subscript on `GenerationOptions` to set model-specific parameters:
-
-```swift
-var options = GenerationOptions(temperature: 0.7)
-
-// OpenAI-specific options
-options[custom: OpenAILanguageModel.self] = .init(
-    topP: 0.9,
-    frequencyPenalty: 0.5,
-    presencePenalty: 0.3,
-    reasoningEffort: .high,
-    extraBody: ["custom_param": .string("value")]
-)
-
-// Anthropic-specific options
-options[custom: AnthropicLanguageModel.self] = .init(
-    topP: 0.9,
-    topK: 40,
-    thinking: .init(budgetTokens: 4096)
-)
-
-// Gemini-specific options
-options[custom: GeminiLanguageModel.self] = .init(
-    thinking: .dynamic,
-    serverTools: [.googleSearch]
-)
-
-// Ollama-specific options (dictionary-based)
-options[custom: OllamaLanguageModel.self] = [
-    "seed": 42,
-    "repeat_penalty": 1.2
-    "think": true,
-]
-```
-
-Custom options are type-safe and isolated per model —
-setting options for one model doesn't affect others.
-The `extraBody` parameter (where available) allows passing
-vendor-specific parameters not explicitly modeled.
-
 ### Apple Foundation Models
 
 Uses Apple's [system language model](https://developer.apple.com/documentation/FoundationModels)
