@@ -217,7 +217,6 @@ public struct OpenAILanguageModel: LanguageModel {
             )
 
             var encoder = JSONEncoder()
-            encoder.outputFormatting = .prettyPrinted
             let body = try encoder.encode(params)
             let resp: Responses.Response = try await urlSession.fetch(
                 .post,
