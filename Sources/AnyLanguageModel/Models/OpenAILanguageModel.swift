@@ -243,9 +243,6 @@ public struct OpenAILanguageModel: LanguageModel {
                         entries.append(.toolOutput(output))
                         let toolSegments: [Transcript.Segment] = output.segments
                         let blocks = convertSegmentsToOpenAIBlocks(toolSegments)
-                        if blocks.count != 1 {
-                            print("blocks count is not 1: \(blocks)")
-                        }
                         messages.append(OpenAIMessage(role: .tool(id: invocation.call.id), content: .blocks(blocks)))
                     }
                     continue
