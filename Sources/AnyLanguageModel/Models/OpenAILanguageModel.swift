@@ -165,16 +165,20 @@ public struct OpenAILanguageModel: LanguageModel {
                 )
             }
 
-            if let toolCalls = choice.message.toolCalls, !toolCalls.isEmpty {
+            let toolCallMessage = choice.message
+            if let toolCalls = toolCallMessage.toolCalls, !toolCalls.isEmpty {
+                if let value = try? JSONValue(toolCallMessage) {
+                    messages.append(OpenAIMessage(role: .raw(rawContent: value), content: .text("")))
+                }
                 let invocations = try await resolveToolCalls(toolCalls, session: session)
                 if !invocations.isEmpty {
                     entries.append(.toolCalls(Transcript.ToolCalls(invocations.map { $0.call })))
                     for invocation in invocations {
                         let output =  invocation.output
                         entries.append(.toolOutput(output))
-
                         let toolSegments: [Transcript.Segment] = output.segments
-                        messages.append(OpenAIMessage(role: .tool(id: invocation.call.id), content: .blocks(convertSegmentsToOpenAIBlocks(toolSegments))))
+                        let blocks = convertSegmentsToOpenAIBlocks(toolSegments)
+                        messages.append(OpenAIMessage(role: .tool(id: invocation.call.id), content: .blocks(blocks)))
                     }
                     continue
                 }
@@ -226,17 +230,24 @@ public struct OpenAILanguageModel: LanguageModel {
 
             let toolCalls = extractToolCallsFromOutput(resp.output)
             if !toolCalls.isEmpty {
-                //messages = []
+                if let output = resp.output {
+                    for msg in output {
+                        messages.append(OpenAIMessage(role: .raw(rawContent: msg), content: .text("")))
+                    }
+                }
                 let invocations = try await resolveToolCalls(toolCalls, session: session)
                 if !invocations.isEmpty {
                     entries.append(.toolCalls(Transcript.ToolCalls(invocations.map { $0.call })))
+
                     for invocation in invocations {
                         let output =  invocation.output
                         entries.append(.toolOutput(output))
-
                         let toolSegments: [Transcript.Segment] = output.segments
-                        let msg = OpenAIMessage(role: .tool(id: invocation.call.id), content: .blocks(convertSegmentsToOpenAIBlocks(toolSegments)))
-                        messages.append(msg)
+                        let blocks = convertSegmentsToOpenAIBlocks(toolSegments)
+                        if blocks.count != 1 {
+                            print("blocks count is not 1: \(blocks)")
+                        }
+                        messages.append(OpenAIMessage(role: .tool(id: invocation.call.id), content: .blocks(blocks)))
                     }
                     continue
                 }
@@ -442,7 +453,7 @@ private enum ChatCompletions {
         let id: String
         let choices: [Choice]
 
-        struct Choice: Decodable, Sendable {
+        struct Choice: Codable, Sendable {
             let message: Message
             let finishReason: String?
 
@@ -452,7 +463,7 @@ private enum ChatCompletions {
             }
         }
 
-        struct Message: Decodable, Sendable {
+        struct Message: Codable, Sendable {
             let role: String
             let content: String?
             let toolCalls: [OpenAIToolCall]?
@@ -517,7 +528,7 @@ private enum Responses {
             case .tool(let id):
                 let toolMessage = msg
                 // Wrap user content into a single top-level message as required by Responses API
-                let contentBlocks: [JSONValue]
+                var contentBlocks: [JSONValue]
                 switch toolMessage.content {
                 case .text(let text):
                     contentBlocks = [
@@ -547,10 +558,14 @@ private enum Responses {
                         outputs.append(.object([
                             "type": .string("function_call_output"),
                             "call_id": .string(id),
-                            "output":  object
-                        ]))
+                            "output":  object,
+                       ]))
                     }
                 }
+
+            case .raw(rawContent: let rawContent):
+                outputs.append(rawContent)
+
 
             case .system:
                 let systemMessage = msg
@@ -569,7 +584,6 @@ private enum Responses {
                 break
             }
         }
-
         body["input"] = .array(outputs)
 
         if let tools {
@@ -589,6 +603,7 @@ private enum Responses {
     struct Response: Decodable, Sendable {
         let id: String
         let output: [JSONValue]?
+        let error: [JSONValue]?
         let outputText: String?
         let finishReason: String?
 
@@ -597,6 +612,7 @@ private enum Responses {
             case output
             case outputText = "output_text"
             case finishReason = "finish_reason"
+            case error = "error"
         }
     }
 }
@@ -605,14 +621,15 @@ private enum Responses {
 
 private struct OpenAIMessage: Hashable, Codable, Sendable {
     enum Role: Hashable, Codable, Sendable {
-        case system, user, assistant, tool(id: String)
+        case system, user, assistant, raw(rawContent: JSONValue), tool(id: String)
 
         var description: String {
             switch self {
             case .system: return "system"
             case .user: return "user"
             case .assistant: return "assistant"
-            case .tool(id: let id): return "tool"
+            case .tool(id: _): return "tool"
+            case .raw(rawContent: _): return "raw"
             }
         }
     }
@@ -625,40 +642,56 @@ private struct OpenAIMessage: Hashable, Codable, Sendable {
     let role: Role
     let content: Content
 
-    func jsonValue(for apiVariant: OpenAILanguageModel.APIVariant) -> JSONValue {
+    func contentAsJsonValue(for apiVariant: OpenAILanguageModel.APIVariant) -> JSONValue {
         switch content {
         case .text(let text):
             switch apiVariant {
             case .chatCompletions:
-                // Chat Completions uses simple string content
-                return .object([
-                    "role": .string(role.description),
-                    "content": .string(text),
-                ])
+                return .string(text)
             case .responses:
-                // Responses API uses array of content blocks
-                return .object([
-                    "role": .string(role.description),
-                    "content": .array([.object(["type": .string("text"), "text": .string(text)])]),
-                ])
+                return .array([.object(["type": .string("text"), "text": .string(text)])])
             }
         case .blocks(let blocks):
             switch apiVariant {
             case .chatCompletions:
-                // Chat Completions accepts array of content parts
-                return .object([
-                    "role": .string(role.description),
-                    "content": .array(blocks.map { $0.jsonValueForChatCompletions }),
-                ])
+                return .array(blocks.map { $0.jsonValueForChatCompletions })
             case .responses:
-                // Responses expects message content blocks
-                return .object([
-                    "role": .string(role.description),
-                    "content": .array(blocks.map { $0.jsonValueForResponses }),
-                ])
+                return .array(blocks.map { $0.jsonValueForResponses })
             }
         }
     }
+
+    func jsonValue(for apiVariant: OpenAILanguageModel.APIVariant) -> JSONValue {
+
+        switch role {
+        case .raw(rawContent: let rawContent):
+            return rawContent
+
+        case .tool(id: let id):
+            switch apiVariant {
+            case .chatCompletions:
+                return .object([
+                    "role": .string(role.description),
+                    "tool_call_id": .string(id),
+                    "content": contentAsJsonValue(for: apiVariant),
+                ])
+            case .responses:
+                return .object([
+                    "type": .string("function_call_output"),
+                    "call_id": .string(id),
+                    "content": contentAsJsonValue(for: apiVariant),
+                ])
+            }
+
+        case .system, .user, .assistant:
+            return .object([
+                "role": .string(role.description),
+                "content": contentAsJsonValue(for: apiVariant),
+            ])
+        }
+    }
+
+
 }
 
 private enum Block: Hashable, Codable, Sendable {
@@ -699,7 +732,12 @@ private func convertSegmentsToOpenAIBlocks(_ segments: [Transcript.Segment]) -> 
         case .text(let text):
             blocks.append(.text(text.content))
         case .structure(let structured):
-            blocks.append(.text(structured.content.jsonString))
+            switch structured.content.kind {
+                case .string(let text):
+                    blocks.append(.text(text))
+            default:
+                blocks.append(.text(structured.content.jsonString))
+            }
         case .image(let image):
             switch image.source {
             case .url(let url):
@@ -814,13 +852,13 @@ private struct OpenAISchema: Hashable, Codable, Sendable {
     }
 }
 
-private struct OpenAIToolCall: Decodable, Sendable {
+private struct OpenAIToolCall: Codable, Sendable {
     let id: String?
     let type: String?
     let function: OpenAIToolFunction?
 }
 
-private struct OpenAIToolFunction: Decodable, Sendable {
+private struct OpenAIToolFunction: Codable, Sendable {
     let name: String
     let arguments: String?
 }
@@ -1075,5 +1113,6 @@ private func extractToolCallsFromOutput(_ output: [JSONValue]?) -> [OpenAIToolCa
 
     return toolCalls
 }
+
 
 
