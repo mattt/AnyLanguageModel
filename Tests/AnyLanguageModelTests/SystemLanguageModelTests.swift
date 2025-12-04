@@ -85,5 +85,26 @@ import AnyLanguageModel
             #expect(!snapshots.isEmpty)
             #expect(!snapshots.last!.rawContent.jsonString.isEmpty)
         }
+
+        @available(macOS 26.0, *)
+        @Test func withTools() async throws {
+            let weatherTool = WeatherTool()
+            let session = LanguageModelSession(model: SystemLanguageModel.default, tools: [weatherTool])
+
+            let response = try await session.respond(to: "How's the weather in San Francisco?")
+
+            #if false // Disabled for now because transcript entries are not converted from FoundationModels for now
+            var foundToolOutput = false
+            for case let .toolOutput(toolOutput) in response.transcriptEntries {
+                #expect(toolOutput.id == "getWeather")
+                foundToolOutput = true
+            }
+            #expect(foundToolOutput)
+            #endif
+
+            let content = response.content
+            #expect(content.contains("San Francisco"))
+            #expect(content.contains("72°F"))
+        }
     }
 #endif
