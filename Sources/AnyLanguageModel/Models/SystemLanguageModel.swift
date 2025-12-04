@@ -118,20 +118,25 @@
                 instructions: session.instructions?.toFoundationModels()
             )
 
-            // Bridge FoundationModels' stream into our ResponseStream snapshots
-            let fmStream: FoundationModels.LanguageModelSession.ResponseStream<String> =
-                fmSession.streamResponse(to: fmPrompt, options: fmOptions)
-            let fmBox = UnsafeSendableBox(value: fmStream)
-
             let stream = AsyncThrowingStream<LanguageModelSession.ResponseStream<Content>.Snapshot, any Error> {
                 @Sendable continuation in
                 let task = Task {
+                    // Bridge FoundationModels' stream into our ResponseStream snapshots
+                    let fmStream: FoundationModels.LanguageModelSession.ResponseStream<String> =
+                    fmSession.streamResponse(to: fmPrompt, options: fmOptions)
+
                     var accumulatedText = ""
                     do {
                         // Iterate FM stream of String snapshots
                         var lastLength = 0
-                        for try await snapshot in fmBox.value {
-                            let chunkText: String = snapshot.content
+                        for try await snapshot in fmStream {
+                            var chunkText: String = snapshot.content
+
+                            // We something get "null" from FoundationModels as a first temp result when streaming
+                            // Some nil is probably converted to our String type when no data is available
+                            if chunkText == "null" && accumulatedText == "" {
+                                chunkText = ""
+                            }
 
                             if chunkText.count >= lastLength, chunkText.hasPrefix(accumulatedText) {
                                 // Cumulative; compute delta via previous length
@@ -152,7 +157,6 @@
                                 accumulatedText += chunkText
                                 lastLength = accumulatedText.count
                             }
-
                             // Build raw content from plain text
                             let raw: GeneratedContent = GeneratedContent(accumulatedText)
 
@@ -300,7 +304,7 @@ private struct AnyToolWrapper: FoundationModels.Tool {
         public let parameters: FoundationModels.GenerationSchema
         public let includesSchemaInInstructions: Bool
         
-        private let wrappedTool: Tool
+        private let wrappedTool: any Tool
 
         init(tool: any Tool) {
             self.wrappedTool = tool
@@ -308,28 +312,7 @@ private struct AnyToolWrapper: FoundationModels.Tool {
             self.description = tool.description
             self.includesSchemaInInstructions = tool.includesSchemaInInstructions
 
-
-            var properties : [FoundationModels.GenerationSchema.Property] = []
-
-            // Handle the case where the schema has a root reference
-            let resolvedSchema = tool.parameters.withResolvedRoot() ?? tool.parameters
-            let rawParameters = try? JSONValue(resolvedSchema)
-            var schema : FoundationModels.GenerationSchema? = nil
-            if let parameters = rawParameters?.objectValue as? [String: JSONValue] {
-                let convertor = ValueSchemaConverter(root: parameters)
-                if let dynamicSchema = convertor.schema() {
-                    schema = try? FoundationModels.GenerationSchema(root: dynamicSchema, dependencies: [])
-                }
-            }
-            if let schema = schema {
-                self.parameters = schema
-            } else {
-                self.parameters = FoundationModels.GenerationSchema(
-                    type: String.self,
-                    description: "tool parameters",
-                    properties: [])
-
-            }
+            self.parameters = FoundationModels.GenerationSchema(tool.parameters)
         }
         
         public func call(arguments: FoundationModels.GeneratedContent) async throws -> Output {
@@ -345,31 +328,35 @@ private struct AnyToolWrapper: FoundationModels.Tool {
                 return result
             } catch {
                 // Return error information as string
-                return "Tool call failed: \(error.localizedDescription)" as! Output
+                return "Tool call failed: \(error.localizedDescription)"
             }
         }
     }
 
     @available(macOS 26.0, *)
     extension FoundationModels.GenerationSchema {
-        internal init(_ content: AnyLanguageModel.GenerationSchema) throws {
-            let resolvedContent = content
-            do {
-                let data = try JSONEncoder().encode(resolvedContent)
-                self = try JSONDecoder().decode(FoundationModels.GenerationSchema.self, from: data)
-            }
-            catch {
-                let data = try JSONEncoder().encode(content)
-                self = try JSONDecoder().decode(FoundationModels.GenerationSchema.self, from: data)
-            }
-        }
-    }
+        internal init(_ content: AnyLanguageModel.GenerationSchema) {
+            let resolvedSchema = content.withResolvedRoot() ?? content
 
-    @available(macOS 26.0, *)
-    extension AnyLanguageModel.GenerationSchema {
-        internal init(_ content: FoundationModels.GenerationSchema) throws {
-            let data = try JSONEncoder().encode(content)
-            self = try JSONDecoder().decode(AnyLanguageModel.GenerationSchema.self, from: data)
+            let rawParameters = try? JSONValue(resolvedSchema)
+            var schema : FoundationModels.GenerationSchema? = nil
+            if let parameters = rawParameters?.objectValue as? [String: JSONValue] {
+                if let data = try? JSONEncoder().encode(rawParameters) {
+                    if let jsonSchema = try? JSONDecoder().decode(JSONSchema.self, from: data) {
+                        if let dynamicSchema = SchemaConverter.convert(schema: jsonSchema) {
+                            schema = try? FoundationModels.GenerationSchema(root: dynamicSchema, dependencies: [])
+                        }
+                    }
+                }
+            }
+            if let schema = schema {
+                self = schema
+            } else {
+                self = FoundationModels.GenerationSchema(
+                    type: String.self,
+                    properties: [])
+
+            }
         }
     }
 
@@ -403,405 +390,161 @@ private struct AnyToolWrapper: FoundationModels.Tool {
         case streamingFailed
     }
 
-// Inspired by :  https://github.com/0Itsuki0/Swift_FoundationModelsWithMCP/blob/main/FoundationModelWithMCP/ValueSchemaConvertor.swift
-    // MARK: - JSON Schema Keys
-    private enum JSONSchemaKey: String, CustomStringConvertible {
-        case type = "type"
-        case properties = "properties"
-        case items = "items"
-        case required = "required"
-        case description = "description"
-        case title = "title"
-        case enumType = "enum"
-        case constType = "const"
-        case anyOf = "anyOf"
+@available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
+private
+class SchemaConverter {
 
-        // Types
-        case null = "null"
-        case boolean = "boolean"
-        case number = "number"
-        case integer = "integer"
-        case array = "array"
-        case string = "string"
-        case object = "object"
+    let jsonSchema: JSONSchema
 
-        // Array constraints
-        case minItems = "minItems"
-        case maxItems = "maxItems"
+    static func convert(schema: JSONSchema) -> FoundationModels.DynamicGenerationSchema? {
+        let converter  = SchemaConverter(schema: schema)
+        return converter.convertedSchema()
+    }
 
-        var description: String {
-            return self.rawValue
+    init(schema: JSONSchema) {
+        self.jsonSchema = schema
+    }
+
+    func convertedSchema() -> FoundationModels.DynamicGenerationSchema? {
+        return schema(from: jsonSchema)
+    }
+
+    private func property(key: String, withSchema jsonSchema: JSONSchema, inSchema mainSchema: JSONSchema) -> FoundationModels.DynamicGenerationSchema.Property? {
+        let required : [String] = if case .object(_, _, _, _, _, _, _, required: let required, _) = mainSchema {
+            required
+        } else  {
+            []
+        }
+        let isOptional = required.contains(key) == false
+        let schema = self.schema(from: jsonSchema)
+
+        switch jsonSchema {
+        case .string(_, let description, _,  _, _, _, _, _, _, _),
+                .object(_, let description, _,  _, _, _, _, _, _),
+                .array(_, let description, _,  _, _, _, _, _, _, _),
+                .number(_, let description, _,  _, _, _, _, _, _, _, _),
+                .integer(_, let description, _,  _, _, _, _, _, _, _, _),
+                .boolean(_, let description, _):
+            return .init(name: key, description: description, schema: schema, isOptional: isOptional)
+
+        default:
+            return .init(name: key, schema: schema, isOptional: isOptional)
         }
     }
 
+    func schema(from jsonSchema: JSONSchema) -> FoundationModels.DynamicGenerationSchema {
+        switch jsonSchema {
+        case .object(_, description: let description, _,  _, _, _, properties: let properties, _, _):
 
-    // MARK: ValueSchemaConvertor
-    // converting JSON Schema (JSONValue) to Dynamic Generation Schema
-    @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
-    class ValueSchemaConverter {
+            let schemaProperties = properties.compactMap { self.property(key: $0.0, withSchema: $0.1, inSchema: jsonSchema) }
+            return .init(name: "", description: description, properties: schemaProperties)
 
-        let root: JSONValue
-        var decodingStack: Set<String> = []
+        case .string(_, _, _, _, enum: let `enum`, const: let `const`, _, _, pattern: let pattern, _):
 
-        init(root: [String: JSONValue]) {
-            self.root = JSONValue.object(root)
-        }
-
-        func schema() -> FoundationModels.DynamicGenerationSchema? {
-            return schema(from: root.objectValue!)
-        }
-
-        private func resolvedValue(_ value: JSONValue) -> JSONValue {
-            switch value {
-
-            case .null, .bool, .int, .double, .string:
-                return value
-
-            case .array(let array):
-                return .array(array.compactMap { resolvedValue($0) })
-
-            case .object(let object):
-                if let ref = object["$ref"]?.stringValue {
-                    if decodingStack.contains(ref) {
-                        return value // Circular references
-                    }
-                    var resolvedRef = value
-                    decodingStack.insert(ref)
-                    var success = false
-                    // Support only of #/path/to/object" references for now
-                    if ref.hasPrefix("#") {
-                        let components = ref.split(separator: "/")
-                        var result = root
-                        for key in components {
-                            if key == "#" {
-                                continue
-                            }
-                            if let object = result.objectValue {
-                                if let val = object[String(key)] {
-                                    success = true
-                                    result = val
-                                } else {
-                                    success = false
-                                    result = value
-                                    break
-                                }
-                            }
-                        }
-                        resolvedRef = success ? resolvedValue(result) : result
-                    }
-                    decodingStack.remove(ref)
-                    return resolvedRef
-                } else {
-                    return .object(object.compactMapValues { resolvedValue($0) })
-
-                }
+            var guides : [FoundationModels.GenerationGuide<String>] = []
+            if let `enum`, let values = `enum` as? [String] {
+                guides.append(.anyOf(values))
             }
-            return value
-        }
-        private func propertyFrom(value: [String: JSONValue], name: String, description: String?, typeString: String?, required: Bool) -> FoundationModels.DynamicGenerationSchema.Property? {
-            let propertyName = name
-            let propertyDescription = description
-            var propertyTypeString = typeString
-            var isRequired = required
-
-            if typeString == nil {
-                // Check if it's a "anyOf <types>"
-                if let typeValue = value[JSONSchemaKey.anyOf.rawValue]?.arrayValue {
-                    let typeArray = typeValue.compactMap {$0.objectValue?[JSONSchemaKey.type.rawValue]?.stringValue}
-                    // We don't actually support than for now - just return the first non-null one
-                    if typeArray.contains(JSONSchemaKey.null.rawValue) {
-                        isRequired = false
-                    }
-                    propertyTypeString = typeArray.first { $0 != JSONSchemaKey.null.rawValue }
-                }
+            if let `const`, let value = `const`.stringValue {
+                guides.append(.constant(value))
             }
-            switch propertyTypeString {
-            case JSONSchemaKey.null.rawValue:
-                return nil
+            if let pattern, let regex = try? Regex(pattern) {
+                guides.append(.pattern(regex))
+            }
+            return .init(type: String.self, guides: guides)
 
-            case JSONSchemaKey.boolean.rawValue:
-                let schema = FoundationModels.DynamicGenerationSchema(type: Bool.self)
-                return property(name: propertyName, description: propertyDescription, schema: schema, required: isRequired)
+        case .integer(_,  _, _, _, enum: let `enum`, const: let `const`, minimum: let minimum, maximum: let maximum, _, _, _):
 
-            case JSONSchemaKey.object.rawValue:
-                let schema = schema(from: value)
-                return property(name: propertyName, description: propertyDescription, schema: schema, required: isRequired)
+            var guides : [FoundationModels.GenerationGuide<Int>] = []
 
-            case JSONSchemaKey.array.rawValue:
-                let arrayItems = getArrayItems(object: value)
-                let (min, max) = getArrayMinMax(object: value)
+            if let `enum` {
 
-                let schema = schema(from: arrayItems)
-                let arraySchema = FoundationModels.DynamicGenerationSchema(
-                    arrayOf: schema,
-                    minimumElements: min,
-                    maximumElements: max
+                let enumsSchema = `enum`.compactMap { self.constSchema(object: $0) }
+                return FoundationModels.DynamicGenerationSchema(
+                    name: "",
+                    anyOf: enumsSchema
                 )
-                return property(name: propertyName, description: propertyDescription, schema: arraySchema, required: isRequired)
 
-            case JSONSchemaKey.number.rawValue:
-                let result = applyEnumAndConstConstraints(for: value, name: propertyName, description: propertyDescription, defaultSchema: FoundationModels.DynamicGenerationSchema(type: Double.self), required: isRequired)
-                return property(name: propertyName, description: propertyDescription, schema: result.schema, required: result.isRequired)
-
-            case JSONSchemaKey.integer.rawValue:
-                let result = applyEnumAndConstConstraints(for: value, name: propertyName, description: propertyDescription, defaultSchema: FoundationModels.DynamicGenerationSchema(type: Int.self), required: isRequired)
-                return property(name: propertyName, description: propertyDescription, schema: result.schema, required: result.isRequired)
-
-            case JSONSchemaKey.string.rawValue:
-                let result = applyEnumAndConstConstraints(for: value, name: propertyName, description: propertyDescription, defaultSchema: FoundationModels.DynamicGenerationSchema(type: String.self), required: isRequired)
-                return property(name: propertyName, description: propertyDescription, schema: result.schema, required: result.isRequired)
-
-            case JSONSchemaKey.anyOf.rawValue:
-                if let value = value[JSONSchemaKey.anyOf.rawValue]?.arrayValue {
-                    let typeArray = value.compactMap { $0.objectValue }
-                    let schemasArray: [FoundationModels.DynamicGenerationSchema] = typeArray.compactMap { self.schema(from: $0) }
-                    let schema = FoundationModels.DynamicGenerationSchema(name: propertyName, description: description, anyOf: schemasArray)
-                    return property(name: name, description: description, schema: schema, required: isRequired)
+            } else {
+                if let min = minimum {
+                    guides.append(.minimum(min))
+                }
+                if let max = maximum {
+                    guides.append(.maximum(max))
+                }
+                if let `const`, let value = `const`.intValue {
+                    guides.append(.range(value...value))
                 }
 
-            default:
-                // const or enum without type
-                if let enumValue = value[JSONSchemaKey.enumType.rawValue] {
-                    let result = enumSchema(name: propertyName, description: description, object: enumValue)
-                    return property(name: propertyName, description: propertyDescription, schema: result.schema, required: result.isRequired ?? isRequired)
-                }
-
-                if let constValue = value[JSONSchemaKey.constType.rawValue], let schema = constSchema(object: constValue) {
-                    return property(name: propertyName, description: propertyDescription, schema: schema, required: isRequired)
-                }
+                return .init(type: Int.self, guides: guides)
             }
 
-            return nil
-        }
+        case .number(_,  _, _, _, enum: let `enum`, const: let `const`, minimum: let minimum, maximum: let maximum, _, _, _):
 
-        func schema(from object: [String: JSONValue]) -> FoundationModels.DynamicGenerationSchema {
-            let title = getTitle(object: object) ?? UUID().uuidString
-            let description = getDescription(object: object)
+            var guides : [FoundationModels.GenerationGuide<Double>] = []
 
-            if let type = getPropertyTypeString(object: object) {
-                switch type {
-                case JSONSchemaKey.boolean.rawValue:
-                    return FoundationModels.DynamicGenerationSchema(type: Bool.self)
+            if let `enum` {
 
-                case JSONSchemaKey.array.rawValue:
-                    let arrayItems = getArrayItems(object: object)
-                    let (min, max) = getArrayMinMax(object: object)
-                    let itemSchema = schema(from: arrayItems)
+                let enumsSchema = `enum`.compactMap { self.constSchema(object: $0) }
+                return .init(name: "", anyOf: enumsSchema)
 
-                    return FoundationModels.DynamicGenerationSchema(
-                        arrayOf: itemSchema,
-                        minimumElements: min,
-                        maximumElements: max
-                    )
-
-                case JSONSchemaKey.number.rawValue:
-                    return applyEnumAndConstConstraints(for: object, name: title, description: description, defaultSchema: FoundationModels.DynamicGenerationSchema(type: Double.self), required: true).schema
-
-                case JSONSchemaKey.integer.rawValue:
-                    return applyEnumAndConstConstraints(for: object, name: title, description: description, defaultSchema: FoundationModels.DynamicGenerationSchema(type: Int.self), required: true).schema
-
-                case JSONSchemaKey.string.rawValue:
-                    return applyEnumAndConstConstraints(for: object, name: title, description: description, defaultSchema: FoundationModels.DynamicGenerationSchema(type: String.self), required: true).schema
-
-                case JSONSchemaKey.anyOf.rawValue:
-                    if let value = object[JSONSchemaKey.anyOf.rawValue]?.arrayValue as? [[String: JSONValue]] {
-                        let schemasArray: [FoundationModels.DynamicGenerationSchema] = value.compactMap { schema(from: $0) }
-                        return FoundationModels.DynamicGenerationSchema(name: title, description: description, anyOf: schemasArray)
-                    }
-
-                case JSONSchemaKey.object.rawValue:
-                    return objectSchema(from: object, title: title, description: description)
-
-                default:
-                    // Unknown type, fall through to handle as object or typeless enum/const
-                    break
+            } else {
+                if let min = minimum {
+                    guides.append(.minimum(min))
+                }
+                if let max = maximum {
+                    guides.append(.maximum(max))
+                }
+                if let `const`, let value = `const`.doubleValue {
+                    guides.append(.range(value...value))
                 }
             }
 
-            // Handle schemas without a 'type' property, or with an unhandled type
-            if let value = object[JSONSchemaKey.enumType.rawValue] {
-                return enumSchema(name: title, description: description, object: value).schema
-            }
+            return .init(type: Double.self, guides: guides)
 
-            if let value = object[JSONSchemaKey.constType.rawValue], let result = constSchema(object: value) {
-                return result
-            }
+        case .boolean(_, _, _):
+            return .init(type: Bool.self)
 
-            // Fallback for objects without an explicit "type": "object"
-            return objectSchema(from: object, title: title, description: description)
+        case .anyOf(let schemas):
+            return .init(name: "", anyOf: schemas.compactMap { self.schema(from: $0) })
+
+        case .array(_, _, _, _, _, _, items: let items, minItems: let minItems, maxItems: let maxItems, _):
+
+            // Note: const and enums are ignored for array properties
+            let itemsSchema = if let items {
+                schema(from: items)
+            } else {
+                FoundationModels.DynamicGenerationSchema(type: String.self)
+            }
+            return .init(arrayOf: itemsSchema, minimumElements: minItems, maximumElements: maxItems)
+
+        case .reference(let name):
+            return .init(referenceTo: name)
+
+        default:
+            break
         }
+        return .init(type: String.self)
+    }
 
-        private func objectSchema(from object: [String: JSONValue], title: String, description: String?) -> FoundationModels.DynamicGenerationSchema {
-            let requiredFields = getRequiredFields(object: object)
-            let properties = getProperties(object: object)
-
-            let schemaProperties: [FoundationModels.DynamicGenerationSchema.Property] = properties.compactMap { (key, value) in
-                if let value = resolvedValue(JSONValue.object(value)).objectValue {
-                    let propertyName: String = key
-                    let propertyDescription = getDescription(object: value)
-                    let propertyTypeString = getPropertyTypeString(object: value)
-                    let required = requiredFields.contains(key)
-
-                    return propertyFrom(value: value, name: propertyName, description: propertyDescription, typeString: propertyTypeString, required: required)
-                } else {
-                    return nil
-                }
-            }
-
-            return FoundationModels.DynamicGenerationSchema(
-                name: title,
-                description: description,
-                properties: schemaProperties
-            )
-        }
-
-        private func applyEnumAndConstConstraints(for value: [String: JSONValue], name: String, description: String?, defaultSchema: FoundationModels.DynamicGenerationSchema, required: Bool) -> (schema: FoundationModels.DynamicGenerationSchema, isRequired: Bool) {
-            var schema = defaultSchema
-            var isRequired = required
-
-            if let enumValue = value[JSONSchemaKey.enumType.rawValue] {
-                let result = enumSchema(name: name, description: description, object: enumValue)
-                schema = result.schema
-                if let r = result.isRequired {
-                    isRequired = r
-                }
-            } else if let constValue = value[JSONSchemaKey.constType.rawValue], let result = constSchema(object: constValue) {
-                schema = result
-            }
-
-            return (schema, isRequired)
-        }
-
-        private func property(name: String, description: String?, schema: FoundationModels.DynamicGenerationSchema, required: Bool)  -> FoundationModels.DynamicGenerationSchema.Property {
-            return FoundationModels.DynamicGenerationSchema.Property(
-                name: name,
-                description: description,
-                schema: schema,
-                isOptional: required == false
-            )
-        }
-
-        // "color": { "enum": ["red", "amber", "green", null, 42] }
-        private func enumSchema(name: String, description: String?, object: JSONValue) -> (schema: FoundationModels.DynamicGenerationSchema, isRequired: Bool?) {
-            guard let array = object.arrayValue else {
-                let schema = FoundationModels.DynamicGenerationSchema(name: name, description: description, anyOf: [] as [String])
-                return (schema: schema, isRequired: nil)
-            }
-
-            let strings = array.compactMap { $0.stringValue }
-
-            if strings.count == array.count {
-                let stringSchema = FoundationModels.DynamicGenerationSchema(name: name, description: description, anyOf: strings)
-                return (schema: stringSchema, isRequired: nil)
-            }
-
-            let required = !array.contains { $0.isNull }
-
-            let nonStringValues = array.filter { $0.stringValue == nil }
-
-            var schemas: [FoundationModels.DynamicGenerationSchema] = []
-            if !strings.isEmpty {
-                schemas.append(FoundationModels.DynamicGenerationSchema(name: name, description: description, anyOf: strings))
-            }
-
-            for value in nonStringValues {
-                if let intValue = value.intValue {
-                    schemas.append(constantIntSchema(value: intValue))
-                } else if let doubleValue = value.doubleValue {
-                    schemas.append(constantDoubleSchema(value: doubleValue))
-                } else if value.boolValue != nil {
-                    schemas.append(FoundationModels.DynamicGenerationSchema(type: Bool.self))
-                }
-            }
-
-            let schema = FoundationModels.DynamicGenerationSchema(name: name, description: description, anyOf: schemas)
-            return (schema: schema, isRequired: required)
-        }
-
-
-        // "country": { "const": "United States of America" }
-        // not handling array, object, or bool here
-        private func constSchema(object: JSONValue) -> FoundationModels.DynamicGenerationSchema? {
-            if let intValue = object.intValue {
-                return constantIntSchema(value: intValue)
-            }
-            if let doubleValue = object.doubleValue {
-                return constantDoubleSchema(value: doubleValue)
-            }
-            if let stringValue = object.stringValue {
-                return constantStringSchema(value: stringValue)
-            }
-            if let _ = object.arrayValue {
-                // array constant not supported by dynamic schema
-                return nil
-            }
-
-            if let _ = object.objectValue {
-                // object constant not supported by dynamic schema
-                return nil
-            }
-            return nil
-        }
-
-        private func constantIntSchema(value: Int) -> FoundationModels.DynamicGenerationSchema {
+    // "country": { "const": "United States of America" }
+    // not handling array, object, or bool here
+    private func constSchema(object: JSONValue) -> FoundationModels.DynamicGenerationSchema? {
+        switch object {
+        case .int(let value):
             FoundationModels.DynamicGenerationSchema(type: Int.self, guides: [.range(value...value)])
-        }
-
-        private func constantDoubleSchema(value: Double) -> FoundationModels.DynamicGenerationSchema {
+        case .double(let value):
             FoundationModels.DynamicGenerationSchema(type: Double.self, guides: [.range(value...value)])
-        }
-
-        private func constantStringSchema(value: String) -> FoundationModels.DynamicGenerationSchema {
+        case .string(let value):
             FoundationModels.DynamicGenerationSchema(type: String.self, guides: [.constant(value)])
-        }
-
-        private func getRequiredFields(object: [String: JSONValue]) -> [String] {
-            guard let array = object[JSONSchemaKey.required.rawValue]?.arrayValue else {
-                return []
-            }
-            return array.compactMap { $0.stringValue }
-        }
-
-        // minItems and maxItems
-        private func getArrayMinMax(object: [String: JSONValue]) -> (Int?, Int?) {
-            let minInt = object[JSONSchemaKey.minItems.rawValue]?.intValue
-            let maxInt = object[JSONSchemaKey.maxItems.rawValue]?.intValue
-            return (minInt, maxInt)
-        }
-
-        private func getArrayItems(object: [String: JSONValue]) -> [String: JSONValue] {
-            guard let items = object[JSONSchemaKey.items.rawValue]?.objectValue else {
-                return [:]
-            }
-            return items
-        }
-
-        private func getProperties(object: [String: JSONValue]) -> [String: [String: JSONValue]] {
-            guard let propertyObject = object[JSONSchemaKey.properties.rawValue]?.objectValue else {
-                return [:]
-            }
-            return propertyObject.compactMapValues { $0.objectValue }
-        }
-
-        private func getDescription(object: [String: JSONValue]) -> String? {
-            return object[JSONSchemaKey.description.rawValue]?.stringValue
-        }
-
-        private func getRequired(object: [String: JSONValue]) -> [String]? {
-            guard let required = object[JSONSchemaKey.required.rawValue]?.arrayValue as? [String] else {
-                return nil
-            }
-            return required
-        }
-
-        private func getTitle(object: [String: JSONValue]) -> String? {
-            return object[JSONSchemaKey.title.rawValue]?.stringValue
-        }
-
-        private func getPropertyTypeString(object: [String: JSONValue]) -> String? {
-            return object[JSONSchemaKey.type.rawValue]?.stringValue
+        case .null:
+            nil
+        case .object(_), .bool(_), .array(_):
+            // bool, object and array constant not supported by dynamic schema
+            nil
         }
     }
+}
 
 #endif
 
