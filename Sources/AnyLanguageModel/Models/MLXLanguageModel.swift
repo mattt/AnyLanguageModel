@@ -83,10 +83,20 @@ import Foundation
             // Map AnyLanguageModel GenerationOptions to MLX GenerateParameters
             let generateParameters = toGenerateParameters(options)
 
-            // Start with user prompt
+            // Build chat history starting with system message if instructions are present
+            var chat: [MLXLMCommon.Chat.Message] = []
+
+            // Add system message if instructions are present
+            if let instructionSegments = extractInstructionSegments(from: session) {
+                let systemMessage = convertSegmentsToMLXSystemMessage(instructionSegments)
+                chat.append(systemMessage)
+            }
+
+            // Add user prompt
             let userSegments = extractPromptSegments(from: session, fallbackText: prompt.description)
             let userMessage = convertSegmentsToMLXMessage(userSegments)
-            var chat: [MLXLMCommon.Chat.Message] = [userMessage]
+            chat.append(userMessage)
+
             var allTextChunks: [String] = []
             var allEntries: [Transcript.Entry] = []
 
@@ -211,6 +221,20 @@ import Foundation
         return [.text(.init(content: fallbackText))]
     }
 
+    private func extractInstructionSegments(from session: LanguageModelSession) -> [Transcript.Segment]? {
+        // Prefer the first Transcript.Instructions entry if present
+        for entry in session.transcript {
+            if case .instructions(let i) = entry {
+                return i.segments
+            }
+        }
+        // Fallback to session.instructions
+        if let instructions = session.instructions?.description, !instructions.isEmpty {
+            return [.text(.init(content: instructions))]
+        }
+        return nil
+    }
+
     private func convertSegmentsToMLXMessage(_ segments: [Transcript.Segment]) -> MLXLMCommon.Chat.Message {
         var textParts: [String] = []
         var images: [MLXLMCommon.UserInput.Image] = []
@@ -246,6 +270,43 @@ import Foundation
 
         let content = textParts.joined(separator: "\n")
         return MLXLMCommon.Chat.Message(role: .user, content: content, images: images)
+    }
+
+    private func convertSegmentsToMLXSystemMessage(_ segments: [Transcript.Segment]) -> MLXLMCommon.Chat.Message {
+        var textParts: [String] = []
+        var images: [MLXLMCommon.UserInput.Image] = []
+
+        for segment in segments {
+            switch segment {
+            case .text(let text):
+                textParts.append(text.content)
+            case .structure(let structured):
+                textParts.append(structured.content.jsonString)
+            case .image(let imageSegment):
+                switch imageSegment.source {
+                case .url(let url):
+                    images.append(.url(url))
+                case .data(let data, _):
+                    #if canImport(UIKit)
+                        if let uiImage = UIKit.UIImage(data: data),
+                            let ciImage = CIImage(image: uiImage)
+                        {
+                            images.append(.ciImage(ciImage))
+                        }
+                    #elseif canImport(AppKit)
+                        if let nsImage = AppKit.NSImage(data: data),
+                            let cgImage = nsImage.cgImage(forProposedRect: nil, context: nil, hints: nil)
+                        {
+                            let ciImage = CIImage(cgImage: cgImage)
+                            images.append(.ciImage(ciImage))
+                        }
+                    #endif
+                }
+            }
+        }
+
+        let content = textParts.joined(separator: "\n")
+        return MLXLMCommon.Chat.Message(role: .system, content: content, images: images)
     }
 
     // MARK: - Tool Conversion
