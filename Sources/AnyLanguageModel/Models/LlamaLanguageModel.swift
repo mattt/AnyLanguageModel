@@ -359,10 +359,6 @@ import Foundation
                 throw LlamaLanguageModelError.invalidModelPath
             }
 
-            // Configure logging level
-            currentLogLevel = Self.logLevel
-            llama_log_set(llamaLogCallback, nil)
-
             // Initialize backend lazily - must be done before loading model
             llama_backend_init()
 
