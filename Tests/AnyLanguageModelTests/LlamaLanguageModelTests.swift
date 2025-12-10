@@ -11,22 +11,82 @@ import Testing
     )
     struct LlamaLanguageModelTests {
         let model = LlamaLanguageModel(
-            modelPath: ProcessInfo.processInfo.environment["LLAMA_MODEL_PATH"]!,
-            contextSize: 2048,
-            temperature: 0.8
+            modelPath: ProcessInfo.processInfo.environment["LLAMA_MODEL_PATH"]!
         )
 
         @Test func initialization() {
-            let customModel = LlamaLanguageModel(
-                modelPath: "/path/to/model.gguf",
-                contextSize: 4096,
-                temperature: 0.7,
-                topK: 50
-            )
+            let customModel = LlamaLanguageModel(modelPath: "/path/to/model.gguf")
             #expect(customModel.modelPath == "/path/to/model.gguf")
-            #expect(customModel.contextSize == 4096)
-            #expect(customModel.temperature == 0.7)
-            #expect(customModel.topK == 50)
+            #expect(customModel.contextSize == 2048)
+            #expect(customModel.batchSize == 512)
+            #expect(customModel.threads == Int32(ProcessInfo.processInfo.processorCount))
+            #expect(customModel.temperature == 0.8)
+            #expect(customModel.topK == 40)
+            #expect(customModel.topP == 0.95)
+            #expect(customModel.repeatPenalty == 1.1)
+            #expect(customModel.repeatLastN == 64)
+        }
+
+        @Test func customGenerationOptionsRoundTrip() {
+            var options = GenerationOptions(
+                temperature: 0.6,
+                maximumResponseTokens: 25
+            )
+
+            let custom = LlamaLanguageModel.CustomGenerationOptions(
+                contextSize: 1024,
+                batchSize: 256,
+                threads: 1,
+                seed: 42,
+                temperature: 0.55,
+                topK: 25,
+                topP: 0.85,
+                repeatPenalty: 1.15,
+                repeatLastN: 48,
+                frequencyPenalty: 0.05,
+                presencePenalty: 0.05,
+                mirostat: .v2(tau: 5.0, eta: 0.2)
+            )
+            options[custom: LlamaLanguageModel.self] = custom
+
+            let retrieved = options[custom: LlamaLanguageModel.self]
+            #expect(retrieved?.contextSize == 1024)
+            #expect(retrieved?.batchSize == 256)
+            #expect(retrieved?.threads == 1)
+            #expect(retrieved?.seed == 42)
+            #expect(retrieved?.temperature == 0.55)
+            #expect(retrieved?.topK == 25)
+            #expect(retrieved?.topP == 0.85)
+            #expect(retrieved?.repeatPenalty == 1.15)
+            #expect(retrieved?.repeatLastN == 48)
+            #expect(retrieved?.frequencyPenalty == 0.05)
+            #expect(retrieved?.presencePenalty == 0.05)
+            #expect(retrieved?.mirostat == .v2(tau: 5.0, eta: 0.2))
+        }
+
+        @Test func deprecatedInitializerFallback() {
+            let legacy = LlamaLanguageModel(
+                modelPath: "/legacy/model.gguf",
+                contextSize: 1024,
+                batchSize: 128,
+                threads: 3,
+                seed: 7,
+                temperature: 0.65,
+                topK: 32,
+                topP: 0.88,
+                repeatPenalty: 1.02,
+                repeatLastN: 24
+            )
+
+            // Deprecated initializer ignores parameters; defaults are used.
+            #expect(legacy.contextSize == 2048)
+            #expect(legacy.batchSize == 512)
+            #expect(legacy.threads == Int32(ProcessInfo.processInfo.processorCount))
+            #expect(legacy.temperature == 0.8)
+            #expect(legacy.topK == 40)
+            #expect(legacy.topP == 0.95)
+            #expect(legacy.repeatPenalty == 1.1)
+            #expect(legacy.repeatLastN == 64)
         }
 
         @Test func logLevelConfiguration() {
@@ -169,6 +229,13 @@ import Testing
 
             // Set llama.cpp-specific custom options
             options[custom: LlamaLanguageModel.self] = .init(
+                contextSize: 1024,
+                batchSize: 256,
+                threads: 2,
+                seed: 123,
+                temperature: 0.75,
+                topK: 30,
+                topP: 0.9,
                 repeatPenalty: 1.2,
                 repeatLastN: 128,
                 frequencyPenalty: 0.1,
