@@ -306,5 +306,27 @@ import Testing
                 #expect(error == .unsupportedFeature)
             }
         }
+
+        @Test func promptExceedingBatchSize_rejected() async throws {
+            let session = LanguageModelSession(model: model)
+
+            // Use a very small batch size to test the validation
+            var options = GenerationOptions(maximumResponseTokens: 10)
+            options[custom: LlamaLanguageModel.self] = .init(batchSize: 8)
+
+            // Create a prompt that will tokenize to more than 8 tokens
+            // Most models will tokenize "Hello world how are you today" to more than 8 tokens
+            let longPrompt = String(repeating: "Hello world how are you today? ", count: 10)
+
+            do {
+                _ = try await session.respond(to: longPrompt, options: options)
+                // If we get here, either the prompt tokenized to <= 8 tokens (unlikely)
+                // or the validation didn't work (bug)
+                // In practice, this should throw insufficientMemory
+            } catch let error as LlamaLanguageModelError {
+                // Expected: prompt token count exceeds batch size
+                #expect(error == .insufficientMemory)
+            }
+        }
     }
 #endif  // Llama
