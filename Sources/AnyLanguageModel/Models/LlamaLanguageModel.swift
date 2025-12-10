@@ -166,14 +166,12 @@ import Foundation
             }
 
             /// Default llama.cpp options used when none are provided at runtime.
-            public static func defaults(
-                seed: UInt32 = UInt32.random(in: 0 ... UInt32.max)
-            ) -> Self {
+            public static var `default`: Self {
                 .init(
                     contextSize: 2048,
                     batchSize: 512,
                     threads: Int32(ProcessInfo.processInfo.processorCount),
-                    seed: seed,
+                    seed: UInt32.random(in: 0 ... UInt32.max),
                     temperature: 0.8,
                     topK: 40,
                     topP: 0.95,

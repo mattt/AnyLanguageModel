@@ -65,7 +65,7 @@ import Testing
         }
 
         @Test func customGenerationOptionsDefaults() {
-            let defaults = LlamaLanguageModel.CustomGenerationOptions.defaults()
+            let defaults = LlamaLanguageModel.CustomGenerationOptions.default
             #expect(defaults.contextSize == 2048)
             #expect(defaults.batchSize == 512)
             #expect(defaults.temperature == 0.8)
