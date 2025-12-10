@@ -364,17 +364,29 @@ Enable the trait in Package.swift:
 )
 ```
 
-Custom generation options for llama.cpp provide fine-grained
-control over sampling parameters:
+Configuration is done via custom generation options,
+allowing you to control runtime parameters per request:
 
 ```swift
 var options = GenerationOptions(temperature: 0.8)
 options[custom: LlamaLanguageModel.self] = .init(
-    repeatPenalty: 1.2,
-    repeatLastN: 128,
-    frequencyPenalty: 0.1,
-    presencePenalty: 0.1,
+    contextSize: 4096,        // Context window size
+    batchSize: 512,           // Batch size for evaluation
+    threads: 8,               // Number of threads
+    seed: 42,                 // Random seed for deterministic output
+    temperature: 0.7,         // Sampling temperature
+    topK: 40,                 // Top-K sampling
+    topP: 0.95,               // Top-P (nucleus) sampling
+    repeatPenalty: 1.2,       // Penalty for repeated tokens
+    repeatLastN: 128,         // Number of tokens to consider for repeat penalty
+    frequencyPenalty: 0.1,    // Frequency-based penalty
+    presencePenalty: 0.1,     // Presence-based penalty
     mirostat: .v2(tau: 5.0, eta: 0.1)  // Adaptive perplexity control
+)
+
+let response = try await session.respond(
+    to: "Write a story",
+    options: options
 )
 ```
 
