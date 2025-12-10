@@ -398,7 +398,7 @@ import Foundation
         /// Creates a Llama language model using legacy parameter defaults.
         ///
         /// - Important: This initializer is deprecated. Use
-        ///   `init(modelPath:defaultOptions:)` and configure per-request values via
+        ///   `init(modelPath:)` and configure per-request values via
         ///   ``GenerationOptions`` custom options instead.
         @available(
             *,
