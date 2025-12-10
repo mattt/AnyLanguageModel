@@ -166,12 +166,15 @@ import Foundation
             }
 
             /// Default llama.cpp options used when none are provided at runtime.
+            ///
+            /// The `seed` is `nil` by default, meaning a random seed will be generated
+            /// for each generation request.
             public static var `default`: Self {
                 .init(
                     contextSize: 2048,
                     batchSize: 512,
                     threads: Int32(ProcessInfo.processInfo.processorCount),
-                    seed: UInt32.random(in: 0 ... UInt32.max),
+                    seed: nil,
                     temperature: 0.8,
                     topK: 40,
                     topP: 0.95,
