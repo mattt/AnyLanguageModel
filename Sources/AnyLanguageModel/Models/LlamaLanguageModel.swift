@@ -2,6 +2,23 @@ import Foundation
 #if Llama
     import Llama
 
+    /// Global storage for the current log level threshold.
+    /// This is needed because the C callback can't capture Swift context.
+    /// Access is synchronized by llama.cpp's internal logging mechanism.
+    nonisolated(unsafe) private var currentLogLevel: LlamaLanguageModel.LogLevel = .warn
+
+    /// Custom log callback that filters messages based on the current log level.
+    private func llamaLogCallback(
+        level: ggml_log_level,
+        text: UnsafePointer<CChar>?,
+        userData: UnsafeMutableRawPointer?
+    ) {
+        guard level.rawValue >= currentLogLevel.ggmlLevel.rawValue else { return }
+        if let text = text {
+            fputs(String(cString: text), stderr)
+        }
+    }
+
     /// A language model that runs llama.cpp models locally.
     ///
     /// Use this model to generate text using GGUF models running directly with llama.cpp.
@@ -16,6 +33,35 @@ import Foundation
         /// The reason the model is unavailable.
         /// This model is always available.
         public typealias UnavailableReason = Never
+
+        /// The verbosity level for llama.cpp logging.
+        public enum LogLevel: Int, Hashable, Comparable, Sendable, CaseIterable {
+            /// No logging output.
+            case none = 0
+            /// Debug messages and above (most verbose).
+            case debug = 1
+            /// Info messages and above.
+            case info = 2
+            /// Warning messages and above (default).
+            case warn = 3
+            /// Only error messages.
+            case error = 4
+
+            /// Maps to the corresponding ggml log level.
+            var ggmlLevel: ggml_log_level {
+                switch self {
+                case .none: return GGML_LOG_LEVEL_NONE
+                case .debug: return GGML_LOG_LEVEL_DEBUG
+                case .info: return GGML_LOG_LEVEL_INFO
+                case .warn: return GGML_LOG_LEVEL_WARN
+                case .error: return GGML_LOG_LEVEL_ERROR
+                }
+            }
+
+            public static func < (lhs: LogLevel, rhs: LogLevel) -> Bool {
+                lhs.rawValue < rhs.rawValue
+            }
+        }
 
         /// Custom generation options specific to llama.cpp.
         ///
@@ -114,6 +160,17 @@ import Foundation
 
         /// The number of tokens to consider for repeat penalty.
         public let repeatLastN: Int32
+
+        /// The minimum log level for llama.cpp output.
+        ///
+        /// This is a global setting that affects all `LlamaLanguageModel` instances
+        /// since llama.cpp uses a single global log callback.
+        public nonisolated(unsafe) static var logLevel: LogLevel = .warn {
+            didSet {
+                currentLogLevel = logLevel
+                llama_log_set(llamaLogCallback, nil)
+            }
+        }
 
         /// The loaded model instance
         private var model: OpaquePointer?

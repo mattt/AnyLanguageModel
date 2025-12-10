@@ -29,6 +29,40 @@ import Testing
             #expect(customModel.topK == 50)
         }
 
+        @Test func logLevelConfiguration() {
+            let originalLevel = LlamaLanguageModel.logLevel
+
+            LlamaLanguageModel.logLevel = .none
+            #expect(LlamaLanguageModel.logLevel == .none)
+
+            LlamaLanguageModel.logLevel = .debug
+            #expect(LlamaLanguageModel.logLevel == .debug)
+
+            LlamaLanguageModel.logLevel = .error
+            #expect(LlamaLanguageModel.logLevel == .error)
+
+            LlamaLanguageModel.logLevel = originalLevel
+        }
+
+        @Test func logLevelComparison() {
+            #expect(LlamaLanguageModel.LogLevel.none < .debug)
+            #expect(LlamaLanguageModel.LogLevel.debug < .info)
+            #expect(LlamaLanguageModel.LogLevel.info < .warn)
+            #expect(LlamaLanguageModel.LogLevel.warn < .error)
+
+            #expect(LlamaLanguageModel.LogLevel.error > .warn)
+            #expect(LlamaLanguageModel.LogLevel.warn >= .warn)
+        }
+
+        @Test func logLevelHashable() {
+            let levels: Set<LlamaLanguageModel.LogLevel> = [.debug, .info, .warn]
+            #expect(levels.contains(.debug))
+            #expect(levels.contains(.info))
+            #expect(levels.contains(.warn))
+            #expect(!levels.contains(.none))
+            #expect(!levels.contains(.error))
+        }
+
         @Test func basicResponse() async throws {
             let session = LanguageModelSession(model: model)
 
