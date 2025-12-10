@@ -185,24 +185,6 @@ import Foundation
                 )
             }
 
-            /// Returns a new options struct with values from `overrides` when provided.
-            func merging(overrides: CustomGenerationOptions?) -> CustomGenerationOptions {
-                guard let overrides else { return self }
-                return CustomGenerationOptions(
-                    contextSize: overrides.contextSize ?? self.contextSize,
-                    batchSize: overrides.batchSize ?? self.batchSize,
-                    threads: overrides.threads ?? self.threads,
-                    seed: overrides.seed ?? self.seed,
-                    temperature: overrides.temperature ?? self.temperature,
-                    topK: overrides.topK ?? self.topK,
-                    topP: overrides.topP ?? self.topP,
-                    repeatPenalty: overrides.repeatPenalty ?? self.repeatPenalty,
-                    repeatLastN: overrides.repeatLastN ?? self.repeatLastN,
-                    frequencyPenalty: overrides.frequencyPenalty ?? self.frequencyPenalty,
-                    presencePenalty: overrides.presencePenalty ?? self.presencePenalty,
-                    mirostat: overrides.mirostat ?? self.mirostat
-                )
-            }
         }
 
         /// The path to the GGUF model file.
@@ -613,8 +595,13 @@ import Foundation
         }
 
         private func resolvedOptions(from options: GenerationOptions) -> ResolvedGenerationOptions {
-            ResolvedGenerationOptions(
-                base: legacyDefaults,
+            var base = legacyDefaults
+            if let temp = options.temperature {
+                base.temperature = Float(temp)
+            }
+
+            return ResolvedGenerationOptions(
+                base: base,
                 overrides: options[custom: LlamaLanguageModel.self],
                 sampling: options.sampling,
                 maximumResponseTokens: options.maximumResponseTokens

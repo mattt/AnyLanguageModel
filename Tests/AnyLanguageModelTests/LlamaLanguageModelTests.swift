@@ -64,6 +64,17 @@ import Testing
             #expect(retrieved?.mirostat == .v2(tau: 5.0, eta: 0.2))
         }
 
+        @Test func customGenerationOptionsDefaults() {
+            let defaults = LlamaLanguageModel.CustomGenerationOptions.defaults()
+            #expect(defaults.contextSize == 2048)
+            #expect(defaults.batchSize == 512)
+            #expect(defaults.temperature == 0.8)
+            #expect(defaults.topK == 40)
+            #expect(defaults.topP == 0.95)
+            #expect(defaults.repeatPenalty == 1.1)
+            #expect(defaults.repeatLastN == 64)
+        }
+
         @Test func deprecatedInitializerFallback() {
             let legacy = LlamaLanguageModel(
                 modelPath: "/legacy/model.gguf",
