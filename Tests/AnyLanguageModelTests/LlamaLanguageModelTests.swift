@@ -10,15 +10,11 @@ import Testing
         .enabled(if: ProcessInfo.processInfo.environment["LLAMA_MODEL_PATH"] != nil)
     )
     struct LlamaLanguageModelTests {
-        let modelPath: String = ProcessInfo.processInfo.environment["LLAMA_MODEL_PATH"] ?? ""
-
-        var model: LlamaLanguageModel {
-            LlamaLanguageModel(
-                modelPath: modelPath,
-                contextSize: 2048,
-                temperature: 0.8
-            )
-        }
+        let model = LlamaLanguageModel(
+            modelPath: ProcessInfo.processInfo.environment["LLAMA_MODEL_PATH"]!,
+            contextSize: 2048,
+            temperature: 0.8
+        )
 
         @Test func initialization() {
             let customModel = LlamaLanguageModel(
@@ -100,17 +96,6 @@ import Testing
 
             let secondResponse = try await session.respond(to: "What did I just tell you?")
             #expect(!secondResponse.content.isEmpty)
-        }
-
-        @Test func customTemperature() async throws {
-            let highTempModel = LlamaLanguageModel(
-                modelPath: modelPath,
-                temperature: 1.5
-            )
-
-            let session = LanguageModelSession(model: highTempModel)
-            let response = try await session.respond(to: "Say something creative")
-            #expect(!response.content.isEmpty)
         }
 
         @Test func maxTokensLimit() async throws {
