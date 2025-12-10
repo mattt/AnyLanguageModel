@@ -68,11 +68,16 @@ import Testing
             let defaults = LlamaLanguageModel.CustomGenerationOptions.default
             #expect(defaults.contextSize == 2048)
             #expect(defaults.batchSize == 512)
+            #expect(defaults.threads == Int32(ProcessInfo.processInfo.processorCount))
+            #expect(defaults.seed == nil)
             #expect(defaults.temperature == 0.8)
             #expect(defaults.topK == 40)
             #expect(defaults.topP == 0.95)
             #expect(defaults.repeatPenalty == 1.1)
             #expect(defaults.repeatLastN == 64)
+            #expect(defaults.frequencyPenalty == 0.0)
+            #expect(defaults.presencePenalty == 0.0)
+            #expect(defaults.mirostat == nil)
         }
 
         @Test func deprecatedInitializerFallback() {
