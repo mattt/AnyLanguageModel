@@ -79,6 +79,27 @@ import Foundation
         /// )
         /// ```
         public struct CustomGenerationOptions: AnyLanguageModel.CustomGenerationOptions, Codable {
+            /// Context size to allocate for the model.
+            public var contextSize: UInt32?
+
+            /// Batch size to use when evaluating tokens.
+            public var batchSize: UInt32?
+
+            /// Number of threads to use for computation.
+            public var threads: Int32?
+
+            /// Random seed for deterministic sampling.
+            public var seed: UInt32?
+
+            /// Sampling temperature.
+            public var temperature: Float?
+
+            /// Top-K sampling parameter.
+            public var topK: Int32?
+
+            /// Top-P (nucleus) sampling parameter.
+            public var topP: Float?
+
             /// The penalty applied to repeated tokens.
             ///
             /// Values greater than 1.0 discourage repetition, while values less than 1.0
@@ -117,49 +138,128 @@ import Foundation
 
             /// Creates custom generation options for llama.cpp.
             public init(
+                contextSize: UInt32? = nil,
+                batchSize: UInt32? = nil,
+                threads: Int32? = nil,
+                seed: UInt32? = nil,
+                temperature: Float? = nil,
+                topK: Int32? = nil,
+                topP: Float? = nil,
                 repeatPenalty: Float? = nil,
                 repeatLastN: Int32? = nil,
                 frequencyPenalty: Float? = nil,
                 presencePenalty: Float? = nil,
                 mirostat: MirostatMode? = nil
             ) {
+                self.contextSize = contextSize
+                self.batchSize = batchSize
+                self.threads = threads
+                self.seed = seed
+                self.temperature = temperature
+                self.topK = topK
+                self.topP = topP
                 self.repeatPenalty = repeatPenalty
                 self.repeatLastN = repeatLastN
                 self.frequencyPenalty = frequencyPenalty
                 self.presencePenalty = presencePenalty
                 self.mirostat = mirostat
             }
+
+            /// Default llama.cpp options used when none are provided at runtime.
+            ///
+            /// The `seed` is `nil` by default, meaning a random seed will be generated
+            /// for each generation request.
+            public static var `default`: Self {
+                .init(
+                    contextSize: 2048,
+                    batchSize: 512,
+                    threads: Int32(ProcessInfo.processInfo.processorCount),
+                    seed: nil,
+                    temperature: 0.8,
+                    topK: 40,
+                    topP: 0.95,
+                    repeatPenalty: 1.1,
+                    repeatLastN: 64,
+                    frequencyPenalty: 0.0,
+                    presencePenalty: 0.0,
+                    mirostat: nil
+                )
+            }
+
         }
 
         /// The path to the GGUF model file.
         public let modelPath: String
 
         /// The context size for the model.
-        public let contextSize: UInt32
+        ///
+        /// - Important: This property is deprecated. Use ``GenerationOptions`` with
+        ///   custom options instead:
+        ///   ```swift
+        ///   var options = GenerationOptions()
+        ///   options[custom: LlamaLanguageModel.self] = .init(contextSize: 4096)
+        ///   ```
+        @available(*, deprecated, message: "Use GenerationOptions custom options instead")
+        public var contextSize: UInt32 { legacyDefaults.contextSize }
 
         /// The batch size for processing.
-        public let batchSize: UInt32
+        ///
+        /// - Important: This property is deprecated. Use ``GenerationOptions`` with
+        ///   custom options instead.
+        @available(*, deprecated, message: "Use GenerationOptions custom options instead")
+        public var batchSize: UInt32 { legacyDefaults.batchSize }
 
         /// The number of threads to use.
-        public let threads: Int32
+        ///
+        /// - Important: This property is deprecated. Use ``GenerationOptions`` with
+        ///   custom options instead.
+        @available(*, deprecated, message: "Use GenerationOptions custom options instead")
+        public var threads: Int32 { legacyDefaults.threads }
 
         /// The random seed for generation.
-        public let seed: UInt32
+        ///
+        /// - Important: This property is deprecated. Use ``GenerationOptions`` with
+        ///   custom options instead.
+        @available(*, deprecated, message: "Use GenerationOptions custom options instead")
+        public var seed: UInt32 { legacyDefaults.seed }
 
         /// The temperature for sampling.
-        public let temperature: Float
+        ///
+        /// - Important: This property is deprecated. Use ``GenerationOptions`` with
+        ///   custom options instead.
+        @available(*, deprecated, message: "Use GenerationOptions custom options instead")
+        public var temperature: Float { legacyDefaults.temperature }
 
         /// The top-K sampling parameter.
-        public let topK: Int32
+        ///
+        /// - Important: This property is deprecated. Use ``GenerationOptions`` with
+        ///   custom options instead.
+        @available(*, deprecated, message: "Use GenerationOptions custom options instead")
+        public var topK: Int32 { legacyDefaults.topK }
 
         /// The top-P (nucleus) sampling parameter.
-        public let topP: Float
+        ///
+        /// - Important: This property is deprecated. Use ``GenerationOptions`` with
+        ///   custom options instead.
+        @available(*, deprecated, message: "Use GenerationOptions custom options instead")
+        public var topP: Float { legacyDefaults.topP }
 
         /// The repeat penalty for generation.
-        public let repeatPenalty: Float
+        ///
+        /// - Important: This property is deprecated. Use ``GenerationOptions`` with
+        ///   custom options instead.
+        @available(*, deprecated, message: "Use GenerationOptions custom options instead")
+        public var repeatPenalty: Float { legacyDefaults.repeatPenalty }
 
         /// The number of tokens to consider for repeat penalty.
-        public let repeatLastN: Int32
+        ///
+        /// - Important: This property is deprecated. Use ``GenerationOptions`` with
+        ///   custom options instead.
+        @available(*, deprecated, message: "Use GenerationOptions custom options instead")
+        public var repeatLastN: Int32 { legacyDefaults.repeatLastN }
+
+        /// Normalized legacy defaults used for deprecated properties.
+        private let legacyDefaults: ResolvedGenerationOptions
 
         /// The minimum log level for llama.cpp output.
         ///
@@ -169,6 +269,111 @@ import Foundation
             didSet {
                 currentLogLevel = logLevel
                 llama_log_set(llamaLogCallback, nil)
+            }
+        }
+
+        /// Resolved, non-optional defaults for llama.cpp runtime parameters.
+        internal struct ResolvedGenerationOptions: Sendable {
+            var contextSize: UInt32
+            var batchSize: UInt32
+            var threads: Int32
+            var seed: UInt32
+            var temperature: Float
+            var topK: Int32
+            var topP: Float
+            var repeatPenalty: Float
+            var repeatLastN: Int32
+            var frequencyPenalty: Float
+            var presencePenalty: Float
+            var mirostat: CustomGenerationOptions.MirostatMode?
+            var sampling: GenerationOptions.SamplingMode?
+            var maximumResponseTokens: Int?
+
+            init(
+                contextSize: UInt32 = 2048,
+                batchSize: UInt32 = 512,
+                threads: Int32 = Int32(ProcessInfo.processInfo.processorCount),
+                seed: UInt32 = UInt32.random(in: 0 ... UInt32.max),
+                temperature: Float = 0.8,
+                topK: Int32 = 40,
+                topP: Float = 0.95,
+                repeatPenalty: Float = 1.1,
+                repeatLastN: Int32 = 64,
+                frequencyPenalty: Float = 0.0,
+                presencePenalty: Float = 0.0,
+                mirostat: CustomGenerationOptions.MirostatMode? = nil,
+                sampling: GenerationOptions.SamplingMode? = nil,
+                maximumResponseTokens: Int? = nil
+            ) {
+                self.contextSize = contextSize
+                self.batchSize = batchSize
+                self.threads = threads
+                self.seed = seed
+                self.temperature = temperature
+                self.topK = topK
+                self.topP = topP
+                self.repeatPenalty = repeatPenalty
+                self.repeatLastN = repeatLastN
+                self.frequencyPenalty = frequencyPenalty
+                self.presencePenalty = presencePenalty
+                self.mirostat = mirostat
+                self.sampling = sampling
+                self.maximumResponseTokens = maximumResponseTokens
+            }
+
+            init(
+                from options: CustomGenerationOptions?,
+                sampling: GenerationOptions.SamplingMode? = nil,
+                maximumResponseTokens: Int? = nil
+            ) {
+                self.init(
+                    base: ResolvedGenerationOptions(),
+                    overrides: options,
+                    sampling: sampling,
+                    maximumResponseTokens: maximumResponseTokens
+                )
+            }
+
+            init(
+                base: ResolvedGenerationOptions = .init(),
+                overrides options: CustomGenerationOptions?,
+                sampling: GenerationOptions.SamplingMode? = nil,
+                maximumResponseTokens: Int? = nil
+            ) {
+                guard let options else {
+                    self = ResolvedGenerationOptions(
+                        contextSize: base.contextSize,
+                        batchSize: base.batchSize,
+                        threads: base.threads,
+                        seed: base.seed,
+                        temperature: base.temperature,
+                        topK: base.topK,
+                        topP: base.topP,
+                        repeatPenalty: base.repeatPenalty,
+                        repeatLastN: base.repeatLastN,
+                        frequencyPenalty: base.frequencyPenalty,
+                        presencePenalty: base.presencePenalty,
+                        mirostat: base.mirostat,
+                        sampling: sampling ?? base.sampling,
+                        maximumResponseTokens: maximumResponseTokens ?? base.maximumResponseTokens
+                    )
+                    return
+                }
+
+                self.contextSize = options.contextSize ?? base.contextSize
+                self.batchSize = options.batchSize ?? base.batchSize
+                self.threads = options.threads ?? base.threads
+                self.seed = options.seed ?? base.seed
+                self.temperature = options.temperature ?? base.temperature
+                self.topK = options.topK ?? base.topK
+                self.topP = options.topP ?? base.topP
+                self.repeatPenalty = options.repeatPenalty ?? base.repeatPenalty
+                self.repeatLastN = options.repeatLastN ?? base.repeatLastN
+                self.frequencyPenalty = options.frequencyPenalty ?? base.frequencyPenalty
+                self.presencePenalty = options.presencePenalty ?? base.presencePenalty
+                self.mirostat = options.mirostat ?? base.mirostat
+                self.sampling = sampling ?? base.sampling
+                self.maximumResponseTokens = maximumResponseTokens ?? base.maximumResponseTokens
             }
         }
 
@@ -185,16 +390,22 @@ import Foundation
         ///
         /// - Parameters:
         ///   - modelPath: The path to the GGUF model file.
-        ///   - contextSize: The context size for the model. Defaults to 2048.
-        ///   - batchSize: The batch size for processing. Defaults to 512.
-        ///   - threads: The number of threads to use. Defaults to the number of processors.
-        ///   - seed: The random seed for generation. Defaults to a random value.
-        ///   - temperature: The temperature for sampling. Defaults to 0.8.
-        ///   - topK: The top-K sampling parameter. Defaults to 40.
-        ///   - topP: The top-P (nucleus) sampling parameter. Defaults to 0.95.
-        ///   - repeatPenalty: The repeat penalty for generation. Defaults to 1.1.
-        ///   - repeatLastN: The number of tokens to consider for repeat penalty. Defaults to 64.
-        public init(
+        public init(modelPath: String) {
+            self.modelPath = modelPath
+            self.legacyDefaults = ResolvedGenerationOptions()
+        }
+
+        /// Creates a Llama language model using legacy parameter defaults.
+        ///
+        /// - Important: This initializer is deprecated. Use
+        ///   `init(modelPath:)` and configure per-request values via
+        ///   ``GenerationOptions`` custom options instead.
+        @available(
+            *,
+            deprecated,
+            message: "Use init(modelPath:) and pass values via GenerationOptions custom options"
+        )
+        public convenience init(
             modelPath: String,
             contextSize: UInt32 = 2048,
             batchSize: UInt32 = 512,
@@ -206,16 +417,9 @@ import Foundation
             repeatPenalty: Float = 1.1,
             repeatLastN: Int32 = 64
         ) {
-            self.modelPath = modelPath
-            self.contextSize = contextSize
-            self.batchSize = batchSize
-            self.threads = threads
-            self.seed = seed
-            self.temperature = temperature
-            self.topK = topK
-            self.topP = topP
-            self.repeatPenalty = repeatPenalty
-            self.repeatLastN = repeatLastN
+            // Deprecated: prefer setting these via GenerationOptions custom options.
+            // We intentionally ignore legacy parameters to avoid storing model-level state.
+            self.init(modelPath: modelPath)
         }
 
         deinit {
@@ -241,7 +445,8 @@ import Foundation
 
             try await ensureModelLoaded()
 
-            let contextParams = createContextParams(from: options)
+            let runtimeOptions = resolvedOptions(from: options)
+            let contextParams = createContextParams(from: runtimeOptions)
 
             // Try to create context with error handling
             guard let context = llama_init_from_model(model!, contextParams) else {
@@ -252,15 +457,15 @@ import Foundation
 
             llama_set_causal_attn(context, true)
             llama_set_warmup(context, false)
-            llama_set_n_threads(context, threads, threads)
+            llama_set_n_threads(context, runtimeOptions.threads, runtimeOptions.threads)
 
-            let maxTokens = options.maximumResponseTokens ?? 100
+            let maxTokens = runtimeOptions.maximumResponseTokens ?? 100
             let text = try await generateText(
                 context: context,
                 model: model!,
                 prompt: prompt.description,
                 maxTokens: maxTokens,
-                options: options
+                options: runtimeOptions
             )
 
             return LanguageModelSession.Response(
@@ -293,15 +498,15 @@ import Foundation
                 )
             }
 
-            let maxTokens = options.maximumResponseTokens ?? 100
-
             let stream: AsyncThrowingStream<LanguageModelSession.ResponseStream<Content>.Snapshot, any Error> =
                 AsyncThrowingStream { continuation in
                     let task = Task {
                         do {
                             try await ensureModelLoaded()
 
-                            let contextParams = createContextParams(from: options)
+                            let runtimeOptions = resolvedOptions(from: options)
+                            let maxTokens = runtimeOptions.maximumResponseTokens ?? 100
+                            let contextParams = createContextParams(from: runtimeOptions)
                             guard let context = llama_init_from_model(model!, contextParams) else {
                                 throw LlamaLanguageModelError.contextInitializationFailed
                             }
@@ -310,7 +515,7 @@ import Foundation
                             // Stabilize runtime behavior per-context
                             llama_set_causal_attn(context, true)
                             llama_set_warmup(context, false)
-                            llama_set_n_threads(context, self.threads, self.threads)
+                            llama_set_n_threads(context, runtimeOptions.threads, runtimeOptions.threads)
 
                             var accumulatedText = ""
 
@@ -320,7 +525,7 @@ import Foundation
                                     model: model!,
                                     prompt: prompt.description,
                                     maxTokens: maxTokens,
-                                    options: options
+                                    options: runtimeOptions
                                 ) {
                                     accumulatedText += tokenText
 
@@ -390,13 +595,85 @@ import Foundation
             return params
         }
 
-        private func createContextParams(from options: GenerationOptions) -> llama_context_params {
+        private func resolvedOptions(from options: GenerationOptions) -> ResolvedGenerationOptions {
+            var base = legacyDefaults
+            if let temp = options.temperature {
+                base.temperature = Float(temp)
+            }
+
+            return ResolvedGenerationOptions(
+                base: base,
+                overrides: options[custom: LlamaLanguageModel.self],
+                sampling: options.sampling,
+                maximumResponseTokens: options.maximumResponseTokens
+            )
+        }
+
+        private func createContextParams(from options: ResolvedGenerationOptions) -> llama_context_params {
             var params = llama_context_default_params()
-            params.n_ctx = contextSize
-            params.n_batch = batchSize
-            params.n_threads = threads
-            params.n_threads_batch = threads
+            params.n_ctx = options.contextSize
+            params.n_batch = options.batchSize
+            params.n_threads = options.threads
+            params.n_threads_batch = options.threads
             return params
+        }
+
+        private func applySampling(
+            sampler: UnsafeMutablePointer<llama_sampler>,
+            effectiveTemperature: Float,
+            options: ResolvedGenerationOptions
+        ) {
+            if let mirostat = options.mirostat {
+                llama_sampler_chain_add(sampler, llama_sampler_init_temp(effectiveTemperature))
+
+                switch mirostat {
+                case .v1(let tau, let eta):
+                    llama_sampler_chain_add(
+                        sampler,
+                        llama_sampler_init_mirostat(
+                            Int32(options.contextSize),
+                            options.seed,
+                            tau,
+                            eta,
+                            100
+                        )
+                    )
+                case .v2(let tau, let eta):
+                    llama_sampler_chain_add(sampler, llama_sampler_init_mirostat_v2(options.seed, tau, eta))
+                }
+                return
+            }
+
+            if let sampling = options.sampling {
+                switch sampling.mode {
+                case .greedy:
+                    llama_sampler_chain_add(sampler, llama_sampler_init_top_k(1))
+                    llama_sampler_chain_add(sampler, llama_sampler_init_top_p(1.0, 1))
+                    llama_sampler_chain_add(sampler, llama_sampler_init_greedy())
+                case .topK(let k, let seed):
+                    llama_sampler_chain_add(sampler, llama_sampler_init_top_k(Int32(k)))
+                    llama_sampler_chain_add(sampler, llama_sampler_init_top_p(1.0, 1))
+                    llama_sampler_chain_add(sampler, llama_sampler_init_temp(effectiveTemperature))
+                    let samplingSeed = seed.map(UInt32.init) ?? options.seed
+                    llama_sampler_chain_add(sampler, llama_sampler_init_dist(samplingSeed))
+                case .nucleus(let threshold, let seed):
+                    llama_sampler_chain_add(sampler, llama_sampler_init_top_k(0))
+                    llama_sampler_chain_add(sampler, llama_sampler_init_top_p(Float(threshold), 1))
+                    llama_sampler_chain_add(sampler, llama_sampler_init_temp(effectiveTemperature))
+                    let samplingSeed = seed.map(UInt32.init) ?? options.seed
+                    llama_sampler_chain_add(sampler, llama_sampler_init_dist(samplingSeed))
+                }
+                return
+            }
+
+            if options.topK > 0 {
+                llama_sampler_chain_add(sampler, llama_sampler_init_top_k(options.topK))
+            }
+            if options.topP < 1.0 {
+                llama_sampler_chain_add(sampler, llama_sampler_init_top_p(options.topP, 1))
+            }
+            llama_sampler_chain_add(sampler, llama_sampler_init_temp(effectiveTemperature))
+            llama_sampler_chain_add(sampler, llama_sampler_init_dist(options.seed))
         }
 
         private func generateText(
@@ -404,7 +681,7 @@ import Foundation
             model: OpaquePointer,
             prompt: String,
             maxTokens: Int,
-            options: GenerationOptions
+            options: ResolvedGenerationOptions
         ) async throws
             -> String
         {
@@ -418,7 +695,7 @@ import Foundation
                 throw LlamaLanguageModelError.tokenizationFailed
             }
 
-            var batch = llama_batch_init(Int32(batchSize), 0, 1)
+            var batch = llama_batch_init(Int32(options.batchSize), 0, 1)
             defer { llama_batch_free(batch) }
 
             batch.n_tokens = Int32(promptTokens.count)
@@ -446,19 +723,19 @@ import Foundation
                 throw LlamaLanguageModelError.decodingFailed
             }
             defer { llama_sampler_free(sampler) }
+            let samplerPtr = UnsafeMutablePointer<llama_sampler>(sampler)
 
-            // Get custom options if provided
-            let customOptions = options[custom: LlamaLanguageModel.self]
+            let effectiveTemperature = Float(options.temperature)
 
             // Apply repeat/frequency/presence penalties from custom options
-            let effectiveRepeatPenalty = customOptions?.repeatPenalty ?? repeatPenalty
-            let effectiveRepeatLastN = customOptions?.repeatLastN ?? repeatLastN
-            let effectiveFrequencyPenalty = customOptions?.frequencyPenalty ?? 0.0
-            let effectivePresencePenalty = customOptions?.presencePenalty ?? 0.0
+            let effectiveRepeatPenalty = options.repeatPenalty
+            let effectiveRepeatLastN = options.repeatLastN
+            let effectiveFrequencyPenalty = options.frequencyPenalty
+            let effectivePresencePenalty = options.presencePenalty
 
             if effectiveRepeatPenalty != 1.0 || effectiveFrequencyPenalty != 0.0 || effectivePresencePenalty != 0.0 {
                 llama_sampler_chain_add(
-                    sampler,
+                    samplerPtr,
                     llama_sampler_init_penalties(
                         effectiveRepeatLastN,
                         effectiveRepeatPenalty,
@@ -468,52 +745,7 @@ import Foundation
                 )
             }
 
-            // Check for mirostat sampling (takes precedence over standard sampling)
-            if let mirostat = customOptions?.mirostat {
-                let temp = Float(options.temperature ?? Double(temperature))
-                llama_sampler_chain_add(sampler, llama_sampler_init_temp(temp))
-
-                switch mirostat {
-                case .v1(let tau, let eta):
-                    llama_sampler_chain_add(
-                        sampler,
-                        llama_sampler_init_mirostat(Int32(contextSize), seed, tau, eta, 100)
-                    )
-                case .v2(let tau, let eta):
-                    llama_sampler_chain_add(sampler, llama_sampler_init_mirostat_v2(seed, tau, eta))
-                }
-            } else if let sampling = options.sampling {
-                // Use standard sampling parameters from options
-                switch sampling.mode {
-                case .greedy:
-                    llama_sampler_chain_add(sampler, llama_sampler_init_top_k(1))
-                    llama_sampler_chain_add(sampler, llama_sampler_init_top_p(1.0, 1))
-                    llama_sampler_chain_add(sampler, llama_sampler_init_greedy())
-                case .topK(let k, let seed):
-                    llama_sampler_chain_add(sampler, llama_sampler_init_top_k(Int32(k)))
-                    llama_sampler_chain_add(sampler, llama_sampler_init_top_p(1.0, 1))
-                    if let temperature = options.temperature {
-                        llama_sampler_chain_add(sampler, llama_sampler_init_temp(Float(temperature)))
-                    }
-                    if let seed = seed {
-                        llama_sampler_chain_add(sampler, llama_sampler_init_dist(UInt32(seed)))
-                    }
-                case .nucleus(let threshold, let seed):
-                    llama_sampler_chain_add(sampler, llama_sampler_init_top_k(0))  // Disable top-k
-                    llama_sampler_chain_add(sampler, llama_sampler_init_top_p(Float(threshold), 1))
-                    if let temperature = options.temperature {
-                        llama_sampler_chain_add(sampler, llama_sampler_init_temp(Float(temperature)))
-                    }
-                    if let seed = seed {
-                        llama_sampler_chain_add(sampler, llama_sampler_init_dist(UInt32(seed)))
-                    }
-                }
-            } else {
-                // Use model's default sampling parameters
-                if topK > 0 { llama_sampler_chain_add(sampler, llama_sampler_init_top_k(topK)) }
-                if topP < 1.0 { llama_sampler_chain_add(sampler, llama_sampler_init_top_p(topP, 1)) }
-                llama_sampler_chain_add(sampler, llama_sampler_init_dist(seed))
-            }
+            applySampling(sampler: samplerPtr, effectiveTemperature: effectiveTemperature, options: options)
 
             // Generate tokens one by one
             var generatedText = ""
@@ -560,10 +792,8 @@ import Foundation
             model: OpaquePointer,
             prompt: String,
             maxTokens: Int,
-            options: GenerationOptions
-        )
-            -> AsyncThrowingStream<String, Error>
-        {
+            options: ResolvedGenerationOptions
+        ) -> AsyncThrowingStream<String, Error> {
             return AsyncThrowingStream { continuation in
                 self.performTextGeneration(
                     context: context,
@@ -581,7 +811,7 @@ import Foundation
             model: OpaquePointer,
             prompt: String,
             maxTokens: Int,
-            options: GenerationOptions,
+            options: ResolvedGenerationOptions,
             continuation: AsyncThrowingStream<String, Error>.Continuation
         ) {
             do {
@@ -598,7 +828,7 @@ import Foundation
                 }
 
                 // Initialize batch
-                var batch = llama_batch_init(Int32(batchSize), 0, 1)
+                var batch = llama_batch_init(Int32(options.batchSize), 0, 1)
                 defer { llama_batch_free(batch) }
 
                 // Evaluate the prompt
@@ -626,20 +856,20 @@ import Foundation
                     throw LlamaLanguageModelError.decodingFailed
                 }
                 defer { llama_sampler_free(sampler) }
+                let samplerPtr = UnsafeMutablePointer<llama_sampler>(sampler)
 
-                // Get custom options if provided
-                let customOptions = options[custom: LlamaLanguageModel.self]
+                let effectiveTemperature = Float(options.temperature)
 
                 // Apply repeat/frequency/presence penalties from custom options
-                let effectiveRepeatPenalty = customOptions?.repeatPenalty ?? self.repeatPenalty
-                let effectiveRepeatLastN = customOptions?.repeatLastN ?? self.repeatLastN
-                let effectiveFrequencyPenalty = customOptions?.frequencyPenalty ?? 0.0
-                let effectivePresencePenalty = customOptions?.presencePenalty ?? 0.0
+                let effectiveRepeatPenalty = options.repeatPenalty
+                let effectiveRepeatLastN = options.repeatLastN
+                let effectiveFrequencyPenalty = options.frequencyPenalty
+                let effectivePresencePenalty = options.presencePenalty
 
                 if effectiveRepeatPenalty != 1.0 || effectiveFrequencyPenalty != 0.0 || effectivePresencePenalty != 0.0
                 {
                     llama_sampler_chain_add(
-                        sampler,
+                        samplerPtr,
                         llama_sampler_init_penalties(
                             effectiveRepeatLastN,
                             effectiveRepeatPenalty,
@@ -650,50 +880,7 @@ import Foundation
                 }
 
                 // Check for mirostat sampling (takes precedence over standard sampling)
-                if let mirostat = customOptions?.mirostat {
-                    let temp = Float(options.temperature ?? Double(self.temperature))
-                    llama_sampler_chain_add(sampler, llama_sampler_init_temp(temp))
-
-                    switch mirostat {
-                    case .v1(let tau, let eta):
-                        llama_sampler_chain_add(
-                            sampler,
-                            llama_sampler_init_mirostat(Int32(self.contextSize), self.seed, tau, eta, 100)
-                        )
-                    case .v2(let tau, let eta):
-                        llama_sampler_chain_add(sampler, llama_sampler_init_mirostat_v2(self.seed, tau, eta))
-                    }
-                } else if let sampling = options.sampling {
-                    // Use standard sampling parameters from options
-                    switch sampling.mode {
-                    case .greedy:
-                        llama_sampler_chain_add(sampler, llama_sampler_init_top_k(1))
-                        llama_sampler_chain_add(sampler, llama_sampler_init_top_p(1.0, 1))
-                    case .topK(let k, let seed):
-                        llama_sampler_chain_add(sampler, llama_sampler_init_top_k(Int32(k)))
-                        llama_sampler_chain_add(sampler, llama_sampler_init_top_p(1.0, 1))
-                        if let temperature = options.temperature {
-                            llama_sampler_chain_add(sampler, llama_sampler_init_temp(Float(temperature)))
-                        }
-                        if let seed = seed {
-                            llama_sampler_chain_add(sampler, llama_sampler_init_dist(UInt32(seed)))
-                        }
-                    case .nucleus(let threshold, let seed):
-                        llama_sampler_chain_add(sampler, llama_sampler_init_top_k(0))  // Disable top-k
-                        llama_sampler_chain_add(sampler, llama_sampler_init_top_p(Float(threshold), 1))
-                        if let temperature = options.temperature {
-                            llama_sampler_chain_add(sampler, llama_sampler_init_temp(Float(temperature)))
-                        }
-                        if let seed = seed {
-                            llama_sampler_chain_add(sampler, llama_sampler_init_dist(UInt32(seed)))
-                        }
-                    }
-                } else {
-                    // Use model's default sampling parameters
-                    if self.topK > 0 { llama_sampler_chain_add(sampler, llama_sampler_init_top_k(self.topK)) }
-                    if self.topP < 1.0 { llama_sampler_chain_add(sampler, llama_sampler_init_top_p(self.topP, 1)) }
-                    llama_sampler_chain_add(sampler, llama_sampler_init_dist(self.seed))
-                }
+                applySampling(sampler: samplerPtr, effectiveTemperature: effectiveTemperature, options: options)
 
                 // Generate tokens one by one
                 var n_cur = batch.n_tokens
