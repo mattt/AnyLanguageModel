@@ -431,6 +431,7 @@ import Foundation
                 case .greedy:
                     llama_sampler_chain_add(sampler, llama_sampler_init_top_k(1))
                     llama_sampler_chain_add(sampler, llama_sampler_init_top_p(1.0, 1))
+                    llama_sampler_chain_add(sampler, llama_sampler_init_greedy())
                 case .topK(let k, let seed):
                     llama_sampler_chain_add(sampler, llama_sampler_init_top_k(Int32(k)))
                     llama_sampler_chain_add(sampler, llama_sampler_init_top_p(1.0, 1))
