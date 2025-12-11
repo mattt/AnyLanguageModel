@@ -453,7 +453,9 @@ public struct GenerationSchema: Sendable, Codable, CustomDebugStringConvertible 
 
         case .array(let item, let min, let max):
             let itemNode = try convertDynamic(item, nameMap: nameMap, defs: &defs)
-            return .array(ArrayNode(description: dynamicProp?.description, items: itemNode, minItems: min, maxItems: max))
+            return .array(
+                ArrayNode(description: dynamicProp?.description, items: itemNode, minItems: min, maxItems: max)
+            )
 
         case .scalar(let scalar):
             switch scalar {
@@ -462,11 +464,17 @@ public struct GenerationSchema: Sendable, Codable, CustomDebugStringConvertible 
             case .string:
                 return .string(StringNode(description: dynamicProp?.description, pattern: nil, enumChoices: nil))
             case .number:
-                return .number(NumberNode(description: dynamicProp?.description, minimum: nil, maximum: nil, integerOnly: false))
+                return .number(
+                    NumberNode(description: dynamicProp?.description, minimum: nil, maximum: nil, integerOnly: false)
+                )
             case .integer:
-                return .number(NumberNode(description: dynamicProp?.description, minimum: nil, maximum: nil, integerOnly: true))
+                return .number(
+                    NumberNode(description: dynamicProp?.description, minimum: nil, maximum: nil, integerOnly: true)
+                )
             case .decimal:
-                return .number(NumberNode(description: dynamicProp?.description, minimum: nil, maximum: nil, integerOnly: false))
+                return .number(
+                    NumberNode(description: dynamicProp?.description, minimum: nil, maximum: nil, integerOnly: false)
+                )
             }
 
         case .reference(let name):

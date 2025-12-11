@@ -2,7 +2,7 @@ import Foundation
 import JSONSchema
 
 #if canImport(FoundationNetworking)
-import FoundationNetworking
+    import FoundationNetworking
 #endif
 
 /// A language model that connects to OpenAI-compatible APIs.
@@ -174,7 +174,7 @@ public struct OpenAILanguageModel: LanguageModel {
                 if !invocations.isEmpty {
                     entries.append(.toolCalls(Transcript.ToolCalls(invocations.map { $0.call })))
                     for invocation in invocations {
-                        let output =  invocation.output
+                        let output = invocation.output
                         entries.append(.toolOutput(output))
                         let toolSegments: [Transcript.Segment] = output.segments
                         let blocks = convertSegmentsToOpenAIBlocks(toolSegments)
@@ -239,7 +239,7 @@ public struct OpenAILanguageModel: LanguageModel {
                     entries.append(.toolCalls(Transcript.ToolCalls(invocations.map { $0.call })))
 
                     for invocation in invocations {
-                        let output =  invocation.output
+                        let output = invocation.output
                         entries.append(.toolOutput(output))
                         let toolSegments: [Transcript.Segment] = output.segments
                         let blocks = convertSegmentsToOpenAIBlocks(toolSegments)
@@ -311,14 +311,14 @@ public struct OpenAILanguageModel: LanguageModel {
                         let body = try JSONEncoder().encode(params)
 
                         let events: AsyncThrowingStream<OpenAIResponsesServerEvent, any Error> =
-                        urlSession.fetchEventStream(
-                            .post,
-                            url: url,
-                            headers: [
-                                "Authorization": "Bearer \(tokenProvider())"
-                            ],
-                            body: body
-                        )
+                            urlSession.fetchEventStream(
+                                .post,
+                                url: url,
+                                headers: [
+                                    "Authorization": "Bearer \(tokenProvider())"
+                                ],
+                                body: body
+                            )
 
                         var accumulatedText = ""
 
@@ -374,14 +374,14 @@ public struct OpenAILanguageModel: LanguageModel {
                         let body = try JSONEncoder().encode(params)
 
                         let events: AsyncThrowingStream<OpenAIChatCompletionsChunk, any Error> =
-                        urlSession.fetchEventStream(
-                            .post,
-                            url: url,
-                            headers: [
-                                "Authorization": "Bearer \(tokenProvider())"
-                            ],
-                            body: body
-                        )
+                            urlSession.fetchEventStream(
+                                .post,
+                                url: url,
+                                headers: [
+                                    "Authorization": "Bearer \(tokenProvider())"
+                                ],
+                                body: body
+                            )
 
                         var accumulatedText = ""
 
@@ -544,24 +544,27 @@ private enum Responses {
                     }
                 }
                 if contentBlocks.count > 1 {
-                    outputs.append(.object([
-                        "type": .string("function_call_output"),
-                        "call_id": .string(id),
-                        "output": .array(contentBlocks),
-                    ]))
-                } else {
-                    if let object = contentBlocks.first {
-                        outputs.append(.object([
+                    outputs.append(
+                        .object([
                             "type": .string("function_call_output"),
                             "call_id": .string(id),
-                            "output":  object,
-                       ]))
+                            "output": .array(contentBlocks),
+                        ])
+                    )
+                } else {
+                    if let object = contentBlocks.first {
+                        outputs.append(
+                            .object([
+                                "type": .string("function_call_output"),
+                                "call_id": .string(id),
+                                "output": object,
+                            ])
+                        )
                     }
                 }
 
             case .raw(rawContent: let rawContent):
                 outputs.append(rawContent)
-
 
             case .system:
                 let systemMessage = msg
@@ -687,7 +690,6 @@ private struct OpenAIMessage: Hashable, Codable, Sendable {
         }
     }
 
-
 }
 
 private enum Block: Hashable, Codable, Sendable {
@@ -729,8 +731,8 @@ private func convertSegmentsToOpenAIBlocks(_ segments: [Transcript.Segment]) -> 
             blocks.append(.text(text.content))
         case .structure(let structured):
             switch structured.content.kind {
-                case .string(let text):
-                    blocks.append(.text(text))
+            case .string(let text):
+                blocks.append(.text(text))
             default:
                 blocks.append(.text(structured.content.jsonString))
             }
@@ -1002,15 +1004,15 @@ private func extractTextFromOutput(_ output: [JSONValue]?) -> String? {
     var textParts: [String] = []
     for block in output {
         if case let .object(obj) = block,
-           case let .string(type)? = obj["type"],
-           type == "message",
-           case let .array(contentBlocks)? = obj["content"]
+            case let .string(type)? = obj["type"],
+            type == "message",
+            case let .array(contentBlocks)? = obj["content"]
         {
             for contentBlock in contentBlocks {
                 if case let .object(contentObj) = contentBlock,
-                   case let .string(contentType)? = contentObj["type"],
-                   contentType == "output_text",
-                   case let .string(text)? = contentObj["text"]
+                    case let .string(contentType)? = contentObj["type"],
+                    contentType == "output_text",
+                    case let .string(text)? = contentObj["text"]
                 {
                     textParts.append(text)
                 }
@@ -1027,12 +1029,12 @@ private func extractToolCallsFromOutput(_ output: [JSONValue]?) -> [OpenAIToolCa
     var toolCalls: [OpenAIToolCall] = []
     for block in output {
         if case let .object(obj) = block,
-           case let .string(type)? = obj["type"]
+            case let .string(type)? = obj["type"]
         {
             // Handle direct function_call at top level
             if type == "function_call" {
                 guard let id = obj["id"].flatMap({ if case .string(let s) = $0 { return s } else { return nil } }),
-                      let name = obj["name"].flatMap({ if case .string(let s) = $0 { return s } else { return nil } })
+                    let name = obj["name"].flatMap({ if case .string(let s) = $0 { return s } else { return nil } })
                 else { continue }
 
                 let argsString: String?
@@ -1060,8 +1062,8 @@ private func extractToolCallsFromOutput(_ output: [JSONValue]?) -> [OpenAIToolCa
             else if type == "message", case let .array(contentBlocks)? = obj["content"] {
                 for contentBlock in contentBlocks {
                     if case let .object(contentObj) = contentBlock,
-                       case let .string(contentType)? = contentObj["type"],
-                       (contentType == "tool_call" || contentType == "tool_use")
+                        case let .string(contentType)? = contentObj["type"],
+                        (contentType == "tool_call" || contentType == "tool_use")
                     {
                         guard
                             let id = contentObj["id"].flatMap({
@@ -1109,6 +1111,3 @@ private func extractToolCallsFromOutput(_ output: [JSONValue]?) -> [OpenAIToolCa
 
     return toolCalls
 }
-
-
-

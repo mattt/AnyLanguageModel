@@ -93,13 +93,13 @@ import AnyLanguageModel
 
             let response = try await session.respond(to: "How's the weather in San Francisco?")
 
-            #if false // Disabled for now because transcript entries are not converted from FoundationModels for now
-            var foundToolOutput = false
-            for case let .toolOutput(toolOutput) in response.transcriptEntries {
-                #expect(toolOutput.id == "getWeather")
-                foundToolOutput = true
-            }
-            #expect(foundToolOutput)
+            #if false  // Disabled for now because transcript entries are not converted from FoundationModels for now
+                var foundToolOutput = false
+                for case let .toolOutput(toolOutput) in response.transcriptEntries {
+                    #expect(toolOutput.id == "getWeather")
+                    foundToolOutput = true
+                }
+                #expect(foundToolOutput)
             #endif
 
             let content = response.content
