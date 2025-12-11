@@ -369,7 +369,7 @@
     }
 
     @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
-    private func convertToDynamicSchema(_ jsonSchema: JSONSchema) -> FoundationModels.DynamicGenerationSchema {
+    func convertToDynamicSchema(_ jsonSchema: JSONSchema) -> FoundationModels.DynamicGenerationSchema {
         switch jsonSchema {
         case .object(_, _, _, _, _, _, properties: let properties, required: let required, _):
             let schemaProperties = properties.compactMap { key, value in
@@ -447,7 +447,7 @@
     }
 
     @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
-    private func convertToProperty(
+    func convertToProperty(
         key: String,
         schema: JSONSchema,
         required: [String]
@@ -463,7 +463,7 @@
     /// Converts a JSON constant value to a DynamicGenerationSchema.
     /// Only handles scalar types (int, double, string); returns nil for null, object, bool, and array.
     @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
-    private func convertConstToSchema(_ value: JSONValue) -> FoundationModels.DynamicGenerationSchema? {
+    func convertConstToSchema(_ value: JSONValue) -> FoundationModels.DynamicGenerationSchema? {
         switch value {
         case .int(let intValue):
             .init(type: Int.self, guides: [.range(intValue ... intValue)])
