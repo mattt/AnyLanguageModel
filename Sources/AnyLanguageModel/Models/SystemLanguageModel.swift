@@ -78,7 +78,7 @@
             let fmSession = FoundationModels.LanguageModelSession(
                 model: systemModel,
                 tools: session.tools.toFoundationModels(),
-                instructions: session.instructions?.toFoundationModels()
+                transcript: session.transcript.toFoundationModels(instructions: session.instructions)
             )
 
             let fmResponse = try await fmSession.respond(to: fmPrompt, options: fmOptions)
@@ -115,7 +115,7 @@
             let fmSession = FoundationModels.LanguageModelSession(
                 model: systemModel,
                 tools: session.tools.toFoundationModels(),
-                instructions: session.instructions?.toFoundationModels()
+                transcript: session.transcript.toFoundationModels(instructions: session.instructions)
             )
 
             let stream = AsyncThrowingStream<LanguageModelSession.ResponseStream<Content>.Snapshot, any Error> {
@@ -473,6 +473,123 @@
             .init(type: String.self, guides: [.constant(stringValue)])
         case .null, .object, .bool, .array:
             nil
+        }
+    }
+
+    @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
+    extension Transcript {
+        fileprivate func toFoundationModels(instructions: AnyLanguageModel.Instructions?) -> FoundationModels.Transcript
+        {
+            var fmEntries: [FoundationModels.Transcript.Entry] = []
+
+            // Add instructions entry if provided and not already in transcript
+            if let instructions = instructions {
+                let hasInstructions =
+                    self.first.map { entry in
+                        if case .instructions = entry { return true } else { return false }
+                    } ?? false
+
+                if !hasInstructions {
+                    let fmInstructions = FoundationModels.Transcript.Instructions(
+                        segments: [.text(.init(content: instructions.description))],
+                        toolDefinitions: []
+                    )
+                    fmEntries.append(.instructions(fmInstructions))
+                }
+            }
+
+            // Convert each entry
+            for entry in self {
+                switch entry {
+                case .instructions(let instr):
+                    let fmSegments = instr.segments.toFoundationModels()
+                    let fmToolDefinitions = instr.toolDefinitions.toFoundationModels()
+                    let fmInstructions = FoundationModels.Transcript.Instructions(
+                        segments: fmSegments,
+                        toolDefinitions: fmToolDefinitions
+                    )
+                    fmEntries.append(.instructions(fmInstructions))
+
+                case .prompt(let prompt):
+                    let fmSegments = prompt.segments.toFoundationModels()
+                    let fmPrompt = FoundationModels.Transcript.Prompt(
+                        segments: fmSegments
+                    )
+                    fmEntries.append(.prompt(fmPrompt))
+
+                case .response(let response):
+                    let fmSegments = response.segments.toFoundationModels()
+                    let fmResponse = FoundationModels.Transcript.Response(
+                        assetIDs: response.assetIDs,
+                        segments: fmSegments
+                    )
+                    fmEntries.append(.response(fmResponse))
+
+                case .toolCalls(let toolCalls):
+                    let fmCalls = toolCalls.compactMap { call -> FoundationModels.Transcript.ToolCall? in
+                        guard let fmArguments = try? FoundationModels.GeneratedContent(call.arguments) else {
+                            return nil
+                        }
+                        return FoundationModels.Transcript.ToolCall(
+                            id: call.id,
+                            toolName: call.toolName,
+                            arguments: fmArguments
+                        )
+                    }
+                    let fmToolCalls = FoundationModels.Transcript.ToolCalls(id: toolCalls.id, fmCalls)
+                    fmEntries.append(.toolCalls(fmToolCalls))
+
+                case .toolOutput(let toolOutput):
+                    let fmSegments = toolOutput.segments.toFoundationModels()
+                    let fmToolOutput = FoundationModels.Transcript.ToolOutput(
+                        id: toolOutput.id,
+                        toolName: toolOutput.toolName,
+                        segments: fmSegments
+                    )
+                    fmEntries.append(.toolOutput(fmToolOutput))
+                }
+            }
+
+            return FoundationModels.Transcript(entries: fmEntries)
+        }
+    }
+
+    @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
+    extension Array where Element == Transcript.Segment {
+        fileprivate func toFoundationModels() -> [FoundationModels.Transcript.Segment] {
+            compactMap { segment -> FoundationModels.Transcript.Segment? in
+                switch segment {
+                case .text(let textSegment):
+                    return .text(.init(id: textSegment.id, content: textSegment.content))
+                case .structure(let structuredSegment):
+                    guard let fmContent = try? FoundationModels.GeneratedContent(structuredSegment.content) else {
+                        return nil
+                    }
+                    return .structure(
+                        .init(
+                            id: structuredSegment.id,
+                            source: structuredSegment.source,
+                            content: fmContent
+                        )
+                    )
+                case .image:
+                    // FoundationModels Transcript does not support image segments
+                    return nil
+                }
+            }
+        }
+    }
+
+    @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
+    extension Array where Element == Transcript.ToolDefinition {
+        fileprivate func toFoundationModels() -> [FoundationModels.Transcript.ToolDefinition] {
+            map { toolDef in
+                FoundationModels.Transcript.ToolDefinition(
+                    name: toolDef.name,
+                    description: toolDef.description,
+                    parameters: FoundationModels.GenerationSchema(toolDef.parameters)
+                )
+            }
         }
     }
 #endif
