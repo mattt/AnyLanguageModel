@@ -967,7 +967,7 @@ private func resolveToolCalls(
         do {
             let segments = try await tool.makeOutputSegments(from: args)
             let output = Transcript.ToolOutput(
-                id: tool.name,
+                id: callID,
                 toolName: tool.name,
                 segments: segments
             )
@@ -1043,7 +1043,11 @@ private func extractToolCallsFromOutput(_ output: [JSONValue]?) -> [OpenAIToolCa
         {
             // Handle direct function_call at top level
             if type == "function_call" {
-                guard let id = obj["id"].flatMap({ if case .string(let s) = $0 { return s } else { return nil } }),
+                // Responses API uses "call_id", Chat Completions uses "id"
+                guard
+                    let id = (obj["call_id"] ?? obj["id"]).flatMap({
+                        if case .string(let s) = $0 { return s } else { return nil }
+                    }),
                     let name = obj["name"].flatMap({ if case .string(let s) = $0 { return s } else { return nil } })
                 else { continue }
 
