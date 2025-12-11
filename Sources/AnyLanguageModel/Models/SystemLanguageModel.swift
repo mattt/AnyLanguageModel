@@ -367,13 +367,6 @@
             return try await call(arguments: Self.Arguments(content))
         }
     }
-    // MARK: - Errors
-    @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
-    private enum SystemLanguageModelError: Error {
-        case streamingFailed
-    }
-
-    // MARK: - Schema Conversion
 
     @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
     private func convertToDynamicSchema(_ jsonSchema: JSONSchema) -> FoundationModels.DynamicGenerationSchema {
