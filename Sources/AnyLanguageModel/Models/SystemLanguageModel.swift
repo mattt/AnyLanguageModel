@@ -311,14 +311,9 @@
             self.includesSchemaInInstructions = tool.includesSchemaInInstructions
         }
 
-        public func call(arguments: FoundationModels.GeneratedContent) async throws -> Output {
-
+        func call(arguments: FoundationModels.GeneratedContent) async throws -> Output {
             let output = try await wrappedTool.callFunction(arguments: arguments)
-            // Since we can't call the tool's call method directly on an existential type,
-            // we need to use makeOutputSegments which internally calls the tool
-            // and then extract the result from the segments
-            let result = output as! Output
-            return result
+            return output.promptRepresentation.description
         }
     }
 
