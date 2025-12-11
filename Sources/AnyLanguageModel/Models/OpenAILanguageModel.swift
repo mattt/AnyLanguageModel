@@ -543,25 +543,35 @@ private enum Responses {
                         }
                     }
                 }
+                let outputString: String
                 if contentBlocks.count > 1 {
-                    outputs.append(
-                        .object([
-                            "type": .string("function_call_output"),
-                            "call_id": .string(id),
-                            "output": .array(contentBlocks),
-                        ])
-                    )
-                } else {
-                    if let object = contentBlocks.first {
-                        outputs.append(
-                            .object([
-                                "type": .string("function_call_output"),
-                                "call_id": .string(id),
-                                "output": object,
-                            ])
-                        )
+                    let encoder = JSONEncoder()
+                    if let data = try? encoder.encode(JSONValue.array(contentBlocks)),
+                        let str = String(data: data, encoding: .utf8)
+                    {
+                        outputString = str
+                    } else {
+                        outputString = "[]"
                     }
+                } else if let block = contentBlocks.first {
+                    let encoder = JSONEncoder()
+                    if let data = try? encoder.encode(block),
+                        let str = String(data: data, encoding: .utf8)
+                    {
+                        outputString = str
+                    } else {
+                        outputString = "{}"
+                    }
+                } else {
+                    outputString = "{}"
                 }
+                outputs.append(
+                    .object([
+                        "type": .string("function_call_output"),
+                        "call_id": .string(id),
+                        "output": .string(outputString),
+                    ])
+                )
 
             case .raw(rawContent: let rawContent):
                 outputs.append(rawContent)
