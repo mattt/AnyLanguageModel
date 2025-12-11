@@ -755,21 +755,17 @@ extension LanguageModelSession {
 
 extension LanguageModelSession {
     public struct ResponseStream<Content>: Sendable where Content: Generable, Content.PartiallyGenerated: Sendable {
-        private let content: Content
-        private let rawContent: GeneratedContent
+        private let fallbackSnapshot: Snapshot?
         private let streaming: AsyncThrowingStream<Snapshot, any Error>?
 
         init(content: Content, rawContent: GeneratedContent) {
-            self.content = content
-            self.rawContent = rawContent
+            self.fallbackSnapshot = Snapshot(content: content.asPartiallyGenerated(), rawContent: rawContent)
             self.streaming = nil
         }
 
         init(stream: AsyncThrowingStream<Snapshot, any Error>) {
-            // Fallback values when consumers call collect() before any snapshots arrive
-            // These will be replaced by the last yielded snapshot during collect()
-            self.content = (try? Content(GeneratedContent(""))) ?? ("" as! Content)
-            self.rawContent = GeneratedContent("")
+            // When streaming, snapshots arrive from the upstream sequence, so no fallback is required.
+            self.fallbackSnapshot = nil
             self.streaming = stream
         }
 
@@ -785,22 +781,14 @@ extension LanguageModelSession.ResponseStream: AsyncSequence {
 
     public struct AsyncIterator: AsyncIteratorProtocol {
         private var hasYielded = false
-        private let content: Content
-        private let rawContent: GeneratedContent
+        private let fallbackSnapshot: Snapshot?
         private var streamIterator: AsyncThrowingStream<Snapshot, any Error>.AsyncIterator?
         private let useStream: Bool
 
-        init(content: Content, rawContent: GeneratedContent, stream: AsyncThrowingStream<Snapshot, any Error>?) {
-            self.content = content
-            self.rawContent = rawContent
-            if let stream {
-                let iterator = stream.makeAsyncIterator()
-                self.streamIterator = iterator
-                self.useStream = true
-            } else {
-                self.streamIterator = nil
-                self.useStream = false
-            }
+        init(fallbackSnapshot: Snapshot?, stream: AsyncThrowingStream<Snapshot, any Error>?) {
+            self.fallbackSnapshot = fallbackSnapshot
+            self.streamIterator = stream?.makeAsyncIterator()
+            self.useStream = stream != nil
         }
 
         public mutating func next() async throws -> Snapshot? {
@@ -815,12 +803,9 @@ extension LanguageModelSession.ResponseStream: AsyncSequence {
                 }
                 return nil
             } else {
-                guard !hasYielded else { return nil }
+                guard !hasYielded, let fallbackSnapshot else { return nil }
                 hasYielded = true
-                return Snapshot(
-                    content: content.asPartiallyGenerated(),
-                    rawContent: rawContent
-                )
+                return fallbackSnapshot
             }
         }
 
@@ -828,7 +813,7 @@ extension LanguageModelSession.ResponseStream: AsyncSequence {
     }
 
     public func makeAsyncIterator() -> AsyncIterator {
-        return AsyncIterator(content: content, rawContent: rawContent, stream: streaming)
+        return AsyncIterator(fallbackSnapshot: fallbackSnapshot, stream: streaming)
     }
 
     nonisolated public func collect() async throws -> sending LanguageModelSession.Response<Content> {
@@ -852,9 +837,26 @@ extension LanguageModelSession.ResponseStream: AsyncSequence {
                 )
             }
         }
+
+        if let fallbackSnapshot {
+            let finalContent: Content
+            if let concrete = fallbackSnapshot.content as? Content {
+                finalContent = concrete
+            } else {
+                finalContent = try Content(fallbackSnapshot.rawContent)
+            }
+            return LanguageModelSession.Response(
+                content: finalContent,
+                rawContent: fallbackSnapshot.rawContent,
+                transcriptEntries: []
+            )
+        }
+
+        // As a last resort, return an empty payload.
+        let empty = GeneratedContent("")
         return LanguageModelSession.Response(
-            content: content,
-            rawContent: rawContent,
+            content: try Content(empty),
+            rawContent: empty,
             transcriptEntries: []
         )
     }
