@@ -321,15 +321,8 @@ private struct AnyToolWrapper: FoundationModels.Tool {
             // Since we can't call the tool's call method directly on an existential type,
             // we need to use makeOutputSegments which internally calls the tool
             // and then extract the result from the segments
-            do {
-                // Convert segments to a string representation
-                let result = output as! Output
-
-                return result
-            } catch {
-                // Return error information as string
-                return "Tool call failed: \(error.localizedDescription)"
-            }
+            let result = output as! Output
+            return result
         }
     }
 
@@ -340,7 +333,7 @@ private struct AnyToolWrapper: FoundationModels.Tool {
 
             let rawParameters = try? JSONValue(resolvedSchema)
             var schema : FoundationModels.GenerationSchema? = nil
-            if let parameters = rawParameters?.objectValue as? [String: JSONValue] {
+            if rawParameters?.objectValue is [String: JSONValue] {
                 if let data = try? JSONEncoder().encode(rawParameters) {
                     if let jsonSchema = try? JSONDecoder().decode(JSONSchema.self, from: data) {
                         if let dynamicSchema = SchemaConverter.convert(schema: jsonSchema) {
