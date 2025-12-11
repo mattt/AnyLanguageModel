@@ -286,32 +286,29 @@
     @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
     extension Array where Element == (any Tool) {
         fileprivate func toFoundationModels() -> [any FoundationModels.Tool] {
-            self.map { tool in
-                return AnyToolWrapper(tool: tool)
-            }
+            map { AnyToolWrapper($0) }
         }
     }
 
-    /// A type-erased wrapper that bridges any Tool to FoundationModels.Tool
+    /// A type-erased wrapper that bridges any `Tool` to `FoundationModels.Tool`.
     @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
     private struct AnyToolWrapper: FoundationModels.Tool {
-        public typealias Arguments = FoundationModels.GeneratedContent
-        public typealias Output = String
+        typealias Arguments = FoundationModels.GeneratedContent
+        typealias Output = String
 
-        public let name: String
-        public let description: String
-        public let parameters: FoundationModels.GenerationSchema
-        public let includesSchemaInInstructions: Bool
+        let name: String
+        let description: String
+        let parameters: FoundationModels.GenerationSchema
+        let includesSchemaInInstructions: Bool
 
         private let wrappedTool: any Tool
 
-        init(tool: any Tool) {
+        init(_ tool: any Tool) {
             self.wrappedTool = tool
             self.name = tool.name
             self.description = tool.description
-            self.includesSchemaInInstructions = tool.includesSchemaInInstructions
-
             self.parameters = FoundationModels.GenerationSchema(tool.parameters)
+            self.includesSchemaInInstructions = tool.includesSchemaInInstructions
         }
 
         public func call(arguments: FoundationModels.GeneratedContent) async throws -> Output {
