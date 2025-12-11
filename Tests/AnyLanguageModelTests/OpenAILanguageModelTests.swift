@@ -302,3 +302,169 @@ struct OpenAILanguageModelTests {
         }
     }
 }
+
+// MARK: - Streaming Tool Call (mocked)
+
+@Suite("OpenAI streaming tool calls (mocked)")
+struct OpenAIStreamingToolCallTests {
+    private let baseURL = URL(string: "https://mock.openai.local")!
+
+    @Test(.disabled("Streaming mock under construction")) func responsesStreamToolCallExecution() async throws {
+        var responsesCallCount = 0
+        URLProtocol.registerClass(MockOpenAIEventStreamURLProtocol.self)
+        MockOpenAIEventStreamURLProtocol.Handler.set { request in
+            defer { responsesCallCount += 1 }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "text/event-stream"]
+            )!
+
+            let events: [String]
+            if responsesCallCount == 0 {
+                events = [
+                    #"data: {"type":"response.tool_call.created","tool_call":{"id":"call_1","type":"function","function":{"name":"getWeather","arguments":""}}}"#,
+                    #"data: {"type":"response.tool_call.delta","tool_call":{"id":"call_1","function":{"arguments":"{\"city\":\"San Francisco\"}"}}}"#,
+                    #"data: {"type":"response.completed","finish_reason":"tool_calls"}"#,
+                ]
+            } else {
+                events = [
+                    #"data: {"type":"response.output_text.delta","delta":"Tool says: Sunny."}"#,
+                    #"data: {"type":"response.completed","finish_reason":"stop"}"#,
+                ]
+            }
+
+            let payload = events.joined(separator: "\n\n") + "\n\n"
+            return (response, [payload.data(using: .utf8)!])
+        }
+        defer { MockOpenAIEventStreamURLProtocol.Handler.clear() }
+
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MockOpenAIEventStreamURLProtocol.self]
+
+        let model = OpenAILanguageModel(
+            baseURL: baseURL,
+            apiKey: "test-key",
+            model: "gpt-test",
+            apiVariant: .responses,
+            session: URLSession(configuration: config)
+        )
+        let session = LanguageModelSession(model: model, tools: [WeatherTool()])
+
+        var snapshots: [LanguageModelSession.ResponseStream<String>.Snapshot] = []
+        for try await snapshot in session.streamResponse(to: "What's the weather?") {
+            snapshots.append(snapshot)
+        }
+
+        #expect(responsesCallCount >= 2)
+    }
+
+    @Test(.disabled("Streaming mock under construction")) func chatCompletionsStreamToolCallExecution() async throws {
+        var chatCallCount = 0
+        URLProtocol.registerClass(MockOpenAIEventStreamURLProtocol.self)
+        MockOpenAIEventStreamURLProtocol.Handler.set { request in
+            defer { chatCallCount += 1 }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "text/event-stream"]
+            )!
+
+            let events: [String]
+            if chatCallCount == 0 {
+                events = [
+                    #"data: {"id":"evt_1","choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"getWeather","arguments":""}}]},"finish_reason":null}]}"#,
+                    #"data: {"id":"evt_1","choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"arguments":"{\"city\":\"Paris\"}"}}]},"finish_reason":null}]}"#,
+                    #"data: {"id":"evt_1","choices":[{"delta":{},"finish_reason":"tool_calls"}]}"#,
+                ]
+            } else {
+                events = [
+                    #"data: {"id":"evt_1","choices":[{"delta":{"content":"Tool says Paris is sunny."},"finish_reason":null}]}"#,
+                    #"data: {"id":"evt_1","choices":[{"delta":{},"finish_reason":"stop"}]}"#,
+                ]
+            }
+
+            let payload = events.joined(separator: "\n\n") + "\n\n"
+            return (response, [payload.data(using: .utf8)!])
+        }
+        defer { MockOpenAIEventStreamURLProtocol.Handler.clear() }
+
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MockOpenAIEventStreamURLProtocol.self]
+
+        let model = OpenAILanguageModel(
+            baseURL: baseURL,
+            apiKey: "test-key",
+            model: "gpt-test",
+            apiVariant: .chatCompletions,
+            session: URLSession(configuration: config)
+        )
+        let session = LanguageModelSession(model: model, tools: [WeatherTool()])
+
+        var snapshots: [LanguageModelSession.ResponseStream<String>.Snapshot] = []
+        for try await snapshot in session.streamResponse(to: "What's the weather?") {
+            snapshots.append(snapshot)
+        }
+
+        #expect(chatCallCount >= 2)
+    }
+}
+
+private final class MockOpenAIEventStreamURLProtocol: URLProtocol {
+    enum Handler {
+        nonisolated(unsafe) private static var handler: ((URLRequest) -> (HTTPURLResponse, [Data]))?
+        private static let lock = NSLock()
+
+        static func set(_ handler: @escaping (URLRequest) -> (HTTPURLResponse, [Data])) {
+            lock.lock()
+            self.handler = handler
+            lock.unlock()
+        }
+
+        static func clear() {
+            lock.lock()
+            handler = nil
+            lock.unlock()
+        }
+
+        static func handle(_ request: URLRequest) -> (HTTPURLResponse, [Data])? {
+            lock.lock()
+            let result = handler?(request)
+            lock.unlock()
+            return result
+        }
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        true
+    }
+
+    override class func canInit(with task: URLSessionTask) -> Bool {
+        if let request = task.currentRequest {
+            return canInit(with: request)
+        }
+        return false
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        guard let handler = Handler.handle(request) else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
+            return
+        }
+
+        let (response, dataChunks) = handler
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        for chunk in dataChunks {
+            client?.urlProtocol(self, didLoad: chunk)
+        }
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}
