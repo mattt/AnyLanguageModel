@@ -360,8 +360,9 @@
 
     @available(macOS 26.0, *)
     extension Tool {
-        func callFunction(arguments: FoundationModels.GeneratedContent) async throws -> Output {
-
+        fileprivate func callFunction(arguments: FoundationModels.GeneratedContent) async throws
+            -> any PromptRepresentable
+        {
             let content = try GeneratedContent(arguments)
             return try await call(arguments: Self.Arguments(content))
         }
