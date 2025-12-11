@@ -641,59 +641,123 @@ public struct OpenAILanguageModel: LanguageModel {
 
         switch apiVariant {
         case .responses:
-            let params = Responses.createRequestBody(
-                model: model,
-                messages: messages,
-                tools: openAITools,
-                options: options,
-                stream: true
-            )
-
+            let initialMessages = messages
             let url = baseURL.appendingPathComponent("responses")
 
             let stream: AsyncThrowingStream<LanguageModelSession.ResponseStream<Content>.Snapshot, any Error> = .init {
                 continuation in
                 let task = Task { @Sendable in
                     do {
-                        let body = try JSONEncoder().encode(params)
+                        var currentMessages = initialMessages
+                        var transcriptEntries: [Transcript.Entry] = []
 
-                        let events: AsyncThrowingStream<OpenAIResponsesServerEvent, any Error> =
-                            urlSession.fetchEventStream(
-                                .post,
-                                url: url,
-                                headers: [
-                                    "Authorization": "Bearer \(tokenProvider())"
-                                ],
-                                body: body
+                        while true {
+                            let params = Responses.createRequestBody(
+                                model: model,
+                                messages: currentMessages,
+                                tools: openAITools,
+                                options: options,
+                                stream: true
                             )
+                            let body = try JSONEncoder().encode(params)
 
-                        var accumulatedText = ""
+                            let events: AsyncThrowingStream<OpenAIResponsesServerEvent, any Error> =
+                                urlSession.fetchEventStream(
+                                    .post,
+                                    url: url,
+                                    headers: [
+                                        "Authorization": "Bearer \(tokenProvider())"
+                                    ],
+                                    body: body
+                                )
 
-                        for try await event in events {
-                            switch event {
-                            case .outputTextDelta(let delta):
-                                accumulatedText += delta
+                            var accumulatedText = ""
+                            var toolCallAccumulator = OpenAIToolCallAccumulator()
+                            var finishReason: String?
 
-                                // Yield snapshot with partially generated content
+                            for try await event in events {
+                                switch event {
+                                case .outputTextDelta(let delta):
+                                    accumulatedText += delta
+
+                                    let raw = GeneratedContent(accumulatedText)
+                                    let content: Content.PartiallyGenerated = (accumulatedText as! Content)
+                                        .asPartiallyGenerated()
+                                    continuation.yield(
+                                        .init(
+                                            content: content,
+                                            rawContent: raw,
+                                            transcriptEntries: transcriptEntries
+                                        )
+                                    )
+
+                                case .toolCallCreated(let call):
+                                    toolCallAccumulator.merge(call, suggestedKey: call.id)
+                                case .toolCallDelta(let call):
+                                    toolCallAccumulator.merge(call, suggestedKey: call.id)
+                                case .completed(let reason):
+                                    finishReason = reason
+                                case .ignored:
+                                    break
+                                }
+                            }
+
+                            let toolCalls = toolCallAccumulator.build()
+
+                            if !toolCalls.isEmpty {
+                                if let assistantRaw = makeAssistantToolCallMessage(
+                                    for: .responses,
+                                    toolCalls: toolCalls
+                                ) {
+                                    currentMessages.append(
+                                        OpenAIMessage(role: .raw(rawContent: assistantRaw), content: .text(""))
+                                    )
+                                }
+                                let invocations = try await resolveToolCalls(toolCalls, session: session)
+                                if !invocations.isEmpty {
+                                    transcriptEntries.append(
+                                        .toolCalls(Transcript.ToolCalls(invocations.map { $0.call }))
+                                    )
+                                    for invocation in invocations {
+                                        let output = invocation.output
+                                        transcriptEntries.append(.toolOutput(output))
+                                        let toolSegments: [Transcript.Segment] = output.segments
+                                        let blocks = convertSegmentsToOpenAIBlocks(toolSegments)
+                                        currentMessages.append(
+                                            OpenAIMessage(role: .tool(id: invocation.call.id), content: .blocks(blocks))
+                                        )
+                                    }
+
+                                    let raw = GeneratedContent(accumulatedText)
+                                    let content: Content.PartiallyGenerated = (accumulatedText as! Content)
+                                        .asPartiallyGenerated()
+                                    continuation.yield(
+                                        .init(
+                                            content: content,
+                                            rawContent: raw,
+                                            transcriptEntries: transcriptEntries
+                                        )
+                                    )
+                                    continue
+                                }
+                            }
+
+                            if finishReason != nil || !accumulatedText.isEmpty {
                                 let raw = GeneratedContent(accumulatedText)
                                 let content: Content.PartiallyGenerated = (accumulatedText as! Content)
                                     .asPartiallyGenerated()
-                                continuation.yield(.init(content: content, rawContent: raw))
-
-                            case .toolCallCreated(_):
-                                // Minimal streaming implementation ignores tool call events
-                                break
-                            case .toolCallDelta(_):
-                                // Minimal streaming implementation ignores tool call deltas
-                                break
-                            case .completed(_):
-                                continuation.finish()
-                            case .ignored:
-                                break
+                                continuation.yield(
+                                    .init(
+                                        content: content,
+                                        rawContent: raw,
+                                        transcriptEntries: transcriptEntries
+                                    )
+                                )
                             }
-                        }
 
-                        continuation.finish()
+                            continuation.finish()
+                            break
+                        }
                     } catch {
                         continuation.finish(throwing: error)
                     }
@@ -704,52 +768,132 @@ public struct OpenAILanguageModel: LanguageModel {
             return LanguageModelSession.ResponseStream(stream: stream)
 
         case .chatCompletions:
-            let params = ChatCompletions.createRequestBody(
-                model: model,
-                messages: messages,
-                tools: openAITools,
-                options: options,
-                stream: true
-            )
-
+            let initialMessages = messages
             let url = baseURL.appendingPathComponent("chat/completions")
 
             let stream: AsyncThrowingStream<LanguageModelSession.ResponseStream<Content>.Snapshot, any Error> = .init {
                 continuation in
                 let task = Task { @Sendable in
                     do {
-                        let body = try JSONEncoder().encode(params)
+                        var currentMessages = initialMessages
+                        var transcriptEntries: [Transcript.Entry] = []
 
-                        let events: AsyncThrowingStream<OpenAIChatCompletionsChunk, any Error> =
-                            urlSession.fetchEventStream(
-                                .post,
-                                url: url,
-                                headers: [
-                                    "Authorization": "Bearer \(tokenProvider())"
-                                ],
-                                body: body
+                        while true {
+                            let params = ChatCompletions.createRequestBody(
+                                model: model,
+                                messages: currentMessages,
+                                tools: openAITools,
+                                options: options,
+                                stream: true
                             )
+                            let body = try JSONEncoder().encode(params)
 
-                        var accumulatedText = ""
+                            let events: AsyncThrowingStream<OpenAIChatCompletionsChunk, any Error> =
+                                urlSession.fetchEventStream(
+                                    .post,
+                                    url: url,
+                                    headers: [
+                                        "Authorization": "Bearer \(tokenProvider())"
+                                    ],
+                                    body: body
+                                )
 
-                        for try await chunk in events {
-                            if let choice = chunk.choices.first {
+                            var accumulatedText = ""
+                            var toolCallAccumulator = OpenAIToolCallAccumulator()
+                            var finishReason: String?
+
+                            for try await chunk in events {
+                                guard let choice = chunk.choices.first else { continue }
+
+                                if let toolCalls = choice.delta.toolCalls {
+                                    for (idx, call) in toolCalls.enumerated() {
+                                        let openAICall = OpenAIToolCall(
+                                            id: call.id,
+                                            type: call.type,
+                                            function: call.function
+                                        )
+                                        toolCallAccumulator.merge(
+                                            openAICall,
+                                            suggestedKey: call.id ?? "tool-call-\(idx)"
+                                        )
+                                    }
+                                }
+
                                 if let piece = choice.delta.content, !piece.isEmpty {
                                     accumulatedText += piece
 
                                     let raw = GeneratedContent(accumulatedText)
                                     let content: Content.PartiallyGenerated = (accumulatedText as! Content)
                                         .asPartiallyGenerated()
-                                    continuation.yield(.init(content: content, rawContent: raw))
+                                    continuation.yield(
+                                        .init(
+                                            content: content,
+                                            rawContent: raw,
+                                            transcriptEntries: transcriptEntries
+                                        )
+                                    )
                                 }
 
-                                if choice.finishReason != nil {
-                                    continuation.finish()
+                                if let reason = choice.finishReason {
+                                    finishReason = reason
                                 }
                             }
-                        }
 
-                        continuation.finish()
+                            let toolCalls = toolCallAccumulator.build()
+                            if !toolCalls.isEmpty || finishReason == "tool_calls" {
+                                if let assistantRaw = makeAssistantToolCallMessage(
+                                    for: .chatCompletions,
+                                    toolCalls: toolCalls
+                                ) {
+                                    currentMessages.append(
+                                        OpenAIMessage(role: .raw(rawContent: assistantRaw), content: .text(""))
+                                    )
+                                }
+                                let invocations = try await resolveToolCalls(toolCalls, session: session)
+                                if !invocations.isEmpty {
+                                    transcriptEntries.append(
+                                        .toolCalls(Transcript.ToolCalls(invocations.map { $0.call }))
+                                    )
+                                    for invocation in invocations {
+                                        let output = invocation.output
+                                        transcriptEntries.append(.toolOutput(output))
+                                        let toolSegments: [Transcript.Segment] = output.segments
+                                        let blocks = convertSegmentsToOpenAIBlocks(toolSegments)
+                                        currentMessages.append(
+                                            OpenAIMessage(role: .tool(id: invocation.call.id), content: .blocks(blocks))
+                                        )
+                                    }
+
+                                    let raw = GeneratedContent(accumulatedText)
+                                    let content: Content.PartiallyGenerated = (accumulatedText as! Content)
+                                        .asPartiallyGenerated()
+                                    continuation.yield(
+                                        .init(
+                                            content: content,
+                                            rawContent: raw,
+                                            transcriptEntries: transcriptEntries
+                                        )
+                                    )
+                                    continue
+                                }
+                            }
+
+                            if finishReason != nil || !accumulatedText.isEmpty {
+                                let raw = GeneratedContent(accumulatedText)
+                                let content: Content.PartiallyGenerated = (accumulatedText as! Content)
+                                    .asPartiallyGenerated()
+                                continuation.yield(
+                                    .init(
+                                        content: content,
+                                        rawContent: raw,
+                                        transcriptEntries: transcriptEntries
+                                    )
+                                )
+                            }
+
+                            continuation.finish()
+                            break
+                        }
                     } catch {
                         continuation.finish(throwing: error)
                     }
@@ -1399,9 +1543,23 @@ private enum OpenAIResponsesServerEvent: Decodable, Sendable {
 
 private struct OpenAIChatCompletionsChunk: Decodable, Sendable {
     struct Choice: Decodable, Sendable {
+        struct ToolCallDelta: Decodable, Sendable {
+            let index: Int?
+            let id: String?
+            let type: String?
+            let function: OpenAIToolFunction?
+        }
+
         struct Delta: Decodable, Sendable {
             let role: String?
             let content: String?
+            let toolCalls: [ToolCallDelta]?
+
+            private enum CodingKeys: String, CodingKey {
+                case role
+                case content
+                case toolCalls = "tool_calls"
+            }
         }
         let delta: Delta
         let finishReason: String?
@@ -1419,6 +1577,44 @@ private struct OpenAIChatCompletionsChunk: Decodable, Sendable {
 private struct OpenAIToolInvocationResult {
     let call: Transcript.ToolCall
     let output: Transcript.ToolOutput
+}
+
+private struct OpenAIToolCallAccumulator {
+    private struct Builder {
+        var id: String
+        var type: String?
+        var functionName: String?
+        var arguments: String = ""
+
+        mutating func merge(_ call: OpenAIToolCall) {
+            if let type = call.type { self.type = type }
+            if let name = call.function?.name { functionName = name }
+            if let args = call.function?.arguments { arguments.append(args) }
+            if let id = call.id { self.id = id }
+        }
+
+        func build() -> OpenAIToolCall? {
+            guard let functionName else { return nil }
+            let function = OpenAIToolFunction(name: functionName, arguments: arguments.isEmpty ? nil : arguments)
+            return OpenAIToolCall(id: id, type: type ?? "function", function: function)
+        }
+    }
+
+    private var builders: [String: Builder] = [:]
+    private var order: [String] = []
+
+    mutating func merge(_ call: OpenAIToolCall, suggestedKey: String?) {
+        let key = suggestedKey ?? call.id ?? call.function?.name ?? UUID().uuidString
+        if builders[key] == nil {
+            order.append(key)
+            builders[key] = Builder(id: call.id ?? key, type: call.type, functionName: call.function?.name)
+        }
+        builders[key]?.merge(call)
+    }
+
+    func build() -> [OpenAIToolCall] {
+        order.compactMap { builders[$0]?.build() }
+    }
 }
 
 private func resolveToolCalls(
@@ -1472,6 +1668,47 @@ private func resolveToolCalls(
     }
 
     return results
+}
+
+private func makeAssistantToolCallMessage(
+    for apiVariant: OpenAILanguageModel.APIVariant,
+    toolCalls: [OpenAIToolCall]
+) -> JSONValue? {
+    guard !toolCalls.isEmpty else { return nil }
+
+    switch apiVariant {
+    case .chatCompletions:
+        let toolCallValues = toolCalls.map { call -> JSONValue in
+            let function = call.function
+            return .object([
+                "id": .string(call.id ?? UUID().uuidString),
+                "type": .string(call.type ?? "function"),
+                "function": .object([
+                    "name": .string(function?.name ?? ""),
+                    "arguments": .string(function?.arguments ?? ""),
+                ]),
+            ])
+        }
+        return .object([
+            "role": .string("assistant"),
+            "tool_calls": .array(toolCallValues),
+        ])
+
+    case .responses:
+        let content = toolCalls.map { call -> JSONValue in
+            .object([
+                "type": .string("tool_call"),
+                "id": .string(call.id ?? UUID().uuidString),
+                "name": .string(call.function?.name ?? ""),
+                "arguments": .string(call.function?.arguments ?? ""),
+            ])
+        }
+        return .object([
+            "type": .string("message"),
+            "role": .string("assistant"),
+            "content": .array(content),
+        ])
+    }
 }
 
 // MARK: - Converters
