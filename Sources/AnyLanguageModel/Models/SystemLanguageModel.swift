@@ -3,6 +3,8 @@
     import Foundation
     import PartialJSONDecoder
 
+    import JSONSchema
+
     /// A language model that uses Apple Intelligence.
     ///
     /// Use this model to generate text using on-device language models provided by Apple.
@@ -116,20 +118,25 @@
                 instructions: session.instructions?.toFoundationModels()
             )
 
-            // Bridge FoundationModels' stream into our ResponseStream snapshots
-            let fmStream: FoundationModels.LanguageModelSession.ResponseStream<String> =
-                fmSession.streamResponse(to: fmPrompt, options: fmOptions)
-            let fmBox = UnsafeSendableBox(value: fmStream)
-
             let stream = AsyncThrowingStream<LanguageModelSession.ResponseStream<Content>.Snapshot, any Error> {
                 @Sendable continuation in
                 let task = Task {
+                    // Bridge FoundationModels' stream into our ResponseStream snapshots
+                    let fmStream: FoundationModels.LanguageModelSession.ResponseStream<String> =
+                        fmSession.streamResponse(to: fmPrompt, options: fmOptions)
+
                     var accumulatedText = ""
                     do {
                         // Iterate FM stream of String snapshots
                         var lastLength = 0
-                        for try await snapshot in fmBox.value {
-                            let chunkText: String = snapshot.content
+                        for try await snapshot in fmStream {
+                            var chunkText: String = snapshot.content
+
+                            // We something get "null" from FoundationModels as a first temp result when streaming
+                            // Some nil is probably converted to our String type when no data is available
+                            if chunkText == "null" && accumulatedText == "" {
+                                chunkText = ""
+                            }
 
                             if chunkText.count >= lastLength, chunkText.hasPrefix(accumulatedText) {
                                 // Cumulative; compute delta via previous length
@@ -150,7 +157,6 @@
                                 accumulatedText += chunkText
                                 lastLength = accumulatedText.count
                             }
-
                             // Build raw content from plain text
                             let raw: GeneratedContent = GeneratedContent(accumulatedText)
 
@@ -280,14 +286,193 @@
     @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
     extension Array where Element == (any Tool) {
         fileprivate func toFoundationModels() -> [any FoundationModels.Tool] {
-            return []
+            map { AnyToolWrapper($0) }
         }
     }
 
-    // MARK: - Errors
+    /// A type-erased wrapper that bridges any `Tool` to `FoundationModels.Tool`.
+    @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
+    private struct AnyToolWrapper: FoundationModels.Tool {
+        typealias Arguments = FoundationModels.GeneratedContent
+        typealias Output = String
+
+        let name: String
+        let description: String
+        let parameters: FoundationModels.GenerationSchema
+        let includesSchemaInInstructions: Bool
+
+        private let wrappedTool: any Tool
+
+        init(_ tool: any Tool) {
+            self.wrappedTool = tool
+            self.name = tool.name
+            self.description = tool.description
+            self.parameters = FoundationModels.GenerationSchema(tool.parameters)
+            self.includesSchemaInInstructions = tool.includesSchemaInInstructions
+        }
+
+        func call(arguments: FoundationModels.GeneratedContent) async throws -> Output {
+            let output = try await wrappedTool.callFunction(arguments: arguments)
+            return output.promptRepresentation.description
+        }
+    }
+
+    @available(macOS 26.0, *)
+    extension FoundationModels.GenerationSchema {
+        internal init(_ content: AnyLanguageModel.GenerationSchema) {
+            let resolvedSchema = content.withResolvedRoot() ?? content
+
+            let rawParameters = try? JSONValue(resolvedSchema)
+            var schema: FoundationModels.GenerationSchema? = nil
+            if rawParameters?.objectValue is [String: JSONValue] {
+                if let data = try? JSONEncoder().encode(rawParameters) {
+                    if let jsonSchema = try? JSONDecoder().decode(JSONSchema.self, from: data) {
+                        let dynamicSchema = convertToDynamicSchema(jsonSchema)
+                        schema = try? FoundationModels.GenerationSchema(root: dynamicSchema, dependencies: [])
+                    }
+                }
+            }
+            if let schema = schema {
+                self = schema
+            } else {
+                self = FoundationModels.GenerationSchema(
+                    type: String.self,
+                    properties: []
+                )
+
+            }
+        }
+    }
+
+    @available(macOS 26.0, *)
+    extension FoundationModels.GeneratedContent {
+        internal init(_ content: AnyLanguageModel.GeneratedContent) throws {
+            try self.init(json: content.jsonString)
+        }
+    }
+
+    @available(macOS 26.0, *)
+    extension AnyLanguageModel.GeneratedContent {
+        internal init(_ content: FoundationModels.GeneratedContent) throws {
+            try self.init(json: content.jsonString)
+        }
+    }
+
+    @available(macOS 26.0, *)
+    extension Tool {
+        fileprivate func callFunction(arguments: FoundationModels.GeneratedContent) async throws
+            -> any PromptRepresentable
+        {
+            let content = try GeneratedContent(arguments)
+            return try await call(arguments: Self.Arguments(content))
+        }
+    }
 
     @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
-    private enum SystemLanguageModelError: Error {
-        case streamingFailed
+    func convertToDynamicSchema(_ jsonSchema: JSONSchema) -> FoundationModels.DynamicGenerationSchema {
+        switch jsonSchema {
+        case .object(_, _, _, _, _, _, properties: let properties, required: let required, _):
+            let schemaProperties = properties.compactMap { key, value in
+                convertToProperty(key: key, schema: value, required: required)
+            }
+            return .init(name: "", description: jsonSchema.description, properties: schemaProperties)
+
+        case .string(_, _, _, _, _, _, _, _, pattern: let pattern, _):
+            var guides: [FoundationModels.GenerationGuide<String>] = []
+            if let values = jsonSchema.enum?.compactMap(\.stringValue), !values.isEmpty {
+                guides.append(.anyOf(values))
+            }
+            if let value = jsonSchema.const?.stringValue {
+                guides.append(.constant(value))
+            }
+            if let pattern, let regex = try? Regex(pattern) {
+                guides.append(.pattern(regex))
+            }
+            return .init(type: String.self, guides: guides)
+
+        case .integer(_, _, _, _, _, _, minimum: let minimum, maximum: let maximum, _, _, _):
+            if let enumValues = jsonSchema.enum {
+                let enumsSchema = enumValues.compactMap { convertConstToSchema($0) }
+                return .init(name: "", anyOf: enumsSchema)
+            }
+
+            var guides: [FoundationModels.GenerationGuide<Int>] = []
+            if let min = minimum {
+                guides.append(.minimum(min))
+            }
+            if let max = maximum {
+                guides.append(.maximum(max))
+            }
+            if let value = jsonSchema.const?.intValue {
+                guides.append(.range(value ... value))
+            }
+            return .init(type: Int.self, guides: guides)
+
+        case .number(_, _, _, _, _, _, minimum: let minimum, maximum: let maximum, _, _, _):
+            if let enumValues = jsonSchema.enum {
+                let enumsSchema = enumValues.compactMap { convertConstToSchema($0) }
+                return .init(name: "", anyOf: enumsSchema)
+            }
+
+            var guides: [FoundationModels.GenerationGuide<Double>] = []
+            if let min = minimum {
+                guides.append(.minimum(min))
+            }
+            if let max = maximum {
+                guides.append(.maximum(max))
+            }
+            if let value = jsonSchema.const?.doubleValue {
+                guides.append(.range(value ... value))
+            }
+            return .init(type: Double.self, guides: guides)
+
+        case .boolean:
+            return .init(type: Bool.self)
+
+        case .anyOf(let schemas):
+            return .init(name: "", anyOf: schemas.map { convertToDynamicSchema($0) })
+
+        case .array(_, _, _, _, _, _, items: let items, minItems: let minItems, maxItems: let maxItems, _):
+            let itemsSchema =
+                items.map { convertToDynamicSchema($0) }
+                ?? FoundationModels.DynamicGenerationSchema(type: String.self)
+            return .init(arrayOf: itemsSchema, minimumElements: minItems, maximumElements: maxItems)
+
+        case .reference(let name):
+            return .init(referenceTo: name)
+
+        case .allOf, .oneOf, .not, .null, .empty, .any:
+            return .init(type: String.self)
+        }
+    }
+
+    @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
+    func convertToProperty(
+        key: String,
+        schema: JSONSchema,
+        required: [String]
+    ) -> FoundationModels.DynamicGenerationSchema.Property {
+        .init(
+            name: key,
+            description: schema.description,
+            schema: convertToDynamicSchema(schema),
+            isOptional: !required.contains(key)
+        )
+    }
+
+    /// Converts a JSON constant value to a DynamicGenerationSchema.
+    /// Only handles scalar types (int, double, string); returns nil for null, object, bool, and array.
+    @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
+    func convertConstToSchema(_ value: JSONValue) -> FoundationModels.DynamicGenerationSchema? {
+        switch value {
+        case .int(let intValue):
+            .init(type: Int.self, guides: [.range(intValue ... intValue)])
+        case .double(let doubleValue):
+            .init(type: Double.self, guides: [.range(doubleValue ... doubleValue)])
+        case .string(let stringValue):
+            .init(type: String.self, guides: [.constant(stringValue)])
+        case .null, .object, .bool, .array:
+            nil
+        }
     }
 #endif

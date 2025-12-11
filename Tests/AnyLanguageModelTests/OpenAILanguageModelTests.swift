@@ -155,7 +155,7 @@ struct OpenAILanguageModelTests {
 
             var foundToolOutput = false
             for case let .toolOutput(toolOutput) in response.transcriptEntries {
-                #expect(toolOutput.id == "getWeather")
+                #expect(toolOutput.toolName == "getWeather")
                 foundToolOutput = true
             }
             #expect(foundToolOutput)
@@ -295,7 +295,7 @@ struct OpenAILanguageModelTests {
 
             var foundToolOutput = false
             for case let .toolOutput(toolOutput) in response.transcriptEntries {
-                #expect(toolOutput.id == "getWeather")
+                #expect(toolOutput.toolName == "getWeather")
                 foundToolOutput = true
             }
             #expect(foundToolOutput)
