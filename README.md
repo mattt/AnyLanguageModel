@@ -618,27 +618,50 @@ swift test
 
 Tests for different language model backends have varying requirements:
 
-- **CoreML tests**: `swift test --traits CoreML` + `ENABLE_COREML_TESTS=1` + `HF_TOKEN` (downloads model from HuggingFace)
-- **MLX tests**: `swift test --traits MLX` + `ENABLE_MLX_TESTS=1` + `HF_TOKEN` (uses pre-defined model)
-- **Llama tests**: `swift test --traits Llama` + `LLAMA_MODEL_PATH` (points to local GGUF file)
-- **Anthropic tests**: `ANTHROPIC_API_KEY` (no traits needed)
-- **OpenAI tests**: `OPENAI_API_KEY` (no traits needed)
-- **Ollama tests**: No setup needed (skips in CI)
+| Backend | Traits | Environment Variables |
+|---------|--------|----------------------|
+| CoreML | `CoreML` | `HF_TOKEN` |
+| MLX | `MLX` | `HF_TOKEN` |
+| Llama | `Llama` | `LLAMA_MODEL_PATH` |
+| Anthropic | — | `ANTHROPIC_API_KEY` |
+| OpenAI | — | `OPENAI_API_KEY` |
+| Ollama | — | — |
 
-Example setup for all backends:
+Example setup for running multiple tests at once:
 
 ```bash
-# Environment variables
-export ENABLE_COREML_TESTS=1
-export ENABLE_MLX_TESTS=1
 export HF_TOKEN=your_huggingface_token
 export LLAMA_MODEL_PATH=/path/to/model.gguf
 export ANTHROPIC_API_KEY=your_anthropic_key
 export OPENAI_API_KEY=your_openai_key
 
-# Run all tests with traits enabled
-swift test --traits CoreML,MLX,Llama
+swift test --traits CoreML,Llama
 ```
+
+> [!TIP]
+> Tests that perform generation are skipped in CI environments (when `CI` is set).
+> Override this by setting `ENABLE_COREML_TESTS=1` or `ENABLE_MLX_TESTS=1`.
+
+> [!NOTE]
+> MLX tests must be run with `xcodebuild` rather than `swift test`
+> due to Metal library loading requirements.
+> Since `xcodebuild` doesn't support package traits directly,
+> you'll first need to update `Package.swift` to enable the MLX trait by default.
+>
+> ```diff
+> - .default(enabledTraits: []),
+> + .default(enabledTraits: ["MLX"]),
+> ```
+> 
+> Pass environment variables with `TEST_RUNNER_` prefix:
+>
+> ```bash
+> export TEST_RUNNER_HF_TOKEN=your_huggingface_token
+> xcodebuild test \
+>   -scheme AnyLanguageModel \
+>   -destination 'platform=macOS' \
+>   -only-testing:AnyLanguageModelTests/MLXLanguageModelTests
+> ```
 
 ## License
 
