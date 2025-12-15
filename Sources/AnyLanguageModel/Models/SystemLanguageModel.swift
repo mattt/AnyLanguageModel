@@ -317,7 +317,7 @@
         }
     }
 
-    @available(macOS 26.0, *)
+    @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
     extension FoundationModels.GenerationSchema {
         internal init(_ content: AnyLanguageModel.GenerationSchema) {
             let resolvedSchema = content.withResolvedRoot() ?? content
@@ -344,21 +344,21 @@
         }
     }
 
-    @available(macOS 26.0, *)
+    @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
     extension FoundationModels.GeneratedContent {
         internal init(_ content: AnyLanguageModel.GeneratedContent) throws {
             try self.init(json: content.jsonString)
         }
     }
 
-    @available(macOS 26.0, *)
+    @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
     extension AnyLanguageModel.GeneratedContent {
         internal init(_ content: FoundationModels.GeneratedContent) throws {
             try self.init(json: content.jsonString)
         }
     }
 
-    @available(macOS 26.0, *)
+    @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
     extension Tool {
         fileprivate func callFunction(arguments: FoundationModels.GeneratedContent) async throws
             -> any PromptRepresentable
