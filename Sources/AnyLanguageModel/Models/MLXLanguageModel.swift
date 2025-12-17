@@ -189,14 +189,8 @@ import Foundation
 
                         let generateParameters = toGenerateParameters(options)
 
-                        var chat: [MLXLMCommon.Chat.Message] = []
-
-                        if let instructionSegments = extractInstructionSegments(from: session) {
-                            chat.append(convertSegmentsToMLXSystemMessage(instructionSegments))
-                        }
-
-                        let userSegments = extractPromptSegments(from: session, fallbackText: prompt.description)
-                        chat.append(convertSegmentsToMLXMessage(userSegments))
+                        // Build chat history from full transcript
+                        let chat = convertTranscriptToMLXChat(session: session, fallbackPrompt: prompt.description)
 
                         let userInput = MLXLMCommon.UserInput(
                             chat: chat,
