@@ -42,6 +42,19 @@ import Testing
             #expect(!response.content.isEmpty)
         }
 
+        @Test func streamingResponse() async throws {
+            let session = LanguageModelSession(model: model)
+
+            let stream = session.streamResponse(to: "Count to 5")
+            var chunks: [String] = []
+
+            for try await response in stream {
+                chunks.append(response.content)
+            }
+
+            #expect(!chunks.isEmpty)
+        }
+
         @Test func withGenerationOptions() async throws {
             let session = LanguageModelSession(model: model)
 
