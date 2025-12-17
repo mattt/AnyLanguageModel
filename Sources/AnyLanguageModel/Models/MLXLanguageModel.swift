@@ -228,7 +228,7 @@ import Foundation
                 chat.append(message)
 
             case .prompt(let prompt):
-                let message = convertSegmentsToMLXMessage(prompt.segments)
+                let message = convertSegmentsToMLXUserMessage(prompt.segments)
                 chat.append(message)
 
             case .response(let response):
@@ -266,7 +266,7 @@ import Foundation
         }
     }
 
-    private func convertSegmentsToMLXMessage(_ segments: [Transcript.Segment]) -> MLXLMCommon.Chat.Message {
+    private func convertSegmentsToMLXUserMessage(_ segments: [Transcript.Segment]) -> MLXLMCommon.Chat.Message {
         var textParts: [String] = []
         var images: [MLXLMCommon.UserInput.Image] = []
 
