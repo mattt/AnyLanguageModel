@@ -29,7 +29,7 @@ import Testing
         return false
     }()
 
-    @Suite("MLXLanguageModel", .enabled(if: shouldRunMLXTests))
+    @Suite("MLXLanguageModel", .enabled(if: shouldRunMLXTests), .serialized)
     struct MLXLanguageModelTests {
         // Qwen3-0.6B is a small model that supports tool calling
         let model = MLXLanguageModel(modelId: "mlx-community/Qwen3-0.6B-4bit")
@@ -40,6 +40,19 @@ import Testing
 
             let response = try await session.respond(to: "Say hello")
             #expect(!response.content.isEmpty)
+        }
+
+        @Test func streamingResponse() async throws {
+            let session = LanguageModelSession(model: model)
+
+            let stream = session.streamResponse(to: "Count to 5")
+            var chunks: [String] = []
+
+            for try await response in stream {
+                chunks.append(response.content)
+            }
+
+            #expect(!chunks.isEmpty)
         }
 
         @Test func withGenerationOptions() async throws {
