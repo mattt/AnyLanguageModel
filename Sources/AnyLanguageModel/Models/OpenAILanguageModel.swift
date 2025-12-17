@@ -433,13 +433,13 @@ public struct OpenAILanguageModel: LanguageModel {
         guard type == String.self else {
             fatalError("OpenAILanguageModel only supports generating String content")
         }
-
+        // Build messages: instructions + conversation history + current prompt
         var messages: [OpenAIMessage] = []
-        if let systemSegments = extractInstructionSegments(from: session) {
-            messages.append(
-                OpenAIMessage(role: .system, content: .blocks(convertSegmentsToOpenAIBlocks(systemSegments)))
-            )
-        }
+
+        // Add conversation history (previous turns, excluding current prompt)
+        messages.append(contentsOf: extractConversationHistory(from: session))
+
+        // Add current prompt (always from fallbackText - reliable source)
         let userSegments = extractPromptSegments(from: session, fallbackText: prompt.description)
         messages.append(OpenAIMessage(role: .user, content: .blocks(convertSegmentsToOpenAIBlocks(userSegments))))
 
@@ -619,15 +619,6 @@ public struct OpenAILanguageModel: LanguageModel {
             fatalError("OpenAILanguageModel only supports generating String content")
         }
 
-        var messages: [OpenAIMessage] = []
-        if let systemSegments = extractInstructionSegments(from: session) {
-            messages.append(
-                OpenAIMessage(role: .system, content: .blocks(convertSegmentsToOpenAIBlocks(systemSegments)))
-            )
-        }
-        let userSegments = extractPromptSegments(from: session, fallbackText: prompt.description)
-        messages.append(OpenAIMessage(role: .user, content: .blocks(convertSegmentsToOpenAIBlocks(userSegments))))
-
         // Convert tools if any are available in the session
         let openAITools: [OpenAITool]? = {
             guard !session.tools.isEmpty else { return nil }
@@ -641,13 +632,6 @@ public struct OpenAILanguageModel: LanguageModel {
 
         switch apiVariant {
         case .responses:
-            let params = Responses.createRequestBody(
-                model: model,
-                messages: messages,
-                tools: openAITools,
-                options: options,
-                stream: true
-            )
 
             let url = baseURL.appendingPathComponent("responses")
 
@@ -655,6 +639,25 @@ public struct OpenAILanguageModel: LanguageModel {
                 continuation in
                 let task = Task { @Sendable in
                     do {
+                        // Build messages: instructions + conversation history + current prompt
+                        var messages: [OpenAIMessage] = []
+
+                        // Add conversation history (instructions,previous turns, excluding current prompt)
+                        messages.append(contentsOf: extractConversationHistory(from: session))
+
+                        // Add current prompt (always from fallbackText - reliable source)
+                        let userSegments = extractPromptSegments(from: session, fallbackText: prompt.description)
+                        messages.append(
+                            OpenAIMessage(role: .user, content: .blocks(convertSegmentsToOpenAIBlocks(userSegments)))
+                        )
+
+                        let params = Responses.createRequestBody(
+                            model: model,
+                            messages: messages,
+                            tools: openAITools,
+                            options: options,
+                            stream: true
+                        )
                         let body = try JSONEncoder().encode(params)
 
                         let events: AsyncThrowingStream<OpenAIResponsesServerEvent, any Error> =
@@ -704,13 +707,7 @@ public struct OpenAILanguageModel: LanguageModel {
             return LanguageModelSession.ResponseStream(stream: stream)
 
         case .chatCompletions:
-            let params = ChatCompletions.createRequestBody(
-                model: model,
-                messages: messages,
-                tools: openAITools,
-                options: options,
-                stream: true
-            )
+           
 
             let url = baseURL.appendingPathComponent("chat/completions")
 
@@ -718,6 +715,24 @@ public struct OpenAILanguageModel: LanguageModel {
                 continuation in
                 let task = Task { @Sendable in
                     do {
+                        // Build messages: instructions + conversation history + current prompt
+                        var messages: [OpenAIMessage] = []
+
+                        // Add conversation history (instructions, previous turns, excluding current prompt)
+                        messages.append(contentsOf: extractConversationHistory(from: session))
+
+                        // Add current prompt (always from fallbackText - reliable source)
+                        let userSegments = extractPromptSegments(from: session, fallbackText: prompt.description)
+                        messages.append(OpenAIMessage(role: .user, content: .blocks(convertSegmentsToOpenAIBlocks(userSegments))))
+
+                        let params = ChatCompletions.createRequestBody(
+                            model: model,
+                            messages: messages,
+                            tools: openAITools,
+                            options: options,
+                            stream: true
+                        )
+                        
                         let body = try JSONEncoder().encode(params)
 
                         let events: AsyncThrowingStream<OpenAIChatCompletionsChunk, any Error> =
@@ -1254,27 +1269,46 @@ private func convertSegmentsToOpenAIBlocks(_ segments: [Transcript.Segment]) -> 
     return blocks
 }
 
-private func extractPromptSegments(from session: LanguageModelSession, fallbackText: String) -> [Transcript.Segment] {
-    // Prefer the most recent Transcript.Prompt entry if present
-    for entry in session.transcript.reversed() {
-        if case .prompt(let p) = entry {
-            return p.segments
+private func extractConversationHistory(from session: LanguageModelSession) -> [OpenAIMessage] {
+    var messages: [OpenAIMessage] = []
+
+    // Iterate through transcript to build history
+    // Skip the last prompt (current turn) - it will be added separately via fallbackText
+    var entries = Array(session.transcript)
+
+    // Find and remove the last prompt entry (current turn)
+    if let lastPromptIndex = entries.lastIndex(where: {
+        if case .prompt = $0 { return true }
+        return false
+    }) {
+        entries.remove(at: lastPromptIndex)
+    }
+
+    for entry in entries {
+        switch entry {
+        case .instructions(let instr):
+            let blocks = convertSegmentsToOpenAIBlocks(instr.segments)
+            messages.append(OpenAIMessage(role: .system, content: .blocks(blocks)))
+        case .prompt(let prompt):
+            let blocks = convertSegmentsToOpenAIBlocks(prompt.segments)
+            messages.append(OpenAIMessage(role: .user, content: .blocks(blocks)))
+        case .response(let response):
+            let blocks = convertSegmentsToOpenAIBlocks(response.segments)
+            messages.append(OpenAIMessage(role: .assistant, content: .blocks(blocks)))
+        case .toolCalls:
+            break
+        case .toolOutput(let toolOutput):
+            let blocks = convertSegmentsToOpenAIBlocks(toolOutput.segments)
+            messages.append(OpenAIMessage(role: .tool(id: toolOutput.id), content: .blocks(blocks)))
         }
     }
-    return [.text(.init(content: fallbackText))]
+
+    return messages
 }
 
-private func extractInstructionSegments(from session: LanguageModelSession) -> [Transcript.Segment]? {
-    // Prefer the first Transcript.Instructions entry if present
-    for entry in session.transcript {
-        if case .instructions(let i) = entry {
-            return i.segments
-        }
-    }
-    if let instructions = session.instructions?.description, !instructions.isEmpty {
-        return [.text(.init(content: instructions))]
-    }
-    return nil
+private func extractPromptSegments(from session: LanguageModelSession, fallbackText: String) -> [Transcript.Segment] {
+    // Always use fallbackText for current prompt (reliable source)
+    return [.text(.init(content: fallbackText))]
 }
 
 private struct OpenAITool: Hashable, Codable, Sendable {
