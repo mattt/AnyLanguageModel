@@ -83,19 +83,8 @@ import Foundation
             // Map AnyLanguageModel GenerationOptions to MLX GenerateParameters
             let generateParameters = toGenerateParameters(options)
 
-            // Build chat history starting with system message if instructions are present
-            var chat: [MLXLMCommon.Chat.Message] = []
-
-            // Add system message if instructions are present
-            if let instructionSegments = extractInstructionSegments(from: session) {
-                let systemMessage = convertSegmentsToMLXSystemMessage(instructionSegments)
-                chat.append(systemMessage)
-            }
-
-            // Add user prompt
-            let userSegments = extractPromptSegments(from: session, fallbackText: prompt.description)
-            let userMessage = convertSegmentsToMLXMessage(userSegments)
-            chat.append(userMessage)
+            // Build chat history from full transcript
+            var chat = convertTranscriptToMLXChat(session: session, fallbackPrompt: prompt.description)
 
             var allTextChunks: [String] = []
             var allEntries: [Transcript.Entry] = []
@@ -208,31 +197,73 @@ import Foundation
         )
     }
 
-    // MARK: - Segment Extraction
+    // MARK: - Transcript Conversion
 
-    private func extractPromptSegments(from session: LanguageModelSession, fallbackText: String) -> [Transcript.Segment]
-    {
-        // Prefer the most recent Transcript.Prompt entry if present
-        for entry in session.transcript.reversed() {
-            if case .prompt(let p) = entry {
-                return p.segments
+    /// Converts the full session transcript into MLX chat messages.
+    private func convertTranscriptToMLXChat(
+        session: LanguageModelSession,
+        fallbackPrompt: String
+    ) -> [MLXLMCommon.Chat.Message] {
+        var chat: [MLXLMCommon.Chat.Message] = []
+
+        // Check if instructions are already in transcript
+        let hasInstructionsInTranscript = session.transcript.contains {
+            if case .instructions = $0 { return true }
+            return false
+        }
+
+        // Add instructions from session if present and not in transcript
+        if !hasInstructionsInTranscript,
+            let instructions = session.instructions?.description,
+            !instructions.isEmpty
+        {
+            chat.append(.init(role: .system, content: instructions))
+        }
+
+        // Convert each transcript entry
+        for entry in session.transcript {
+            switch entry {
+            case .instructions(let instr):
+                let message = convertSegmentsToMLXSystemMessage(instr.segments)
+                chat.append(message)
+
+            case .prompt(let prompt):
+                let message = convertSegmentsToMLXMessage(prompt.segments)
+                chat.append(message)
+
+            case .response(let response):
+                let content = response.segments.map { segmentToText($0) }.joined(separator: "\n")
+                chat.append(.assistant(content))
+
+            case .toolCalls:
+                // Tool calls are handled inline during generation loop
+                break
+
+            case .toolOutput(let toolOutput):
+                let content = toolOutput.segments.map { segmentToText($0) }.joined(separator: "\n")
+                chat.append(.tool(content))
             }
         }
-        return [.text(.init(content: fallbackText))]
+
+        // If no user message in transcript, add fallback prompt
+        let hasUserMessage = chat.contains { $0.role == .user }
+        if !hasUserMessage {
+            chat.append(.init(role: .user, content: fallbackPrompt))
+        }
+
+        return chat
     }
 
-    private func extractInstructionSegments(from session: LanguageModelSession) -> [Transcript.Segment]? {
-        // Prefer the first Transcript.Instructions entry if present
-        for entry in session.transcript {
-            if case .instructions(let i) = entry {
-                return i.segments
-            }
+    /// Extracts text content from a transcript segment.
+    private func segmentToText(_ segment: Transcript.Segment) -> String {
+        switch segment {
+        case .text(let text):
+            return text.content
+        case .structure(let structured):
+            return structured.content.jsonString
+        case .image:
+            return ""
         }
-        // Fallback to session.instructions
-        if let instructions = session.instructions?.description, !instructions.isEmpty {
-            return [.text(.init(content: instructions))]
-        }
-        return nil
     }
 
     private func convertSegmentsToMLXMessage(_ segments: [Transcript.Segment]) -> MLXLMCommon.Chat.Message {
