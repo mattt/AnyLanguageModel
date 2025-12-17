@@ -29,7 +29,7 @@ import Testing
         return false
     }()
 
-    @Suite("MLXLanguageModel", .enabled(if: shouldRunMLXTests))
+    @Suite("MLXLanguageModel", .enabled(if: shouldRunMLXTests), .serialized)
     struct MLXLanguageModelTests {
         // Qwen3-0.6B is a small model that supports tool calling
         let model = MLXLanguageModel(modelId: "mlx-community/Qwen3-0.6B-4bit")
