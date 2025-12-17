@@ -224,12 +224,10 @@ import Foundation
         for entry in session.transcript {
             switch entry {
             case .instructions(let instr):
-                let message = convertSegmentsToMLXSystemMessage(instr.segments)
-                chat.append(message)
+                chat.append(makeMLXChatMessage(from: instr.segments, role: .system))
 
             case .prompt(let prompt):
-                let message = convertSegmentsToMLXUserMessage(prompt.segments)
-                chat.append(message)
+                chat.append(makeMLXChatMessage(from: prompt.segments, role: .user))
 
             case .response(let response):
                 let content = response.segments.map { segmentToText($0) }.joined(separator: "\n")
@@ -266,7 +264,10 @@ import Foundation
         }
     }
 
-    private func convertSegmentsToMLXUserMessage(_ segments: [Transcript.Segment]) -> MLXLMCommon.Chat.Message {
+    private func makeMLXChatMessage(
+        from segments: [Transcript.Segment],
+        role: MLXLMCommon.Chat.Message.Role
+    ) -> MLXLMCommon.Chat.Message {
         var textParts: [String] = []
         var images: [MLXLMCommon.UserInput.Image] = []
 
@@ -300,44 +301,7 @@ import Foundation
         }
 
         let content = textParts.joined(separator: "\n")
-        return MLXLMCommon.Chat.Message(role: .user, content: content, images: images)
-    }
-
-    private func convertSegmentsToMLXSystemMessage(_ segments: [Transcript.Segment]) -> MLXLMCommon.Chat.Message {
-        var textParts: [String] = []
-        var images: [MLXLMCommon.UserInput.Image] = []
-
-        for segment in segments {
-            switch segment {
-            case .text(let text):
-                textParts.append(text.content)
-            case .structure(let structured):
-                textParts.append(structured.content.jsonString)
-            case .image(let imageSegment):
-                switch imageSegment.source {
-                case .url(let url):
-                    images.append(.url(url))
-                case .data(let data, _):
-                    #if canImport(UIKit)
-                        if let uiImage = UIKit.UIImage(data: data),
-                            let ciImage = CIImage(image: uiImage)
-                        {
-                            images.append(.ciImage(ciImage))
-                        }
-                    #elseif canImport(AppKit)
-                        if let nsImage = AppKit.NSImage(data: data),
-                            let cgImage = nsImage.cgImage(forProposedRect: nil, context: nil, hints: nil)
-                        {
-                            let ciImage = CIImage(cgImage: cgImage)
-                            images.append(.ciImage(ciImage))
-                        }
-                    #endif
-                }
-            }
-        }
-
-        let content = textParts.joined(separator: "\n")
-        return MLXLMCommon.Chat.Message(role: .system, content: content, images: images)
+        return MLXLMCommon.Chat.Message(role: role, content: content, images: images)
     }
 
     // MARK: - Tool Conversion
