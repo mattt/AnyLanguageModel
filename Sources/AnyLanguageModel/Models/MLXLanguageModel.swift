@@ -199,7 +199,6 @@ import Foundation
 
     // MARK: - Transcript Conversion
 
-    /// Converts the full session transcript into MLX chat messages.
     private func convertTranscriptToMLXChat(
         session: LanguageModelSession,
         fallbackPrompt: String
@@ -230,7 +229,7 @@ import Foundation
                 chat.append(makeMLXChatMessage(from: prompt.segments, role: .user))
 
             case .response(let response):
-                let content = response.segments.map { segmentToText($0) }.joined(separator: "\n")
+                let content = response.segments.map { extractText(from: $0) }.joined(separator: "\n")
                 chat.append(.assistant(content))
 
             case .toolCalls:
@@ -238,7 +237,7 @@ import Foundation
                 break
 
             case .toolOutput(let toolOutput):
-                let content = toolOutput.segments.map { segmentToText($0) }.joined(separator: "\n")
+                let content = toolOutput.segments.map { extractText(from: $0) }.joined(separator: "\n")
                 chat.append(.tool(content))
             }
         }
@@ -252,8 +251,7 @@ import Foundation
         return chat
     }
 
-    /// Extracts text content from a transcript segment.
-    private func segmentToText(_ segment: Transcript.Segment) -> String {
+    private func extractText(from segment: Transcript.Segment) -> String {
         switch segment {
         case .text(let text):
             return text.content
@@ -273,10 +271,6 @@ import Foundation
 
         for segment in segments {
             switch segment {
-            case .text(let text):
-                textParts.append(text.content)
-            case .structure(let structured):
-                textParts.append(structured.content.jsonString)
             case .image(let imageSegment):
                 switch imageSegment.source {
                 case .url(let url):
@@ -296,6 +290,11 @@ import Foundation
                             images.append(.ciImage(ciImage))
                         }
                     #endif
+                }
+            default:
+                let text = extractText(from: segment)
+                if !text.isEmpty {
+                    textParts.append(text)
                 }
             }
         }
