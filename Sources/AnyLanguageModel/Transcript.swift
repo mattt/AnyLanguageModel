@@ -387,7 +387,8 @@ public struct Transcript: Sendable, Equatable, Codable {
         /// A description of how and when to use the tool.
         public var description: String
 
-        private let parameters: GenerationSchema
+        /// The schema describing the tool's parameters.
+        internal let parameters: GenerationSchema
 
         public init(name: String, description: String, parameters: GenerationSchema) {
             self.name = name
