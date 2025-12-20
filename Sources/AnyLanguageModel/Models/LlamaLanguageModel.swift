@@ -924,6 +924,7 @@ import Foundation
 
             var position: Int32
             var remainingTokens: Int
+            let totalTokenBudget: Int
 
             let quoteToken: llama_token
             let digitOnlyTokens: Set<llama_token>
@@ -949,6 +950,7 @@ import Foundation
                 self.batch = batch
                 self.position = initialPosition
                 self.remainingTokens = maximumTokens
+                self.totalTokenBudget = maximumTokens
                 self.schema = schema
 
                 guard let quoteToken = try StructuredJSONGenerator.tokenizeFragment(vocab: vocab, "\"").first else {
@@ -1063,6 +1065,11 @@ import Foundation
                 return sampled
             }
 
+            private func maxTokenCountForFreeString() -> Int {
+                let perStringLimit = max(32, totalTokenBudget / 4)
+                return min(remainingTokens, perStringLimit)
+            }
+
             private mutating func generateFreeString(maxTokens: Int) throws -> String {
                 var result = ""
                 var generatedTokens = 0
@@ -1174,7 +1181,7 @@ import Foundation
                     if let enumChoices = stringNode.enumChoices, !enumChoices.isEmpty {
                         output += try generateLiteralChoice(enumChoices)
                     } else {
-                        output += try generateFreeString(maxTokens: 12)
+                        output += try generateFreeString(maxTokens: maxTokenCountForFreeString())
                     }
                     output += try emitLiteral("\"")
                     return output
