@@ -160,6 +160,16 @@ public struct GenerationSchema: Sendable, Codable, CustomDebugStringConvertible 
                 )
             }
         }
+
+        var nodeDescription: String? {
+            switch self {
+            case .object(let node): node.description
+            case .array(let node): node.description
+            case .string(let node): node.description
+            case .number(let node): node.description
+            case .boolean, .anyOf, .ref: nil
+            }
+        }
     }
 
     struct ObjectNode: Sendable, Codable {
@@ -703,6 +713,13 @@ extension GenerationSchema {
             } else {
                 // Complex type - use its schema
                 let schema = Value.generationSchema
+
+                // Arrays should be inlined, not referenced
+                if case .array(var arrayNode) = schema.root {
+                    arrayNode.description = description
+                    return (.array(arrayNode), schema.defs)
+                }
+
                 let typeName = String(reflecting: Value.self)
 
                 var deps = schema.defs
