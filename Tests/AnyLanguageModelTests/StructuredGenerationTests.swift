@@ -162,12 +162,9 @@ private func testAllModels(_ test: (SupportedModel) async throws -> Void) async 
     var failures: [(name: String, error: any Error)] = []
 
     for model in supportedModels {
-        print("Testing: \(model.name)")
         do {
             try await test(model)
-            print("  ✓ \(model.name) passed")
         } catch {
-            print("  ✗ \(model.name) failed: \(error)")
             failures.append((model.name, error))
         }
     }
