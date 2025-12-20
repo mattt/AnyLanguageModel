@@ -478,14 +478,8 @@ import Foundation
             includeSchemaInPrompt: Bool,
             options: GenerationOptions
         ) async throws -> LanguageModelSession.Response<Content> where Content: Generable {
-            // For now, only String is supported
-            guard type == String.self else {
-                fatalError("LlamaLanguageModel only supports generating String content")
-            }
-
             // Validate that no image segments are present
             try validateNoImageSegments(in: session)
-
             try await ensureModelLoaded()
 
             let runtimeOptions = resolvedOptions(from: options)
@@ -495,7 +489,6 @@ import Foundation
             guard let context = llama_init_from_model(model!, contextParams) else {
                 throw LlamaLanguageModelError.contextInitializationFailed
             }
-
             defer { llama_free(context) }
 
             // Check if this is an embedding model (no KV cache).
@@ -510,22 +503,44 @@ import Foundation
             llama_set_warmup(context, false)
             llama_set_n_threads(context, runtimeOptions.threads, runtimeOptions.threads)
 
-            let maxTokens = runtimeOptions.maximumResponseTokens ?? 100
             let fullPrompt = try formatPrompt(for: session)
 
-            let text = try await generateText(
-                context: context,
-                model: model!,
-                prompt: fullPrompt,
-                maxTokens: maxTokens,
-                options: runtimeOptions
-            )
+            if type == String.self {
+                let maxTokens = runtimeOptions.maximumResponseTokens ?? 100
+                let text = try await generateText(
+                    context: context,
+                    model: model!,
+                    prompt: fullPrompt,
+                    maxTokens: maxTokens,
+                    options: runtimeOptions
+                )
 
-            return LanguageModelSession.Response(
-                content: text as! Content,
-                rawContent: GeneratedContent(text),
-                transcriptEntries: ArraySlice([])
-            )
+                return LanguageModelSession.Response(
+                    content: text as! Content,
+                    rawContent: GeneratedContent(text),
+                    transcriptEntries: ArraySlice([])
+                )
+            } else {
+                let maxTokens = runtimeOptions.maximumResponseTokens ?? 512
+                let schema = type.generationSchema
+                let jsonString = try await generateStructuredJSON(
+                    context: context,
+                    model: model!,
+                    prompt: fullPrompt,
+                    schema: schema,
+                    maxTokens: maxTokens,
+                    options: runtimeOptions
+                )
+
+                let generatedContent = try GeneratedContent(json: jsonString)
+                let content = try type.init(generatedContent)
+
+                return LanguageModelSession.Response(
+                    content: content,
+                    rawContent: generatedContent,
+                    transcriptEntries: ArraySlice([])
+                )
+            }
         }
 
         public func streamResponse<Content>(
@@ -838,6 +853,354 @@ import Foundation
             }
 
             return generatedText
+        }
+
+        // MARK: - Structured JSON Generation (logit constrained)
+
+        private func generateStructuredJSON(
+            context: OpaquePointer,
+            model: OpaquePointer,
+            prompt: String,
+            schema: GenerationSchema,
+            maxTokens: Int,
+            options: ResolvedGenerationOptions
+        ) async throws -> String {
+            guard let vocab = llama_model_get_vocab(model) else {
+                throw LlamaLanguageModelError.contextInitializationFailed
+            }
+
+            let promptTokens = try tokenizeText(vocab: vocab, text: prompt)
+            guard !promptTokens.isEmpty else {
+                throw LlamaLanguageModelError.tokenizationFailed
+            }
+
+            var batch = llama_batch_init(Int32(options.batchSize), 0, 1)
+            defer { llama_batch_free(batch) }
+
+            let hasEncoder = try prepareInitialBatch(
+                batch: &batch,
+                promptTokens: promptTokens,
+                model: model,
+                vocab: vocab,
+                context: context,
+                batchSize: options.batchSize
+            )
+
+            guard let sampler = llama_sampler_chain_init(llama_sampler_chain_default_params()) else {
+                throw LlamaLanguageModelError.decodingFailed
+            }
+            defer { llama_sampler_free(sampler) }
+            let samplerPointer = UnsafeMutablePointer<llama_sampler>(sampler)
+
+            applySampling(sampler: samplerPointer, effectiveTemperature: options.temperature, options: options)
+
+            let vocabSize = Int(llama_vocab_n_tokens(vocab))
+            let initialPosition: Int32 = hasEncoder ? 1 : batch.n_tokens
+
+            return try withUnsafeMutablePointer(to: &batch) { batchPointer in
+                let generator = try StructuredJSONGenerator(
+                    context: context,
+                    vocab: vocab,
+                    vocabSize: vocabSize,
+                    sampler: samplerPointer,
+                    tokenToText: { token in self.tokenToText(vocab: vocab, token: token) },
+                    batch: batchPointer,
+                    initialPosition: initialPosition,
+                    maximumTokens: maxTokens,
+                    schema: schema
+                )
+                return try generator.generate()
+            }
+        }
+
+        private struct StructuredJSONGenerator {
+            let context: OpaquePointer
+            let vocab: OpaquePointer
+            let vocabSize: Int
+            let sampler: UnsafeMutablePointer<llama_sampler>
+            let tokenToText: (llama_token) -> String?
+            let batch: UnsafeMutablePointer<llama_batch>
+            let schema: GenerationSchema
+
+            var position: Int32
+            var remainingTokens: Int
+
+            let quoteToken: llama_token
+            let digitOnlyTokens: Set<llama_token>
+            let validStringTokens: Set<llama_token>
+            let validStringTokensOrQuote: Set<llama_token>
+
+            init(
+                context: OpaquePointer,
+                vocab: OpaquePointer,
+                vocabSize: Int,
+                sampler: UnsafeMutablePointer<llama_sampler>,
+                tokenToText: @escaping (llama_token) -> String?,
+                batch: UnsafeMutablePointer<llama_batch>,
+                initialPosition: Int32,
+                maximumTokens: Int,
+                schema: GenerationSchema
+            ) throws {
+                self.context = context
+                self.vocab = vocab
+                self.vocabSize = vocabSize
+                self.sampler = sampler
+                self.tokenToText = tokenToText
+                self.batch = batch
+                self.position = initialPosition
+                self.remainingTokens = maximumTokens
+                self.schema = schema
+
+                guard let quoteToken = try StructuredJSONGenerator.tokenizeFragment(vocab: vocab, "\"").first else {
+                    throw LlamaLanguageModelError.tokenizationFailed
+                }
+                self.quoteToken = quoteToken
+                self.digitOnlyTokens = StructuredJSONGenerator.buildDigitOnlyTokens(vocabSize: vocabSize, tokenToText: tokenToText)
+                self.validStringTokens = StructuredJSONGenerator.buildValidJSONStringContentTokens(
+                    vocabSize: vocabSize,
+                    tokenToText: tokenToText
+                )
+                var tokensOrQuote = self.validStringTokens
+                tokensOrQuote.insert(quoteToken)
+                self.validStringTokensOrQuote = tokensOrQuote
+            }
+
+            func generate() throws -> String {
+                var generator = self
+                return try generator.generateNode(schema.root)
+            }
+
+            private static func buildDigitOnlyTokens(
+                vocabSize: Int,
+                tokenToText: (llama_token) -> String?
+            ) -> Set<llama_token> {
+                Set((0 ..< vocabSize).compactMap { tokenIndex in
+                    let token = llama_token(tokenIndex)
+                    guard let text = tokenToText(token), !text.isEmpty else { return nil }
+                    return text.allSatisfy({ $0.isNumber }) ? token : nil
+                })
+            }
+
+            private static func buildValidJSONStringContentTokens(
+                vocabSize: Int,
+                tokenToText: (llama_token) -> String?
+            ) -> Set<llama_token> {
+                var allowed = Set<llama_token>()
+                allowed.reserveCapacity(vocabSize / 4)
+
+                for tokenIndex in 0 ..< vocabSize {
+                    let token = llama_token(tokenIndex)
+                    guard let text = tokenToText(token), !text.isEmpty else { continue }
+                    if text.contains("\"") { continue }
+                    if text.contains("\\") { continue }
+                    if text.unicodeScalars.contains(where: { $0.value < 0x20 }) { continue }
+                    allowed.insert(token)
+                }
+                return allowed
+            }
+
+            private static func tokenizeFragment(vocab: OpaquePointer, _ text: String) throws -> [llama_token] {
+                let utf8Count = text.utf8.count
+                let capacity = Int32(max(utf8Count * 2, 8))
+                let tokens = UnsafeMutablePointer<llama_token>.allocate(capacity: Int(capacity))
+                defer { tokens.deallocate() }
+
+                let tokenCount = llama_tokenize(
+                    vocab,
+                    text,
+                    Int32(utf8Count),
+                    tokens,
+                    capacity,
+                    false,
+                    false
+                )
+                guard tokenCount > 0 else { return [] }
+                return Array(UnsafeBufferPointer(start: tokens, count: Int(tokenCount)))
+            }
+
+            private mutating func decodeToken(_ token: llama_token) throws {
+                batch.pointee.n_tokens = 1
+                batch.pointee.token[0] = token
+                batch.pointee.pos[0] = position
+                batch.pointee.n_seq_id[0] = 1
+                if let seqIds = batch.pointee.seq_id, let seqId = seqIds[0] {
+                    seqId[0] = 0
+                }
+                batch.pointee.logits[0] = 1
+
+                position += 1
+                remainingTokens -= 1
+
+                let decodeResult = llama_decode(context, batch.pointee)
+                guard decodeResult == 0 else {
+                    throw LlamaLanguageModelError.decodingFailed
+                }
+            }
+
+            private mutating func emitLiteral(_ text: String) throws -> String {
+                for token in try StructuredJSONGenerator.tokenizeFragment(vocab: vocab, text) {
+                    guard remainingTokens > 0 else { throw LlamaLanguageModelError.decodingFailed }
+                    try decodeToken(token)
+                }
+                return text
+            }
+
+            private mutating func sampleToken(allowedTokens: Set<llama_token>) -> llama_token {
+                guard let logits = llama_get_logits(context) else {
+                    return llama_vocab_eos(vocab)
+                }
+
+                for tokenIndex in 0 ..< vocabSize {
+                    let token = llama_token(tokenIndex)
+                    if !allowedTokens.contains(token) {
+                        logits[tokenIndex] = -Float.infinity
+                    }
+                }
+
+                let tokenIndex = batch.pointee.n_tokens - 1
+                let sampled = llama_sampler_sample(sampler, context, tokenIndex)
+                llama_sampler_accept(sampler, sampled)
+                return sampled
+            }
+
+            private mutating func generateFreeString(maxTokens: Int) throws -> String {
+                var result = ""
+                var generatedTokens = 0
+
+                while remainingTokens > 0, generatedTokens < maxTokens {
+                    let allowedTokens = result.isEmpty ? validStringTokens : validStringTokensOrQuote
+                    let token = sampleToken(allowedTokens: allowedTokens)
+                    if token == quoteToken { break }
+
+                    result += tokenToText(token) ?? ""
+                    generatedTokens += 1
+                    try decodeToken(token)
+                }
+
+                return result
+            }
+
+            private mutating func generateLiteralChoice(_ candidates: [String]) throws -> String {
+                let tokenizedCandidates = try candidates.map { try StructuredJSONGenerator.tokenizeFragment(vocab: vocab, $0) }
+                    .filter { !$0.isEmpty }
+                guard !tokenizedCandidates.isEmpty else { throw LlamaLanguageModelError.tokenizationFailed }
+
+                var prefixes = tokenizedCandidates
+                var emitted = ""
+                var tokenPosition = 0
+
+                while remainingTokens > 0 {
+                    if prefixes.contains(where: { $0.count == tokenPosition }) { break }
+
+                    let allowed = Set(prefixes.compactMap { tokens -> llama_token? in
+                        guard tokenPosition < tokens.count else { return nil }
+                        return tokens[tokenPosition]
+                    })
+
+                    let nextToken = sampleToken(allowedTokens: allowed)
+                    emitted += tokenToText(nextToken) ?? ""
+                    try decodeToken(nextToken)
+
+                    prefixes = prefixes.filter { tokens in
+                        tokenPosition < tokens.count && tokens[tokenPosition] == nextToken
+                    }
+                    tokenPosition += 1
+                    if prefixes.isEmpty { break }
+                }
+
+                return emitted
+            }
+
+            private mutating func generateNumber(isInteger: Bool) throws -> String {
+                let maxTokens = isInteger ? 3 : 4
+                var generated = ""
+
+                for _ in 0 ..< maxTokens {
+                    guard remainingTokens > 0 else { break }
+                    let token = sampleToken(allowedTokens: digitOnlyTokens)
+                    generated += tokenToText(token) ?? ""
+                    try decodeToken(token)
+                    if !generated.isEmpty { break }
+                }
+
+                return generated.isEmpty ? "0" : generated
+            }
+
+            private mutating func generateArray(_ arrayNode: GenerationSchema.ArrayNode) throws -> String {
+                let elementCount = arrayNode.minItems ?? arrayNode.maxItems ?? 4
+                var output = try emitLiteral("[")
+
+                for index in 0 ..< elementCount {
+                    output += try generateNode(arrayNode.items)
+                    if index < elementCount - 1 {
+                        output += try emitLiteral(",")
+                    }
+                }
+
+                output += try emitLiteral("]")
+                return output
+            }
+
+            private mutating func generateObject(_ objectNode: GenerationSchema.ObjectNode) throws -> String {
+                let keys = objectNode.properties.keys.sorted()
+                var output = try emitLiteral("{")
+
+                for (index, key) in keys.enumerated() {
+                    output += try emitLiteral("\"")
+                    output += try emitLiteral(key)
+                    output += try emitLiteral("\":")
+
+                    if let propertyNode = objectNode.properties[key] {
+                        output += try generateNode(propertyNode)
+                    } else {
+                        output += try emitLiteral("null")
+                    }
+
+                    if index < keys.count - 1 {
+                        output += try emitLiteral(",")
+                    }
+                }
+
+                output += try emitLiteral("}")
+                return output
+            }
+
+            private mutating func generateNode(_ node: GenerationSchema.Node) throws -> String {
+                guard remainingTokens > 0 else { throw LlamaLanguageModelError.decodingFailed }
+
+                switch node {
+                case .string(let stringNode):
+                    var output = try emitLiteral("\"")
+                    if let enumChoices = stringNode.enumChoices, !enumChoices.isEmpty {
+                        output += try generateLiteralChoice(enumChoices)
+                    } else {
+                        output += try generateFreeString(maxTokens: 12)
+                    }
+                    output += try emitLiteral("\"")
+                    return output
+
+                case .number(let numberNode):
+                    return try generateNumber(isInteger: numberNode.integerOnly)
+
+                case .boolean:
+                    return try generateLiteralChoice(["true", "false"])
+
+                case .array(let arrayNode):
+                    return try generateArray(arrayNode)
+
+                case .object(let objectNode):
+                    return try generateObject(objectNode)
+
+                case .anyOf(let nodes):
+                    // Pick the first option deterministically (schema-driven).
+                    guard let first = nodes.first else { throw LlamaLanguageModelError.decodingFailed }
+                    return try generateNode(first)
+
+                case .ref(let refName):
+                    guard let referenced = schema.defs[refName] else { throw LlamaLanguageModelError.decodingFailed }
+                    return try generateNode(referenced)
+                }
+            }
         }
 
         private func generateTextStream(
