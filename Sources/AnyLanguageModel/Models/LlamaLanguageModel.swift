@@ -503,7 +503,15 @@ import Foundation
             llama_set_warmup(context, false)
             llama_set_n_threads(context, runtimeOptions.threads, runtimeOptions.threads)
 
-            let fullPrompt = try formatPrompt(for: session)
+            let fullPrompt: String
+            if includeSchemaInPrompt, type != String.self {
+                fullPrompt = try formatPrompt(
+                    for: session,
+                    extraSystemMessage: type.generationSchema.schemaPrompt()
+                )
+            } else {
+                fullPrompt = try formatPrompt(for: session)
+            }
 
             if type == String.self {
                 let maxTokens = runtimeOptions.maximumResponseTokens ?? 100
@@ -892,7 +900,19 @@ import Foundation
             defer { llama_sampler_free(sampler) }
             let samplerPointer = UnsafeMutablePointer<llama_sampler>(sampler)
 
-            applySampling(sampler: samplerPointer, effectiveTemperature: options.temperature, options: options)
+            let effectiveTemperature: Float = 0.2
+            if options.repeatPenalty != 1.0 || options.frequencyPenalty != 0.0 || options.presencePenalty != 0.0 {
+                llama_sampler_chain_add(
+                    samplerPointer,
+                    llama_sampler_init_penalties(
+                        options.repeatLastN,
+                        options.repeatPenalty,
+                        options.frequencyPenalty,
+                        options.presencePenalty
+                    )
+                )
+            }
+            applySampling(sampler: samplerPointer, effectiveTemperature: effectiveTemperature, options: options)
 
             let vocabSize = Int(llama_vocab_n_tokens(vocab))
             let initialPosition: Int32 = hasEncoder ? 1 : batch.n_tokens
@@ -927,6 +947,7 @@ import Foundation
             let totalTokenBudget: Int
 
             let quoteToken: llama_token
+            let eosToken: llama_token
             let digitOnlyTokens: Set<llama_token>
             let validStringTokens: Set<llama_token>
             let validStringTokensOrQuote: Set<llama_token>
@@ -957,13 +978,16 @@ import Foundation
                     throw LlamaLanguageModelError.tokenizationFailed
                 }
                 self.quoteToken = quoteToken
+                self.eosToken = llama_vocab_eos(vocab)
+
                 self.digitOnlyTokens = StructuredJSONGenerator.buildDigitOnlyTokens(vocabSize: vocabSize, tokenToText: tokenToText)
                 self.validStringTokens = StructuredJSONGenerator.buildValidJSONStringContentTokens(
                     vocabSize: vocabSize,
                     tokenToText: tokenToText
                 )
-                var tokensOrQuote = self.validStringTokens
+                var tokensOrQuote = validStringTokens
                 tokensOrQuote.insert(quoteToken)
+                tokensOrQuote.insert(eosToken)
                 self.validStringTokensOrQuote = tokensOrQuote
             }
 
@@ -993,10 +1017,9 @@ import Foundation
                 for tokenIndex in 0 ..< vocabSize {
                     let token = llama_token(tokenIndex)
                     guard let text = tokenToText(token), !text.isEmpty else { continue }
-                    if text.contains("\"") { continue }
-                    if text.contains("\\") { continue }
-                    if text.unicodeScalars.contains(where: { $0.value < 0x20 }) { continue }
-                    allowed.insert(token)
+                    if text.allSatisfy({ $0.isValidJSONStringCharacter }) {
+                        allowed.insert(token)
+                    }
                 }
                 return allowed
             }
@@ -1037,6 +1060,9 @@ import Foundation
                 guard decodeResult == 0 else {
                     throw LlamaLanguageModelError.decodingFailed
                 }
+
+                // Keep sampler state aligned with the actual context tokens.
+                llama_sampler_accept(sampler, token)
             }
 
             private mutating func emitLiteral(_ text: String) throws -> String {
@@ -1060,9 +1086,7 @@ import Foundation
                 }
 
                 let tokenIndex = batch.pointee.n_tokens - 1
-                let sampled = llama_sampler_sample(sampler, context, tokenIndex)
-                llama_sampler_accept(sampler, sampled)
-                return sampled
+                return llama_sampler_sample(sampler, context, tokenIndex)
             }
 
             private func maxTokenCountForFreeString() -> Int {
@@ -1077,7 +1101,7 @@ import Foundation
                 while remainingTokens > 0, generatedTokens < maxTokens {
                     let allowedTokens = result.isEmpty ? validStringTokens : validStringTokensOrQuote
                     let token = sampleToken(allowedTokens: allowedTokens)
-                    if token == quoteToken { break }
+                    if token == quoteToken || token == eosToken { break }
 
                     result += tokenToText(token) ?? ""
                     generatedTokens += 1
@@ -1452,7 +1476,10 @@ import Foundation
             return hasEncoder
         }
 
-        private func formatPrompt(for session: LanguageModelSession) throws -> String {
+        private func formatPrompt(
+            for session: LanguageModelSession,
+            extraSystemMessage: String? = nil
+        ) throws -> String {
             guard let model = self.model else {
                 throw LlamaLanguageModelError.modelLoadFailed
             }
@@ -1482,6 +1509,10 @@ import Foundation
                 default:
                     break
                 }
+            }
+
+            if let extraSystemMessage, !extraSystemMessage.isEmpty {
+                messages.append(("system", extraSystemMessage))
             }
 
             // Keep C strings alive while using them
