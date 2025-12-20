@@ -200,12 +200,14 @@ import Foundation
             let context = try await loadContext(modelId: modelId, hub: hub, directory: directory)
 
             if type != String.self {
+                let schema = type.generationSchema
                 let jsonString = try await generateStructuredJSON(
                     session: session,
                     prompt: prompt,
                     context: context,
                     options: options,
-                    schema: type.generationSchema
+                    schema: schema,
+                    includeSchemaInPrompt: includeSchemaInPrompt
                 )
 
                 let generatedContent = try GeneratedContent(json: jsonString)
@@ -386,6 +388,20 @@ import Foundation
             topP: 1.0,
             repetitionPenalty: nil,
             repetitionContextSize: 20
+        )
+    }
+
+    private func toStructuredGenerateParameters(_ options: GenerationOptions) -> MLXLMCommon.GenerateParameters {
+        MLXLMCommon.GenerateParameters(
+            maxTokens: options.maximumResponseTokens,
+            maxKVSize: nil,
+            kvBits: nil,
+            kvGroupSize: 64,
+            quantizedKVStart: 0,
+            temperature: 0.2,
+            topP: 0.95,
+            repetitionPenalty: 1.1,
+            repetitionContextSize: 64
         )
     }
 
@@ -650,7 +666,7 @@ import Foundation
         return textParts.joined(separator: "\n")
     }
 
-    // MARK: - Structured JSON Generation (logit constrained)
+    // MARK: - Structured JSON Generation
 
     private enum StructuredGenerationError: Error {
         case missingTokenizer
@@ -666,12 +682,16 @@ import Foundation
         prompt: Prompt,
         context: ModelContext,
         options: GenerationOptions,
-        schema: GenerationSchema
+        schema: GenerationSchema,
+        includeSchemaInPrompt: Bool
     ) async throws -> String {
         let structuredMaxTokens = options.maximumResponseTokens ?? 512
-        let generateParameters = toGenerateParameters(options)
+        let generateParameters = toStructuredGenerateParameters(options)
 
-        let chat = convertTranscriptToMLXChat(session: session, fallbackPrompt: prompt.description)
+        var chat = convertTranscriptToMLXChat(session: session, fallbackPrompt: prompt.description)
+        if includeSchemaInPrompt {
+            chat.insert(.init(role: .system, content: schema.schemaPrompt()), at: 0)
+        }
         let userInput = MLXLMCommon.UserInput(
             chat: chat,
             processing: .init(resize: .init(width: 512, height: 512)),
@@ -687,6 +707,7 @@ import Foundation
         )
 
         let vocabSize = decoder.vocabSize
+        let eosToken = context.tokenizer.eosTokenId ?? -1
         var generator = try StructuredJSONGenerator(
             schema: schema,
             tokenizeFragment: { fragment in
@@ -702,7 +723,8 @@ import Foundation
                 try decoder.sampleToken(allowedTokens: allowedTokens)
             },
             maximumTokens: structuredMaxTokens,
-            vocabSize: vocabSize
+            vocabSize: vocabSize,
+            eosToken: eosToken
         )
 
         let json = try generator.generate()
@@ -807,10 +829,10 @@ import Foundation
         var remainingTokens: Int
         let totalTokenBudget: Int
 
-        let quoteToken: Int
         let digitOnlyTokens: Set<Int>
         let validStringTokens: Set<Int>
-        let validStringTokensOrQuote: Set<Int>
+        let stringTerminators: Set<Int>
+        let validStringTokensOrTerminators: Set<Int>
 
         init(
             schema: GenerationSchema,
@@ -819,7 +841,8 @@ import Foundation
             decodeToken: @escaping (Int) throws -> Void,
             sampleToken: @escaping (Set<Int>) throws -> Int,
             maximumTokens: Int,
-            vocabSize: Int
+            vocabSize: Int,
+            eosToken: Int
         ) throws {
             self.schema = schema
             self.tokenizeFragment = tokenizeFragment
@@ -829,11 +852,15 @@ import Foundation
             self.remainingTokens = maximumTokens
             self.totalTokenBudget = maximumTokens
 
+            // String terminators: EOS + dumb quote (")
+            var terminators = Set<Int>()
+            if eosToken >= 0 { terminators.insert(eosToken) }
             let quoteTokens = try tokenizeFragment("\"")
             guard quoteTokens.count == 1, let quoteToken = quoteTokens.first else {
                 throw StructuredGenerationError.invalidQuoteToken
             }
-            self.quoteToken = quoteToken
+            terminators.insert(quoteToken)
+            self.stringTerminators = terminators
 
             self.digitOnlyTokens = StructuredJSONGenerator.buildDigitOnlyTokens(
                 vocabSize: vocabSize,
@@ -843,9 +870,7 @@ import Foundation
                 vocabSize: vocabSize,
                 tokenText: tokenText
             )
-            var tokensOrQuote = self.validStringTokens
-            tokensOrQuote.insert(quoteToken)
-            self.validStringTokensOrQuote = tokensOrQuote
+            self.validStringTokensOrTerminators = validStringTokens.union(stringTerminators)
         }
 
         mutating func generate() throws -> String {
@@ -878,10 +903,9 @@ import Foundation
             for tokenId in 0 ..< vocabSize {
                 let text = tokenText(tokenId)
                 guard !text.isEmpty else { continue }
-                if text.contains("\"") { continue }
-                if text.contains("\\") { continue }
-                if text.unicodeScalars.contains(where: { $0.value < 0x20 }) { continue }
-                allowed.insert(tokenId)
+                if text.allSatisfy({ $0.isValidJSONStringCharacter }) {
+                    allowed.insert(tokenId)
+                }
             }
             return allowed
         }
@@ -900,9 +924,9 @@ import Foundation
             var generatedTokens = 0
 
             while remainingTokens > 0, generatedTokens < maxTokens {
-                let allowedTokens = result.isEmpty ? validStringTokens : validStringTokensOrQuote
+                let allowedTokens = result.isEmpty ? validStringTokens : validStringTokensOrTerminators
                 let token = try sampleToken(allowedTokens)
-                if token == quoteToken { break }
+                if stringTerminators.contains(token) { break }
 
                 result += tokenText(token)
                 generatedTokens += 1

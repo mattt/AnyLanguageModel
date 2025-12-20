@@ -71,6 +71,18 @@ struct Address: Equatable {
 }
 
 @Generable
+struct ReusedNestedStruct: Equatable {
+    @Guide(description: "Some text")
+    var text: String
+}
+
+@Generable
+struct ContainerWithDuplicateNestedType: Equatable {
+    var first: ReusedNestedStruct
+    var second: ReusedNestedStruct
+}
+
+@Generable
 struct Person: Equatable {
     @Guide(description: "Person's name")
     var name: String
@@ -158,6 +170,14 @@ private func isGenerationTestsEnabled() -> Bool {
     !supportedModels.isEmpty
 }
 
+@Test("GenerationSchema merges duplicate defs for the same type")
+func generationSchemaMergesDuplicateDefsForSameType() {
+    let schema = ContainerWithDuplicateNestedType.generationSchema
+
+    let nestedTypeName = String(reflecting: ReusedNestedStruct.self)
+    #expect(schema.defs[nestedTypeName] != nil)
+}
+
 private func testAllModels(_ test: (SupportedModel) async throws -> Void) async {
     var failures: [(name: String, error: any Error)] = []
 
@@ -171,6 +191,19 @@ private func testAllModels(_ test: (SupportedModel) async throws -> Void) async 
 
     for failure in failures {
         Issue.record("[\(failure.name)] \(failure.error)")
+    }
+}
+
+private func logGenerated<T: Generable>(_ content: T, model: String) {
+    let json = content.generatedContent.jsonString
+    if let data = json.data(using: .utf8),
+       let object = try? JSONSerialization.jsonObject(with: data),
+       let prettyData = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]),
+       let prettyJSON = String(data: prettyData, encoding: .utf8)
+    {
+        print("\n[\(model)]\n\(prettyJSON)\n")
+    } else {
+        print("\n[\(model)]\n\(json)\n")
     }
 }
 
@@ -189,6 +222,7 @@ struct StructuredGenerationTests {
                 generating: SimpleString.self
             )
 
+            logGenerated(response.content, model: model.name)
             #expect(!response.content.message.isEmpty, "[\(model.name)] message should not be empty")
         }
     }
@@ -206,6 +240,7 @@ struct StructuredGenerationTests {
                 generating: SimpleInt.self
             )
 
+            logGenerated(response.content, model: model.name)
             #expect(response.content.count >= 0, "[\(model.name)] count should be non-negative")
         }
     }
@@ -223,6 +258,7 @@ struct StructuredGenerationTests {
                 generating: SimpleDouble.self
             )
 
+            logGenerated(response.content, model: model.name)
             #expect(!response.content.temperature.isNaN, "[\(model.name)] temperature should be a valid number")
         }
     }
@@ -240,6 +276,7 @@ struct StructuredGenerationTests {
                 generating: SimpleBool.self
             )
 
+            logGenerated(response.content, model: model.name)
             let jsonData = response.rawContent.jsonString.data(using: .utf8)
             #expect(jsonData != nil, "[\(model.name)] rawContent should be valid UTF-8 JSON")
             if let jsonData {
@@ -264,6 +301,7 @@ struct StructuredGenerationTests {
                 generating: OptionalFields.self
             )
 
+            logGenerated(response.content, model: model.name)
             #expect(!response.content.name.isEmpty, "[\(model.name)] name should not be empty")
             if let nickname = response.content.nickname {
                 #expect(!nickname.isEmpty, "[\(model.name)] nickname should not be empty when present")
@@ -284,6 +322,7 @@ struct StructuredGenerationTests {
                 generating: Priority.self
             )
 
+            logGenerated(response.content, model: model.name)
             #expect(
                 [Priority.low, Priority.medium, Priority.high].contains(response.content),
                 "[\(model.name)] should generate valid priority"
@@ -304,6 +343,7 @@ struct StructuredGenerationTests {
                 generating: BasicStruct.self
             )
 
+            logGenerated(response.content, model: model.name)
             #expect(!response.content.name.isEmpty, "[\(model.name)] name should not be empty")
             #expect(response.content.age >= 0, "[\(model.name)] age should be non-negative")
         }
@@ -322,6 +362,7 @@ struct StructuredGenerationTests {
                 generating: Person.self
             )
 
+            logGenerated(response.content, model: model.name)
             #expect(!response.content.name.isEmpty, "[\(model.name)] name should not be empty")
             #expect(response.content.age >= 0, "[\(model.name)] age should be non-negative")
             #expect(!response.content.address.street.isEmpty, "[\(model.name)] street should not be empty")
@@ -342,6 +383,7 @@ struct StructuredGenerationTests {
                 generating: TaskItem.self
             )
 
+            logGenerated(response.content, model: model.name)
             #expect(!response.content.title.isEmpty, "[\(model.name)] title should not be empty")
             #expect(
                 [Priority.low, Priority.medium, Priority.high].contains(response.content.priority),
@@ -363,6 +405,7 @@ struct StructuredGenerationTests {
                 generating: SimpleArray.self
             )
 
+            logGenerated(response.content, model: model.name)
             #expect(!response.content.colors.isEmpty, "[\(model.name)] colors should not be empty")
         }
     }
@@ -386,6 +429,7 @@ struct StructuredGenerationTests {
                 generating: MultiChoiceQuestion.self
             )
 
+            logGenerated(response.content, model: model.name)
             #expect(!response.content.text.isEmpty, "[\(model.name)] question text should not be empty")
             #expect(response.content.choices.count == 4, "[\(model.name)] should have exactly 4 choices")
             #expect(!response.content.answer.isEmpty, "[\(model.name)] answer should not be empty")

@@ -514,12 +514,32 @@ public struct GenerationSchema: Sendable, Codable, CustomDebugStringConvertible 
     }
 
     private static func nodesEqual(_ a: Node, _ b: Node) -> Bool {
-        // Simple structural equality - could be enhanced
         switch (a, b) {
         case (.boolean, .boolean):
             return true
         case (.ref(let aName), .ref(let bName)):
             return aName == bName
+        case (.string(let aString), .string(let bString)):
+            return aString.pattern == bString.pattern
+                && aString.enumChoices == bString.enumChoices
+        case (.number(let aNumber), .number(let bNumber)):
+            return aNumber.integerOnly == bNumber.integerOnly
+                && aNumber.minimum == bNumber.minimum
+                && aNumber.maximum == bNumber.maximum
+        case (.array(let aArray), .array(let bArray)):
+            return aArray.minItems == bArray.minItems
+                && aArray.maxItems == bArray.maxItems
+                && nodesEqual(aArray.items, bArray.items)
+        case (.object(let aObject), .object(let bObject)):
+            return aObject.required == bObject.required
+                && aObject.properties.keys == bObject.properties.keys
+                && aObject.properties.allSatisfy { key, aNode in
+                    guard let bNode = bObject.properties[key] else { return false }
+                    return nodesEqual(aNode, bNode)
+                }
+        case (.anyOf(let aNodes), .anyOf(let bNodes)):
+            return aNodes.count == bNodes.count
+                && zip(aNodes, bNodes).allSatisfy(nodesEqual)
         default:
             return false
         }
@@ -817,4 +837,25 @@ extension GenerationSchema {
     /// let data = try encoder.encode(schema)
     /// ```
     static let omitAdditionalPropertiesKey = CodingUserInfoKey(rawValue: "GenerationSchema.omitAdditionalProperties")!
+
+    package func schemaPrompt() -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        guard let data = try? encoder.encode(self),
+              let schemaJSON = String(data: data, encoding: .utf8) else {
+            return "Respond with valid JSON only."
+        }
+        return "Respond with valid JSON matching this schema:\n\(schemaJSON)"
+    }
+}
+
+extension Character {
+    package static let jsonQuoteScalars: Set<UInt32> = [0x22, 0x201C, 0x201D, 0x2018, 0x2019]
+
+    package var isValidJSONStringCharacter: Bool {
+        guard self != "\\" else { return false }
+        guard let scalar = unicodeScalars.first, scalar.value >= 0x20 else { return false }
+        guard !Self.jsonQuoteScalars.contains(scalar.value) else { return false }
+        return true
+    }
 }
