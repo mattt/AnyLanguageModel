@@ -968,20 +968,42 @@ import Foundation
             return emitted
         }
 
-        private mutating func generateNumber(isInteger: Bool) throws -> String {
-            let maxTokens = isInteger ? 3 : 4
-            var generated = ""
-
-            for _ in 0 ..< maxTokens {
-                guard remainingTokens > 0 else { break }
-                let token = try sampleToken(digitOnlyTokens)
-                generated += tokenText(token)
-                try decodeToken(token)
-                remainingTokens -= 1
-                if !generated.isEmpty { break }
+        private mutating func generateNumber(_ numberNode: GenerationSchema.NumberNode) throws -> String {
+            if numberNode.integerOnly {
+                let clamped = clampInteger(defaultValue: 0, minimum: numberNode.minimum, maximum: numberNode.maximum)
+                return try emitLiteral(String(clamped))
             }
 
-            return generated.isEmpty ? "0" : generated
+            let clamped = clampDouble(defaultValue: 0, minimum: numberNode.minimum, maximum: numberNode.maximum)
+            return try emitLiteral(formatNumberLiteral(clamped))
+        }
+
+        private func clampInteger(defaultValue: Int, minimum: Double?, maximum: Double?) -> Int {
+            let clampedMinimum = minimum.map { Int(ceil($0)) }
+            let clampedMaximum = maximum.map { Int(floor($0)) }
+            let normalized = normalizeBounds(minimum: clampedMinimum, maximum: clampedMaximum)
+            return clamp(defaultValue, minimum: normalized.minimum, maximum: normalized.maximum)
+        }
+
+        private func clampDouble(defaultValue: Double, minimum: Double?, maximum: Double?) -> Double {
+            let normalized = normalizeBounds(minimum: minimum, maximum: maximum)
+            return clamp(defaultValue, minimum: normalized.minimum, maximum: normalized.maximum)
+        }
+
+        private func normalizeBounds<T: Comparable>(minimum: T?, maximum: T?) -> (minimum: T?, maximum: T?) {
+            guard let minimum, let maximum, minimum > maximum else { return (minimum, maximum) }
+            return (minimum, minimum)
+        }
+
+        private func clamp<T: Comparable>(_ value: T, minimum: T?, maximum: T?) -> T {
+            if let minimum, value < minimum { return minimum }
+            if let maximum, value > maximum { return maximum }
+            return value
+        }
+
+        private func formatNumberLiteral(_ value: Double) -> String {
+            if value.rounded() == value { return String(Int(value)) }
+            return String(value)
         }
 
         private mutating func generateArray(_ arrayNode: GenerationSchema.ArrayNode) throws -> String {
@@ -1038,7 +1060,7 @@ import Foundation
                 return output
 
             case .number(let numberNode):
-                return try generateNumber(isInteger: numberNode.integerOnly)
+                return try generateNumber(numberNode)
 
             case .boolean:
                 return try generateLiteralChoice(["true", "false"])
