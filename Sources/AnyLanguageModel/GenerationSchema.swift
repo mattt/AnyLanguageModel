@@ -723,12 +723,24 @@ extension GenerationSchema {
             } else if type == String.self {
                 return (.string(StringNode(description: description, pattern: nil, enumChoices: nil)), [:])
             } else if type == Int.self {
+                var minimum: Double?
+                var maximum: Double?
+                for guide in guides {
+                    if let min = guide.minimum { minimum = min }
+                    if let max = guide.maximum { maximum = max }
+                }
                 return (
-                    .number(NumberNode(description: description, minimum: nil, maximum: nil, integerOnly: true)), [:]
+                    .number(NumberNode(description: description, minimum: minimum, maximum: maximum, integerOnly: true)), [:]
                 )
             } else if type == Float.self || type == Double.self || type == Decimal.self {
+                var minimum: Double?
+                var maximum: Double?
+                for guide in guides {
+                    if let min = guide.minimum { minimum = min }
+                    if let max = guide.maximum { maximum = max }
+                }
                 return (
-                    .number(NumberNode(description: description, minimum: nil, maximum: nil, integerOnly: false)), [:]
+                    .number(NumberNode(description: description, minimum: minimum, maximum: maximum, integerOnly: false)), [:]
                 )
             } else {
                 // Complex type - use its schema
@@ -737,6 +749,10 @@ extension GenerationSchema {
                 // Arrays should be inlined, not referenced
                 if case .array(var arrayNode) = schema.root {
                     arrayNode.description = description
+                    for guide in guides {
+                        if let min = guide.minimumCount { arrayNode.minItems = min }
+                        if let max = guide.maximumCount { arrayNode.maxItems = max }
+                    }
                     return (.array(arrayNode), schema.defs)
                 }
 
