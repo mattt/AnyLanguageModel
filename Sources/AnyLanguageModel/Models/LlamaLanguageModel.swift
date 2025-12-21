@@ -900,7 +900,6 @@ import Foundation
             defer { llama_sampler_free(sampler) }
             let samplerPointer = UnsafeMutablePointer<llama_sampler>(sampler)
 
-            let effectiveTemperature: Float = 0.2
             if options.repeatPenalty != 1.0 || options.frequencyPenalty != 0.0 || options.presencePenalty != 0.0 {
                 llama_sampler_chain_add(
                     samplerPointer,
@@ -912,7 +911,7 @@ import Foundation
                     )
                 )
             }
-            applySampling(sampler: samplerPointer, effectiveTemperature: effectiveTemperature, options: options)
+            applySampling(sampler: samplerPointer, effectiveTemperature: options.temperature, options: options)
 
             let vocabSize = Int(llama_vocab_n_tokens(vocab))
             let initialPosition: Int32 = hasEncoder ? 1 : batch.n_tokens
