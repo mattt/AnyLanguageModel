@@ -398,7 +398,7 @@ import Foundation
             kvBits: nil,
             kvGroupSize: 64,
             quantizedKVStart: 0,
-            temperature: 0.2,
+            temperature: Float(options.temperature ?? 0.2),
             topP: 0.95,
             repetitionPenalty: 1.1,
             repetitionContextSize: 64
