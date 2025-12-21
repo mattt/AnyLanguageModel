@@ -199,26 +199,22 @@ import Foundation
             // Get cached or load fresh ModelContext
             let context = try await loadContext(modelId: modelId, hub: hub, directory: directory)
 
-            if type != String.self {
-                let schema = type.generationSchema
-                let jsonString = try await generateStructuredJSON(
-                    session: session,
-                    prompt: prompt,
-                    context: context,
-                    options: options,
-                    schema: schema,
-                    includeSchemaInPrompt: includeSchemaInPrompt
-                )
-
-                let generatedContent = try GeneratedContent(json: jsonString)
-                let content = try type.init(generatedContent)
-
-                return LanguageModelSession.Response(
-                    content: content,
-                    rawContent: generatedContent,
-                    transcriptEntries: ArraySlice([])
-                )
-            }
+        if type != String.self {
+            let jsonString = try await generateStructuredJSON(
+                context: context,
+                session: session,
+                prompt: prompt,
+                schema: type.generationSchema,
+                options: options
+            )
+            let generatedContent = try GeneratedContent(json: jsonString)
+            let content = try type.init(generatedContent)
+            return LanguageModelSession.Response(
+                content: content,
+                rawContent: generatedContent,
+                transcriptEntries: ArraySlice([])
+            )
+        }
 
             // Convert session tools to MLX ToolSpec format
             let toolSpecs: [ToolSpec]? =
@@ -580,7 +576,7 @@ import Foundation
             return try convertToSendableJSONObject(dictionaryValue)
         }
 
-        throw StructuredGenerationError.invalidTokenization
+        throw StructuredGenerationError.unsupportedJSONValueType
     }
 
     // MARK: - Tool Invocation Handling
@@ -669,29 +665,22 @@ import Foundation
     // MARK: - Structured JSON Generation
 
     private enum StructuredGenerationError: Error {
-        case missingTokenizer
-        case emptyPrompt
-        case invalidQuoteToken
-        case invalidTokenization
-        case tokenBudgetExceeded
         case invalidVocabSize
+        case unsupportedJSONValueType
     }
 
     private func generateStructuredJSON(
+        context: ModelContext,
         session: LanguageModelSession,
         prompt: Prompt,
-        context: ModelContext,
-        options: GenerationOptions,
         schema: GenerationSchema,
-        includeSchemaInPrompt: Bool
+        options: GenerationOptions
     ) async throws -> String {
-        let structuredMaxTokens = options.maximumResponseTokens ?? 512
+        let maxTokens = options.maximumResponseTokens ?? 512
         let generateParameters = toStructuredGenerateParameters(options)
 
-        var chat = convertTranscriptToMLXChat(session: session, fallbackPrompt: prompt.description)
-        if includeSchemaInPrompt {
-            chat.insert(.init(role: .system, content: schema.schemaPrompt()), at: 0)
-        }
+        let baseChat = convertTranscriptToMLXChat(session: session, fallbackPrompt: prompt.description)
+        let chat = normalizeChatForStructuredGeneration(baseChat, schemaPrompt: schema.schemaPrompt())
         let userInput = MLXLMCommon.UserInput(
             chat: chat,
             processing: .init(resize: .init(width: 512, height: 512)),
@@ -699,48 +688,78 @@ import Foundation
         )
         let lmInput = try await context.processor.prepare(input: userInput)
 
-        var decoder = try MLXTokenDecoder(
+        let backend = try MLXTokenBackend(
             context: context,
             input: lmInput,
             parameters: generateParameters,
-            maximumTokens: structuredMaxTokens
+            maximumTokens: maxTokens
         )
 
-        let vocabSize = decoder.vocabSize
-        let eosToken = context.tokenizer.eosTokenId ?? -1
-        var generator = try StructuredJSONGenerator(
-            schema: schema,
-            tokenizeFragment: { fragment in
-                context.tokenizer.encode(text: fragment, addSpecialTokens: false)
-            },
-            tokenText: { token in
-                context.tokenizer.decode(tokens: [token], skipSpecialTokens: false)
-            },
-            decodeToken: { token in
-                try decoder.decodeToken(token)
-            },
-            sampleToken: { allowedTokens in
-                try decoder.sampleToken(allowedTokens: allowedTokens)
-            },
-            maximumTokens: structuredMaxTokens,
-            vocabSize: vocabSize,
-            eosToken: eosToken
-        )
-
+        var generator = try ConstrainedJSONGenerator(backend: backend, schema: schema)
         let json = try generator.generate()
         Stream().synchronize()
         return json
     }
 
-    private struct MLXTokenDecoder {
+    private func normalizeChatForStructuredGeneration(
+        _ chat: [MLXLMCommon.Chat.Message],
+        schemaPrompt: String
+    ) -> [MLXLMCommon.Chat.Message] {
+        var systemMessageParts: [String] = []
+        systemMessageParts.append(schemaPrompt)
+
+        var messages: [MLXLMCommon.Chat.Message] = []
+        messages.reserveCapacity(chat.count)
+
+        for message in chat {
+            if message.role == .system {
+                systemMessageParts.append(message.content)
+                continue
+            }
+
+            if let last = messages.last, last.role == message.role {
+                let merged = MLXLMCommon.Chat.Message(role: last.role, content: "\(last.content)\n\(message.content)")
+                messages.removeLast()
+                messages.append(merged)
+            } else {
+                messages.append(message)
+            }
+        }
+
+        let systemPrefix = systemMessageParts
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n\n")
+
+        guard !systemPrefix.isEmpty else {
+            return messages
+        }
+
+        if let firstUserIndex = messages.firstIndex(where: { $0.role == .user }) {
+            let existing = messages[firstUserIndex].content
+            messages[firstUserIndex] = MLXLMCommon.Chat.Message(role: .user, content: "\(systemPrefix)\n\n\(existing)")
+            return messages
+        }
+
+        messages.insert(.init(role: .user, content: systemPrefix), at: 0)
+        return messages
+    }
+
+    private struct MLXTokenBackend: TokenBackend {
         let model: any MLXLMCommon.LanguageModel
+        let tokenizer: any Tokenizer
         var state: MLXLMCommon.LMOutput.State?
         var cache: [MLXLMCommon.KVCache]
         var processor: MLXLMCommon.LogitProcessor?
         let sampler: MLXLMCommon.LogitSampler
+        let tokensExcludedFromRepetitionPenalty: Set<Int>
+        let endTokens: Set<Int>
 
         var currentLogits: MLXArray
         let vocabSize: Int
+        let eosToken: Int
+        var remainingTokens: Int
+        let totalTokenBudget: Int
 
         init(
             context: ModelContext,
@@ -749,10 +768,24 @@ import Foundation
             maximumTokens: Int
         ) throws {
             self.model = context.model
+            self.tokenizer = context.tokenizer
             self.state = nil
             self.cache = context.model.newCache(parameters: parameters)
             self.processor = parameters.processor()
             self.sampler = parameters.sampler()
+            self.remainingTokens = maximumTokens
+            self.totalTokenBudget = maximumTokens
+            guard let eosTokenId = context.tokenizer.eosTokenId else {
+                throw StructuredGenerationError.invalidVocabSize
+            }
+            self.eosToken = eosTokenId
+            self.endTokens = Self.buildEndTokens(
+                eosTokenId: eosTokenId,
+                tokenizer: context.tokenizer,
+                configuration: context.configuration
+            )
+            
+            self.tokensExcludedFromRepetitionPenalty = Self.buildTokensExcludedFromRepetitionPenalty(tokenizer: context.tokenizer)
 
             processor?.prompt(input.text.tokens)
 
@@ -786,11 +819,61 @@ import Foundation
             }
         }
 
-        mutating func decodeToken(_ token: Int) throws {
-            let tokenArray = MLXArray(token)
-            processor?.didSample(token: tokenArray)
+        private static func buildEndTokens(
+            eosTokenId: Int,
+            tokenizer: any Tokenizer,
+            configuration: ModelConfiguration
+        ) -> Set<Int> {
+            var tokens: Set<Int> = [eosTokenId]
 
-            let inputText = MLXLMCommon.LMInput.Text(tokens: tokenArray)
+            // If the tokenizer declares an EOS token string, prefer treating its ID as an end token too.
+            // Some chat models use a string EOS marker (e.g. "<end_of_turn>") whose ID may differ from eosTokenId.
+            if let eosString = tokenizer.eosToken, let eosStringId = tokenizer.convertTokenToId(eosString) {
+                tokens.insert(eosStringId)
+            }
+
+            for tokenString in configuration.extraEOSTokens {
+                if let id = tokenizer.convertTokenToId(tokenString) {
+                    tokens.insert(id)
+                }
+            }
+            return tokens
+        }
+
+        func isSpecialToken(_ token: Int) -> Bool {
+            // Use swift-transformers' own special token registry (skipSpecialTokens) instead of guessing.
+            let raw = tokenizer.decode(tokens: [token], skipSpecialTokens: false)
+            guard !raw.isEmpty else { return false }
+            let filtered = tokenizer.decode(tokens: [token], skipSpecialTokens: true)
+            return filtered.isEmpty
+        }
+
+        private static func buildTokensExcludedFromRepetitionPenalty(tokenizer: any Tokenizer) -> Set<Int> {
+            let excludedTexts = ["{", "}", "[", "]", ",", ":", "\""]
+            var excluded = Set<Int>()
+            excluded.reserveCapacity(excludedTexts.count * 2)
+
+            for text in excludedTexts {
+                let tokens = tokenizer.encode(text: text, addSpecialTokens: false)
+                for token in tokens {
+                    excluded.insert(token)
+                }
+            }
+
+            return excluded
+        }
+
+        func tokenize(_ text: String) throws -> [Int] {
+            tokenizer.encode(text: text, addSpecialTokens: false)
+        }
+
+        func tokenText(_ token: Int) -> String? {
+            let decoded = tokenizer.decode(tokens: [token], skipSpecialTokens: false)
+            return decoded.isEmpty ? nil : decoded
+        }
+
+        mutating func decode(_ token: Int) throws {
+            let inputText = MLXLMCommon.LMInput.Text(tokens: MLXArray([Int32(token)]))
             let output = model(
                 inputText[text: .newAxis],
                 cache: cache.isEmpty ? nil : cache,
@@ -798,10 +881,18 @@ import Foundation
             )
             state = output.state
             currentLogits = output.logits
+            remainingTokens -= 1
+
+            if !tokensExcludedFromRepetitionPenalty.contains(token) {
+                let tokenArray = MLXArray(Int32(token))
+                processor?.didSample(token: tokenArray)
+            }
         }
 
-        mutating func sampleToken(allowedTokens: Set<Int>) throws -> Int {
-            guard !allowedTokens.isEmpty else { throw StructuredGenerationError.invalidTokenization }
+        mutating func sample(from allowedTokens: Set<Int>) throws -> Int {
+            guard !allowedTokens.isEmpty else {
+                throw ConstrainedGenerationError.tokenizationFailed
+            }
 
             var logits = currentLogits[0..., -1, 0...]
             logits = processor?.process(logits: logits) ?? logits
@@ -814,271 +905,7 @@ import Foundation
             maskedLogits[0..., allowedIndices] = logits[0..., allowedIndices]
 
             let sampledToken = sampler.sample(logits: maskedLogits)
-            processor?.didSample(token: sampledToken)
             return sampledToken.item(Int.self)
-        }
-    }
-
-    private struct StructuredJSONGenerator {
-        let schema: GenerationSchema
-        let tokenizeFragment: (String) throws -> [Int]
-        let tokenText: (Int) -> String
-        let decodeToken: (Int) throws -> Void
-        let sampleToken: (Set<Int>) throws -> Int
-
-        var remainingTokens: Int
-        let totalTokenBudget: Int
-
-        let digitOnlyTokens: Set<Int>
-        let validStringTokens: Set<Int>
-        let stringTerminators: Set<Int>
-        let validStringTokensOrTerminators: Set<Int>
-
-        init(
-            schema: GenerationSchema,
-            tokenizeFragment: @escaping (String) throws -> [Int],
-            tokenText: @escaping (Int) -> String,
-            decodeToken: @escaping (Int) throws -> Void,
-            sampleToken: @escaping (Set<Int>) throws -> Int,
-            maximumTokens: Int,
-            vocabSize: Int,
-            eosToken: Int
-        ) throws {
-            self.schema = schema
-            self.tokenizeFragment = tokenizeFragment
-            self.tokenText = tokenText
-            self.decodeToken = decodeToken
-            self.sampleToken = sampleToken
-            self.remainingTokens = maximumTokens
-            self.totalTokenBudget = maximumTokens
-
-            // String terminators: EOS + dumb quote (")
-            var terminators = Set<Int>()
-            if eosToken >= 0 { terminators.insert(eosToken) }
-            let quoteTokens = try tokenizeFragment("\"")
-            guard quoteTokens.count == 1, let quoteToken = quoteTokens.first else {
-                throw StructuredGenerationError.invalidQuoteToken
-            }
-            terminators.insert(quoteToken)
-            self.stringTerminators = terminators
-
-            self.digitOnlyTokens = StructuredJSONGenerator.buildDigitOnlyTokens(
-                vocabSize: vocabSize,
-                tokenText: tokenText
-            )
-            self.validStringTokens = StructuredJSONGenerator.buildValidJSONStringContentTokens(
-                vocabSize: vocabSize,
-                tokenText: tokenText
-            )
-            self.validStringTokensOrTerminators = validStringTokens.union(stringTerminators)
-        }
-
-        mutating func generate() throws -> String {
-            try generateNode(schema.root)
-        }
-
-        private func maxTokenCountForFreeString() -> Int {
-            let perStringLimit = max(32, totalTokenBudget / 4)
-            return min(remainingTokens, perStringLimit)
-        }
-
-        private static func buildDigitOnlyTokens(
-            vocabSize: Int,
-            tokenText: (Int) -> String
-        ) -> Set<Int> {
-            Set((0 ..< vocabSize).filter { tokenId in
-                let text = tokenText(tokenId)
-                guard !text.isEmpty else { return false }
-                return text.allSatisfy({ $0.isNumber })
-            })
-        }
-
-        private static func buildValidJSONStringContentTokens(
-            vocabSize: Int,
-            tokenText: (Int) -> String
-        ) -> Set<Int> {
-            var allowed = Set<Int>()
-            allowed.reserveCapacity(vocabSize / 4)
-
-            for tokenId in 0 ..< vocabSize {
-                let text = tokenText(tokenId)
-                guard !text.isEmpty else { continue }
-                if text.allSatisfy({ $0.isValidJSONStringCharacter }) {
-                    allowed.insert(tokenId)
-                }
-            }
-            return allowed
-        }
-
-        private mutating func emitLiteral(_ text: String) throws -> String {
-            for token in try tokenizeFragment(text) {
-                guard remainingTokens > 0 else { throw StructuredGenerationError.tokenBudgetExceeded }
-                try decodeToken(token)
-                remainingTokens -= 1
-            }
-            return text
-        }
-
-        private mutating func generateFreeString(maxTokens: Int) throws -> String {
-            var result = ""
-            var generatedTokens = 0
-
-            while remainingTokens > 0, generatedTokens < maxTokens {
-                let allowedTokens = result.isEmpty ? validStringTokens : validStringTokensOrTerminators
-                let token = try sampleToken(allowedTokens)
-                if stringTerminators.contains(token) { break }
-
-                result += tokenText(token)
-                generatedTokens += 1
-                try decodeToken(token)
-                remainingTokens -= 1
-            }
-
-            return result
-        }
-
-        private mutating func generateLiteralChoice(_ candidates: [String]) throws -> String {
-            let tokenizedCandidates = try candidates.map { try tokenizeFragment($0) }.filter { !$0.isEmpty }
-            guard !tokenizedCandidates.isEmpty else { throw StructuredGenerationError.invalidTokenization }
-
-            var prefixes = tokenizedCandidates
-            var emitted = ""
-            var tokenPosition = 0
-
-            while remainingTokens > 0 {
-                if prefixes.contains(where: { $0.count == tokenPosition }) { break }
-
-                let allowed = Set(prefixes.compactMap { tokens -> Int? in
-                    guard tokenPosition < tokens.count else { return nil }
-                    return tokens[tokenPosition]
-                })
-
-                let nextToken = try sampleToken(allowed)
-                emitted += tokenText(nextToken)
-                try decodeToken(nextToken)
-                remainingTokens -= 1
-
-                prefixes = prefixes.filter { tokens in
-                    tokenPosition < tokens.count && tokens[tokenPosition] == nextToken
-                }
-                tokenPosition += 1
-                if prefixes.isEmpty { break }
-            }
-
-            return emitted
-        }
-
-        private mutating func generateNumber(_ numberNode: GenerationSchema.NumberNode) throws -> String {
-            if numberNode.integerOnly {
-                let clamped = clampInteger(defaultValue: 0, minimum: numberNode.minimum, maximum: numberNode.maximum)
-                return try emitLiteral(String(clamped))
-            }
-
-            let clamped = clampDouble(defaultValue: 0, minimum: numberNode.minimum, maximum: numberNode.maximum)
-            return try emitLiteral(formatNumberLiteral(clamped))
-        }
-
-        private func clampInteger(defaultValue: Int, minimum: Double?, maximum: Double?) -> Int {
-            let clampedMinimum = minimum.map { Int(ceil($0)) }
-            let clampedMaximum = maximum.map { Int(floor($0)) }
-            let normalized = normalizeBounds(minimum: clampedMinimum, maximum: clampedMaximum)
-            return clamp(defaultValue, minimum: normalized.minimum, maximum: normalized.maximum)
-        }
-
-        private func clampDouble(defaultValue: Double, minimum: Double?, maximum: Double?) -> Double {
-            let normalized = normalizeBounds(minimum: minimum, maximum: maximum)
-            return clamp(defaultValue, minimum: normalized.minimum, maximum: normalized.maximum)
-        }
-
-        private func normalizeBounds<T: Comparable>(minimum: T?, maximum: T?) -> (minimum: T?, maximum: T?) {
-            guard let minimum, let maximum, minimum > maximum else { return (minimum, maximum) }
-            return (minimum, minimum)
-        }
-
-        private func clamp<T: Comparable>(_ value: T, minimum: T?, maximum: T?) -> T {
-            if let minimum, value < minimum { return minimum }
-            if let maximum, value > maximum { return maximum }
-            return value
-        }
-
-        private func formatNumberLiteral(_ value: Double) -> String {
-            if value.rounded() == value { return String(Int(value)) }
-            return String(value)
-        }
-
-        private mutating func generateArray(_ arrayNode: GenerationSchema.ArrayNode) throws -> String {
-            let elementCount = arrayNode.minItems ?? arrayNode.maxItems ?? 4
-            var output = try emitLiteral("[")
-
-            for index in 0 ..< elementCount {
-                output += try generateNode(arrayNode.items)
-                if index < elementCount - 1 {
-                    output += try emitLiteral(",")
-                }
-            }
-
-            output += try emitLiteral("]")
-            return output
-        }
-
-        private mutating func generateObject(_ objectNode: GenerationSchema.ObjectNode) throws -> String {
-            let keys = objectNode.properties.keys.sorted()
-            var output = try emitLiteral("{")
-
-            for (index, key) in keys.enumerated() {
-                output += try emitLiteral("\"")
-                output += try emitLiteral(key)
-                output += try emitLiteral("\":")
-
-                if let propertyNode = objectNode.properties[key] {
-                    output += try generateNode(propertyNode)
-                } else {
-                    output += try emitLiteral("null")
-                }
-
-                if index < keys.count - 1 {
-                    output += try emitLiteral(",")
-                }
-            }
-
-            output += try emitLiteral("}")
-            return output
-        }
-
-        private mutating func generateNode(_ node: GenerationSchema.Node) throws -> String {
-            guard remainingTokens > 0 else { throw StructuredGenerationError.tokenBudgetExceeded }
-
-            switch node {
-            case .string(let stringNode):
-                var output = try emitLiteral("\"")
-                if let enumChoices = stringNode.enumChoices, !enumChoices.isEmpty {
-                    output += try generateLiteralChoice(enumChoices)
-                } else {
-                    output += try generateFreeString(maxTokens: maxTokenCountForFreeString())
-                }
-                output += try emitLiteral("\"")
-                return output
-
-            case .number(let numberNode):
-                return try generateNumber(numberNode)
-
-            case .boolean:
-                return try generateLiteralChoice(["true", "false"])
-
-            case .array(let arrayNode):
-                return try generateArray(arrayNode)
-
-            case .object(let objectNode):
-                return try generateObject(objectNode)
-
-            case .anyOf(let nodes):
-                guard let first = nodes.first else { throw StructuredGenerationError.invalidTokenization }
-                return try generateNode(first)
-
-            case .ref(let refName):
-                guard let referenced = schema.defs[refName] else { throw StructuredGenerationError.invalidTokenization }
-                return try generateNode(referenced)
-            }
         }
     }
 #endif  // MLX

@@ -129,6 +129,10 @@ private struct SupportedModel: Sendable {
     let model: any LanguageModel
 
     static var all: [SupportedModel] {
+        func environmentValue(_ key: String) -> String? {
+            ProcessInfo.processInfo.environment[key] ?? ProcessInfo.processInfo.environment["TEST_RUNNER_\(key)"]
+        }
+
         var models: [SupportedModel] = []
 
         #if canImport(FoundationModels)
@@ -140,21 +144,21 @@ private struct SupportedModel: Sendable {
         #endif
 
         #if Llama
-            if let modelPath = ProcessInfo.processInfo.environment["LLAMA_MODEL_PATH"] {
+            if let modelPath = environmentValue("LLAMA_MODEL_PATH") {
                 models.append(SupportedModel(name: "LlamaLanguageModel", model: LlamaLanguageModel(modelPath: modelPath)))
             }
         #endif
 
         #if MLX
-            let shouldRunMLX = ProcessInfo.processInfo.environment["ENABLE_MLX_TESTS"] != nil
-                || (ProcessInfo.processInfo.environment["CI"] == nil
-                    && ProcessInfo.processInfo.environment["HF_TOKEN"] != nil
-                    && ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil)
-            if shouldRunMLX {
+            let shouldRunMLX = environmentValue("ENABLE_MLX_TESTS") != nil
+                || (environmentValue("CI") == nil
+                    && environmentValue("HF_TOKEN") != nil
+                    && environmentValue("XCTestConfigurationFilePath") != nil)
+            if let modelId = environmentValue("MLX_MODEL_ID"), shouldRunMLX {
                 models.append(
                     SupportedModel(
                         name: "MLXLanguageModel",
-                        model: MLXLanguageModel(modelId: "mlx-community/Qwen3-0.6B-4bit")
+                        model: MLXLanguageModel(modelId: modelId)
                     )
                 )
             }
