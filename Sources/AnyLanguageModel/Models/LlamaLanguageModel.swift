@@ -1,6 +1,6 @@
 import Foundation
 #if Llama
-    import Llama
+    import LlamaSwift
 
     /// Global storage for the current log level threshold.
     /// This is needed because the C callback can't capture Swift context.
