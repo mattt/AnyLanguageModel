@@ -690,12 +690,15 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
 
         return DeclSyntax(
             stringLiteral: """
-                public struct PartiallyGenerated: Sendable, ConvertibleFromGeneratedContent {
+                public struct PartiallyGenerated: Identifiable, Sendable, ConvertibleFromGeneratedContent {
+                    public var id: GenerationID
+
                     \(optionalProperties)
 
                     private let rawContent: GeneratedContent
 
                     public init(_ generatedContent: GeneratedContent) throws {
+                        self.id = generatedContent.id ?? GenerationID()
                         self.rawContent = generatedContent
 
                         if \(properties.isEmpty ? "case .structure = generatedContent.kind" : "case .structure(let properties, _) = generatedContent.kind") {
