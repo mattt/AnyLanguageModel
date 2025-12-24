@@ -34,6 +34,38 @@ struct TestArguments {
     var age: Int
 }
 
+@Generable
+private enum TestEnum: Equatable {
+    case optionA
+    case optionB
+    case optionC
+}
+
+@Generable
+private struct TestNestedInner: Equatable {
+    var value: String
+    var count: Int
+}
+
+@Generable
+private struct TestNestedOuter: Equatable {
+    var name: String
+    var inner: TestNestedInner
+}
+
+@Generable
+private struct TestStructWithEnum: Equatable {
+    var label: String
+    var choice: TestEnum
+}
+
+@Generable
+private struct TestStructWithArray: Equatable {
+    var title: String
+    @Guide(.count(3))
+    var items: [String]
+}
+
 @Suite("Generable Macro")
 struct GenerableMacroTests {
     @Test("@Guide description with multiline string")
@@ -134,5 +166,37 @@ struct GenerableMacroTests {
         let args = try TestArguments(content)
         #expect(args.name == "Bob")
         #expect(args.age == 25)
+    }
+
+    @Test("Enum round-trip conversion")
+    func enumRoundTrip() throws {
+        for choice in [TestEnum.optionA, TestEnum.optionB, TestEnum.optionC] {
+            let restored = try TestEnum(choice.generatedContent)
+            #expect(choice == restored)
+        }
+    }
+
+    @Test("Nested struct round-trip conversion")
+    func nestedStructRoundTrip() throws {
+        let original = TestNestedOuter(
+            name: "outer",
+            inner: TestNestedInner(value: "inner", count: 42)
+        )
+        let restored = try TestNestedOuter(original.generatedContent)
+        #expect(original == restored)
+    }
+
+    @Test("Struct with enum round-trip conversion")
+    func structWithEnumRoundTrip() throws {
+        let original = TestStructWithEnum(label: "test", choice: .optionB)
+        let restored = try TestStructWithEnum(original.generatedContent)
+        #expect(original == restored)
+    }
+
+    @Test("Struct with array round-trip conversion")
+    func structWithArrayRoundTrip() throws {
+        let original = TestStructWithArray(title: "list", items: ["a", "b", "c"])
+        let restored = try TestStructWithArray(original.generatedContent)
+        #expect(original == restored)
     }
 }
