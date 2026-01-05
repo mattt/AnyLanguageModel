@@ -42,10 +42,10 @@ jobs:
             ${{ runner.os }}-swift-${{ matrix.swift }}-spm-
 
       - name: Build
-        run: swift build --traits MLX,Llama,CoreML
+        run: swift build --build-tests --traits MLX,Llama,CoreML
 
       - name: Test
-        run: swift test
+        run: swift test --skip-build
 
   test-linux:
     name: Swift ${{ matrix.swift-version }} on Linux
