@@ -45,7 +45,7 @@ jobs:
         run: swift build -v --traits MLX,Llama,CoreML
 
       - name: Test
-        run: swift test -v --traits MLX,Llama,CoreML
+        run: swift test -v
 
   test-linux:
     name: Swift ${{ matrix.swift-version }} on Linux
