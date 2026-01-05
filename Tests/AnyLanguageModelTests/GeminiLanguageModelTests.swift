@@ -1,4 +1,5 @@
 import Foundation
+import JSONSchema
 import Testing
 
 @testable import AnyLanguageModel
@@ -143,5 +144,47 @@ struct GeminiLanguageModelTests {
         let session = LanguageModelSession(model: model, transcript: transcript)
         let response = try await session.respond(to: "")
         #expect(!response.content.isEmpty)
+    }
+
+    @Test func jsonModeEnabled() async throws {
+        let session = LanguageModelSession(model: model)
+
+        var options = GenerationOptions()
+        options[custom: GeminiLanguageModel.self] = .init(
+            thinking: .disabled,
+            jsonMode: true
+        )
+
+        let response = try await session.respond(
+            to: "Return a JSON object with a 'greeting' key and value 'hello'",
+            options: options
+        )
+        #expect(response.content.contains("greeting"))
+        #expect(response.content.contains("hello"))
+    }
+
+    @Test func jsonModeWithSchema() async throws {
+        let session = LanguageModelSession(model: model)
+
+        let schema = JSONSchema.object(
+            properties: [
+                "name": .string(),
+                "age": .integer(),
+            ],
+            required: ["name", "age"]
+        )
+
+        var options = GenerationOptions()
+        options[custom: GeminiLanguageModel.self] = .init(
+            thinking: .disabled,
+            jsonMode: .schema(schema)
+        )
+
+        let response = try await session.respond(
+            to: "Generate a person with name 'Alice' and age 30",
+            options: options
+        )
+        #expect(response.content.contains("Alice"))
+        #expect(response.content.contains("30"))
     }
 }
