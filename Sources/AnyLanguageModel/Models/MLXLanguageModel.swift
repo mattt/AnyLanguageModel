@@ -58,11 +58,6 @@ import Foundation
             includeSchemaInPrompt: Bool,
             options: GenerationOptions
         ) async throws -> LanguageModelSession.Response<Content> where Content: Generable {
-            // For now, only String is supported
-            guard type == String.self else {
-                fatalError("MLXLanguageModel only supports generating String content")
-            }
-
             let context: ModelContext
             if let directory {
                 context = try await loadModel(directory: directory)
@@ -71,6 +66,23 @@ import Foundation
             } else {
                 context = try await loadModel(id: modelId)
             }
+
+        if type != String.self {
+            let jsonString = try await generateStructuredJSON(
+                context: context,
+                session: session,
+                prompt: prompt,
+                schema: type.generationSchema,
+                options: options
+            )
+            let generatedContent = try GeneratedContent(json: jsonString)
+            let content = try type.init(generatedContent)
+            return LanguageModelSession.Response(
+                content: content,
+                rawContent: generatedContent,
+                transcriptEntries: ArraySlice([])
+            )
+        }
 
             // Convert session tools to MLX ToolSpec format
             let toolSpecs: [ToolSpec]? =
@@ -168,7 +180,7 @@ import Foundation
             options: GenerationOptions
         ) -> sending LanguageModelSession.ResponseStream<Content> where Content: Generable {
             guard type == String.self else {
-                fatalError("MLXLanguageModel only supports generating String content")
+                fatalError("MLXLanguageModel streaming only supports String content")
             }
 
             let modelId = self.modelId
@@ -189,7 +201,6 @@ import Foundation
 
                         let generateParameters = toGenerateParameters(options)
 
-                        // Build chat history from full transcript
                         let chat = convertTranscriptToMLXChat(session: session, fallbackPrompt: prompt.description)
 
                         let userInput = MLXLMCommon.UserInput(
@@ -245,6 +256,20 @@ import Foundation
             topP: 1.0,
             repetitionPenalty: nil,
             repetitionContextSize: 20
+        )
+    }
+
+    private func toStructuredGenerateParameters(_ options: GenerationOptions) -> MLXLMCommon.GenerateParameters {
+        MLXLMCommon.GenerateParameters(
+            maxTokens: options.maximumResponseTokens,
+            maxKVSize: nil,
+            kvBits: nil,
+            kvGroupSize: 64,
+            quantizedKVStart: 0,
+            temperature: Float(options.temperature ?? 0.2),
+            topP: 0.95,
+            repetitionPenalty: 1.1,
+            repetitionContextSize: 64
         )
     }
 
@@ -358,28 +383,72 @@ import Foundation
 
     private func convertToolToMLXSpec(_ tool: any Tool) -> ToolSpec {
         // Convert AnyLanguageModel's GenerationSchema to JSON-compatible dictionary
-        let parametersDict: [String: Any]
+        let parametersDict: [String: any Sendable]
         do {
             let resolvedSchema = tool.parameters.withResolvedRoot() ?? tool.parameters
             let encoder = JSONEncoder()
             let data = try encoder.encode(resolvedSchema)
             if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                parametersDict = json
+                parametersDict = try convertToSendableJSONObject(json)
             } else {
-                parametersDict = ["type": "object", "properties": [:], "required": []]
+                parametersDict = makeEmptyJSONSchemaObject()
             }
         } catch {
-            parametersDict = ["type": "object", "properties": [:], "required": []]
+            parametersDict = makeEmptyJSONSchemaObject()
         }
 
-        return [
-            "type": "function",
-            "function": [
-                "name": tool.name,
-                "description": tool.description,
-                "parameters": parametersDict,
-            ],
+        let functionSpec: [String: any Sendable] = [
+            "name": tool.name,
+            "description": tool.description,
+            "parameters": parametersDict,
         ]
+
+        let toolSpec: ToolSpec = [
+            "type": "function",
+            "function": functionSpec,
+        ]
+
+        return toolSpec
+    }
+
+    private func makeEmptyJSONSchemaObject() -> [String: any Sendable] {
+        [
+            "type": "object",
+            "properties": [String: any Sendable](),
+            "required": [String](),
+        ]
+    }
+
+    private func convertToSendableJSONObject(_ object: [String: Any]) throws -> [String: any Sendable] {
+        var converted: [String: any Sendable] = [:]
+        converted.reserveCapacity(object.count)
+
+        for (key, value) in object {
+            converted[key] = try convertToSendableJSONValue(value)
+        }
+        return converted
+    }
+
+    private func convertToSendableJSONValue(_ value: Any) throws -> any Sendable {
+        if value is NSNull { return MLXLMCommon.JSONValue.null }
+        if let stringValue = value as? String { return stringValue }
+        if let boolValue = value as? Bool { return boolValue }
+        if let intValue = value as? Int { return intValue }
+        if let doubleValue = value as? Double { return doubleValue }
+        if let numberValue = value as? NSNumber {
+            if CFGetTypeID(numberValue) == CFBooleanGetTypeID() {
+                return numberValue.boolValue
+            }
+            return numberValue.doubleValue
+        }
+        if let arrayValue = value as? [Any] {
+            return try arrayValue.map { try convertToSendableJSONValue($0) }
+        }
+        if let dictionaryValue = value as? [String: Any] {
+            return try convertToSendableJSONObject(dictionaryValue)
+        }
+
+        throw StructuredGenerationError.unsupportedJSONValueType
     }
 
     // MARK: - Tool Invocation Handling
@@ -463,5 +532,252 @@ import Foundation
             }
         }
         return textParts.joined(separator: "\n")
+    }
+
+    // MARK: - Structured JSON Generation
+
+    private enum StructuredGenerationError: Error {
+        case invalidVocabSize
+        case unsupportedJSONValueType
+    }
+
+    private func generateStructuredJSON(
+        context: ModelContext,
+        session: LanguageModelSession,
+        prompt: Prompt,
+        schema: GenerationSchema,
+        options: GenerationOptions
+    ) async throws -> String {
+        let maxTokens = options.maximumResponseTokens ?? 512
+        let generateParameters = toStructuredGenerateParameters(options)
+
+        let baseChat = convertTranscriptToMLXChat(session: session, fallbackPrompt: prompt.description)
+        let chat = normalizeChatForStructuredGeneration(baseChat, schemaPrompt: schema.schemaPrompt())
+        let userInput = MLXLMCommon.UserInput(
+            chat: chat,
+            processing: .init(resize: .init(width: 512, height: 512)),
+            tools: nil
+        )
+        let lmInput = try await context.processor.prepare(input: userInput)
+
+        let backend = try MLXTokenBackend(
+            context: context,
+            input: lmInput,
+            parameters: generateParameters,
+            maximumTokens: maxTokens
+        )
+
+        var generator = try ConstrainedJSONGenerator(backend: backend, schema: schema)
+        let json = try generator.generate()
+        Stream().synchronize()
+        return json
+    }
+
+    private func normalizeChatForStructuredGeneration(
+        _ chat: [MLXLMCommon.Chat.Message],
+        schemaPrompt: String
+    ) -> [MLXLMCommon.Chat.Message] {
+        var systemMessageParts: [String] = []
+        systemMessageParts.append(schemaPrompt)
+
+        var messages: [MLXLMCommon.Chat.Message] = []
+        messages.reserveCapacity(chat.count)
+
+        for message in chat {
+            if message.role == .system {
+                systemMessageParts.append(message.content)
+                continue
+            }
+
+            if let last = messages.last, last.role == message.role {
+                let merged = MLXLMCommon.Chat.Message(role: last.role, content: "\(last.content)\n\(message.content)")
+                messages.removeLast()
+                messages.append(merged)
+            } else {
+                messages.append(message)
+            }
+        }
+
+        let systemPrefix = systemMessageParts
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n\n")
+
+        guard !systemPrefix.isEmpty else {
+            return messages
+        }
+
+        if let firstUserIndex = messages.firstIndex(where: { $0.role == .user }) {
+            let existing = messages[firstUserIndex].content
+            messages[firstUserIndex] = MLXLMCommon.Chat.Message(role: .user, content: "\(systemPrefix)\n\n\(existing)")
+            return messages
+        }
+
+        messages.insert(.init(role: .user, content: systemPrefix), at: 0)
+        return messages
+    }
+
+    private struct MLXTokenBackend: TokenBackend {
+        let model: any MLXLMCommon.LanguageModel
+        let tokenizer: any Tokenizer
+        var state: MLXLMCommon.LMOutput.State?
+        var cache: [MLXLMCommon.KVCache]
+        var processor: MLXLMCommon.LogitProcessor?
+        let sampler: MLXLMCommon.LogitSampler
+        let tokensExcludedFromRepetitionPenalty: Set<Int>
+        let endTokens: Set<Int>
+
+        var currentLogits: MLXArray
+        let vocabSize: Int
+        let eosToken: Int
+        var remainingTokens: Int
+        let totalTokenBudget: Int
+
+        init(
+            context: ModelContext,
+            input: MLXLMCommon.LMInput,
+            parameters: MLXLMCommon.GenerateParameters,
+            maximumTokens: Int
+        ) throws {
+            self.model = context.model
+            self.tokenizer = context.tokenizer
+            self.state = nil
+            self.cache = context.model.newCache(parameters: parameters)
+            self.processor = parameters.processor()
+            self.sampler = parameters.sampler()
+            self.remainingTokens = maximumTokens
+            self.totalTokenBudget = maximumTokens
+            guard let eosTokenId = context.tokenizer.eosTokenId else {
+                throw StructuredGenerationError.invalidVocabSize
+            }
+            self.eosToken = eosTokenId
+            self.endTokens = Self.buildEndTokens(
+                eosTokenId: eosTokenId,
+                tokenizer: context.tokenizer,
+                configuration: context.configuration
+            )
+            
+            self.tokensExcludedFromRepetitionPenalty = Self.buildTokensExcludedFromRepetitionPenalty(tokenizer: context.tokenizer)
+
+            processor?.prompt(input.text.tokens)
+
+            let prepareResult = try context.model.prepare(
+                input,
+                cache: cache,
+                windowSize: parameters.prefillStepSize
+            )
+
+            let output: MLXLMCommon.LMOutput
+            switch prepareResult {
+            case .tokens(let tokensToProcess):
+                output = context.model(
+                    tokensToProcess[text: .newAxis],
+                    cache: cache,
+                    state: state
+                )
+            case .logits(let logitsOutput):
+                output = logitsOutput
+            }
+
+            self.state = output.state
+            self.currentLogits = output.logits
+
+            guard output.logits.shape.count >= 1 else {
+                throw StructuredGenerationError.invalidVocabSize
+            }
+            self.vocabSize = output.logits.shape.last ?? 0
+            guard self.vocabSize > 0 else {
+                throw StructuredGenerationError.invalidVocabSize
+            }
+        }
+
+        private static func buildEndTokens(
+            eosTokenId: Int,
+            tokenizer: any Tokenizer,
+            configuration: ModelConfiguration
+        ) -> Set<Int> {
+            var tokens: Set<Int> = [eosTokenId]
+
+            // If the tokenizer declares an EOS token string, prefer treating its ID as an end token too.
+            // Some chat models use a string EOS marker (e.g. "<end_of_turn>") whose ID may differ from eosTokenId.
+            if let eosString = tokenizer.eosToken, let eosStringId = tokenizer.convertTokenToId(eosString) {
+                tokens.insert(eosStringId)
+            }
+
+            for tokenString in configuration.extraEOSTokens {
+                if let id = tokenizer.convertTokenToId(tokenString) {
+                    tokens.insert(id)
+                }
+            }
+            return tokens
+        }
+
+        func isSpecialToken(_ token: Int) -> Bool {
+            // Use swift-transformers' own special token registry (skipSpecialTokens) instead of guessing.
+            let raw = tokenizer.decode(tokens: [token], skipSpecialTokens: false)
+            guard !raw.isEmpty else { return false }
+            let filtered = tokenizer.decode(tokens: [token], skipSpecialTokens: true)
+            return filtered.isEmpty
+        }
+
+        private static func buildTokensExcludedFromRepetitionPenalty(tokenizer: any Tokenizer) -> Set<Int> {
+            let excludedTexts = ["{", "}", "[", "]", ",", ":", "\""]
+            var excluded = Set<Int>()
+            excluded.reserveCapacity(excludedTexts.count * 2)
+
+            for text in excludedTexts {
+                let tokens = tokenizer.encode(text: text, addSpecialTokens: false)
+                for token in tokens {
+                    excluded.insert(token)
+                }
+            }
+
+            return excluded
+        }
+
+        func tokenize(_ text: String) throws -> [Int] {
+            tokenizer.encode(text: text, addSpecialTokens: false)
+        }
+
+        func tokenText(_ token: Int) -> String? {
+            let decoded = tokenizer.decode(tokens: [token], skipSpecialTokens: false)
+            return decoded.isEmpty ? nil : decoded
+        }
+
+        mutating func decode(_ token: Int) throws {
+            let inputText = MLXLMCommon.LMInput.Text(tokens: MLXArray([Int32(token)]))
+            let output = model(
+                inputText[text: .newAxis],
+                cache: cache.isEmpty ? nil : cache,
+                state: state
+            )
+            state = output.state
+            currentLogits = output.logits
+            remainingTokens -= 1
+
+            if !tokensExcludedFromRepetitionPenalty.contains(token) {
+                let tokenArray = MLXArray(Int32(token))
+                processor?.didSample(token: tokenArray)
+            }
+        }
+
+        mutating func sample(from allowedTokens: Set<Int>) throws -> Int {
+            guard !allowedTokens.isEmpty else {
+                throw ConstrainedGenerationError.tokenizationFailed
+            }
+
+            var logits = currentLogits[0..., -1, 0...]
+            logits = processor?.process(logits: logits) ?? logits
+            if logits.dtype == .bfloat16 {
+                logits = logits.asType(.float32)
+            }
+
+            let allowedIndices = MLXArray(allowedTokens.map { UInt32($0) })
+            let maskedLogits = full(logits.shape, values: -Float.infinity)
+            maskedLogits[0..., allowedIndices] = logits[0..., allowedIndices]
+
+            let sampledToken = sampler.sample(logits: maskedLogits)
+            return sampledToken.item(Int.self)
+        }
     }
 #endif  // MLX

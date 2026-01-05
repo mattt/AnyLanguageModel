@@ -81,17 +81,19 @@
                 transcript: session.transcript.toFoundationModels(instructions: session.instructions)
             )
 
-            let fmResponse = try await fmSession.respond(to: fmPrompt, options: fmOptions)
-            let generatedContent = GeneratedContent(fmResponse.content)
-
             if type == String.self {
+                let fmResponse = try await fmSession.respond(to: fmPrompt, options: fmOptions)
+                let generatedContent = GeneratedContent(fmResponse.content)
                 return LanguageModelSession.Response(
                     content: fmResponse.content as! Content,
                     rawContent: generatedContent,
                     transcriptEntries: []
                 )
             } else {
-                // For non-String types, try to create an instance from the generated content
+                // For non-String types, use schema-based structured generation
+                let schema = FoundationModels.GenerationSchema(type.generationSchema)
+                let fmResponse = try await fmSession.respond(to: fmPrompt, schema: schema, options: fmOptions)
+                let generatedContent = try AnyLanguageModel.GeneratedContent(fmResponse.content)
                 let content = try type.init(generatedContent)
 
                 return LanguageModelSession.Response(
@@ -321,25 +323,15 @@
     extension FoundationModels.GenerationSchema {
         internal init(_ content: AnyLanguageModel.GenerationSchema) {
             let resolvedSchema = content.withResolvedRoot() ?? content
-
-            let rawParameters = try? JSONValue(resolvedSchema)
-            var schema: FoundationModels.GenerationSchema? = nil
-            if rawParameters?.objectValue is [String: JSONValue] {
-                if let data = try? JSONEncoder().encode(rawParameters) {
-                    if let jsonSchema = try? JSONDecoder().decode(JSONSchema.self, from: data) {
-                        let dynamicSchema = convertToDynamicSchema(jsonSchema)
-                        schema = try? FoundationModels.GenerationSchema(root: dynamicSchema, dependencies: [])
-                    }
-                }
+            let dynamicSchema = convertToDynamicSchema(resolvedSchema.root)
+            let dependencies = resolvedSchema.defs.map { name, node in
+                convertToDynamicSchema(node, name: name)
             }
-            if let schema = schema {
+
+            if let schema = try? FoundationModels.GenerationSchema(root: dynamicSchema, dependencies: dependencies) {
                 self = schema
             } else {
-                self = FoundationModels.GenerationSchema(
-                    type: String.self,
-                    properties: []
-                )
-
+                self = FoundationModels.GenerationSchema(type: String.self, properties: [])
             }
         }
     }
@@ -369,6 +361,78 @@
     }
 
     @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
+    func convertToDynamicSchema(
+        _ node: GenerationSchema.Node,
+        name: String? = nil
+    ) -> FoundationModels.DynamicGenerationSchema {
+        switch node {
+        case .object(let objectNode):
+            return .init(
+                name: name ?? "",
+                description: objectNode.description,
+                properties: objectNode.properties.map { key, value in
+                    .init(
+                        name: key,
+                        description: value.nodeDescription,
+                        schema: convertToDynamicSchema(value),
+                        isOptional: !objectNode.required.contains(key)
+                    )
+                }
+            )
+
+        case .string(let stringNode):
+            if let enumChoices = stringNode.enumChoices, !enumChoices.isEmpty {
+                return .init(
+                    name: name ?? "",
+                    description: stringNode.description,
+                    anyOf: enumChoices.map { .init(type: String.self, guides: [.constant($0)]) }
+                )
+            }
+            if let pattern = stringNode.pattern, let regex = try? Regex(pattern) {
+                return .init(type: String.self, guides: [.pattern(regex)])
+            }
+            return .init(type: String.self)
+
+        case .number(let numberNode):
+            return numberNode.integerOnly
+                ? .init(type: Int.self, guides: intGuides(numberNode))
+                : .init(type: Double.self, guides: doubleGuides(numberNode))
+
+        case .boolean:
+            return .init(type: Bool.self)
+
+        case .array(let arrayNode):
+            return .init(
+                arrayOf: convertToDynamicSchema(arrayNode.items),
+                minimumElements: arrayNode.minItems,
+                maximumElements: arrayNode.maxItems
+            )
+
+        case .anyOf(let nodes):
+            return .init(name: "", anyOf: nodes.map { convertToDynamicSchema($0) })
+
+        case .ref(let refName):
+            return .init(referenceTo: refName)
+        }
+    }
+
+    @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
+    private func intGuides(_ numberNode: GenerationSchema.NumberNode) -> [FoundationModels.GenerationGuide<Int>] {
+        var guides: [FoundationModels.GenerationGuide<Int>] = []
+        if let minimum = numberNode.minimum { guides.append(.minimum(Int(minimum))) }
+        if let maximum = numberNode.maximum { guides.append(.maximum(Int(maximum))) }
+        return guides
+    }
+
+    @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
+    private func doubleGuides(_ numberNode: GenerationSchema.NumberNode) -> [FoundationModels.GenerationGuide<Double>] {
+        var guides: [FoundationModels.GenerationGuide<Double>] = []
+        if let minimum = numberNode.minimum { guides.append(.minimum(minimum)) }
+        if let maximum = numberNode.maximum { guides.append(.maximum(maximum)) }
+        return guides
+    }
+
+    @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
     func convertToDynamicSchema(_ jsonSchema: JSONSchema) -> FoundationModels.DynamicGenerationSchema {
         switch jsonSchema {
         case .object(_, _, _, _, _, _, properties: let properties, required: let required, _):
@@ -378,10 +442,13 @@
             return .init(name: "", description: jsonSchema.description, properties: schemaProperties)
 
         case .string(_, _, _, _, _, _, _, _, pattern: let pattern, _):
-            var guides: [FoundationModels.GenerationGuide<String>] = []
-            if let values = jsonSchema.enum?.compactMap(\.stringValue), !values.isEmpty {
-                guides.append(.anyOf(values))
+            if let enumValues = jsonSchema.enum?.compactMap(\.stringValue), !enumValues.isEmpty {
+                let enumSchemas = enumValues.map {
+                    FoundationModels.DynamicGenerationSchema(type: String.self, guides: [.constant($0)])
+                }
+                return .init(name: "", description: jsonSchema.description, anyOf: enumSchemas)
             }
+            var guides: [FoundationModels.GenerationGuide<String>] = []
             if let value = jsonSchema.const?.stringValue {
                 guides.append(.constant(value))
             }
@@ -397,12 +464,8 @@
             }
 
             var guides: [FoundationModels.GenerationGuide<Int>] = []
-            if let min = minimum {
-                guides.append(.minimum(min))
-            }
-            if let max = maximum {
-                guides.append(.maximum(max))
-            }
+            if let minimum { guides.append(.minimum(minimum)) }
+            if let maximum { guides.append(.maximum(maximum)) }
             if let value = jsonSchema.const?.intValue {
                 guides.append(.range(value ... value))
             }
@@ -415,12 +478,8 @@
             }
 
             var guides: [FoundationModels.GenerationGuide<Double>] = []
-            if let min = minimum {
-                guides.append(.minimum(min))
-            }
-            if let max = maximum {
-                guides.append(.maximum(max))
-            }
+            if let minimum { guides.append(.minimum(minimum)) }
+            if let maximum { guides.append(.maximum(maximum)) }
             if let value = jsonSchema.const?.doubleValue {
                 guides.append(.range(value ... value))
             }
