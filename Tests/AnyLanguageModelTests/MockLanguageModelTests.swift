@@ -94,7 +94,7 @@ struct MockLanguageModelTests {
         try await Task.sleep(for: .milliseconds(50))
         #expect(asyncSession.isResponding == true)
 
-        let response = try await asyncTask.value
+        _ = try await asyncTask.value
         try await Task.sleep(for: .milliseconds(10))
         #expect(asyncSession.isResponding == false)
         #expect(asyncSession.transcript.count == 2)

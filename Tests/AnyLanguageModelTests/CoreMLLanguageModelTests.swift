@@ -138,16 +138,15 @@ import Testing
         func multimodal_rejectsImageURL() async throws {
             let model = try await getModel()
             let session = LanguageModelSession(model: model)
-            let prompt = Transcript.Prompt(segments: [
-                .text(.init(content: "Describe this image")),
-                .image(.init(url: testImageURL)),
-            ])
             do {
-                _ = try await session.respond(to: prompt)
+                _ = try await session.respond(
+                    to: "Describe this image",
+                    image: .init(url: testImageURL)
+                )
                 Issue.record("Expected error when image segments are present")
             } catch {
                 // CoreMLUnsupportedFeatureError is a private struct, so we just check that an error is thrown
-                #expect(true)
+                #expect(Bool(true))
             }
         }
 
@@ -155,16 +154,15 @@ import Testing
         func multimodal_rejectsImageData() async throws {
             let model = try await getModel()
             let session = LanguageModelSession(model: model)
-            let prompt = Transcript.Prompt(segments: [
-                .text(.init(content: "Describe this image")),
-                .image(.init(data: testImageData, mimeType: "image/jpeg")),
-            ])
             do {
-                _ = try await session.respond(to: prompt)
+                _ = try await session.respond(
+                    to: "Describe this image",
+                    image: .init(data: testImageData, mimeType: "image/jpeg")
+                )
                 Issue.record("Expected error when image segments are present")
             } catch {
                 // CoreMLUnsupportedFeatureError is a private struct, so we just check that an error is thrown
-                #expect(true)
+                #expect(Bool(true))
             }
         }
     }
