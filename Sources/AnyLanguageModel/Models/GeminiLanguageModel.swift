@@ -535,10 +535,7 @@ private func createGenerateContentParams(
     }
     generationConfig["thinkingConfig"] = .object(thinkingConfig)
 
-    // Configure JSON mode if enabled
-    if let jsonMode, case .disabled = jsonMode {
-        // Do nothing for disabled
-    } else if let jsonMode {
+    if let jsonMode {
         switch jsonMode {
         case .disabled:
             break
