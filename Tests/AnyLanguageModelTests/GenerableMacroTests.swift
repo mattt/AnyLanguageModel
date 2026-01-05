@@ -126,13 +126,18 @@ struct GenerableMacroTests {
 
     @Test("Create instance from GeneratedContent")
     func fromGeneratedContent() throws {
-        let content = GeneratedContent(properties: [
-            "name": GeneratedContent("Bob"),
-            "age": GeneratedContent(kind: .number(25)),
-        ])
+        let generationID = GenerationID()
+        let content = GeneratedContent(
+            properties: [
+                "name": GeneratedContent("Bob"),
+                "age": GeneratedContent(kind: .number(25)),
+            ],
+            id: generationID
+        )
 
         let args = try TestArguments(content)
         #expect(args.name == "Bob")
         #expect(args.age == 25)
+        #expect(args.asPartiallyGenerated().id == generationID)
     }
 }
