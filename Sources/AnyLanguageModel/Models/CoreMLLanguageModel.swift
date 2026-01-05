@@ -214,15 +214,7 @@
         // MARK: - Image Validation
 
         private func validateNoImageSegments(in session: LanguageModelSession) throws {
-            // Check for image segments in instructions
-            if let instructions = session.instructions {
-                for segment in instructions.segments {
-                    if case .image = segment {
-                        throw CoreMLLanguageModelError.unsupportedFeature
-                    }
-                }
-            }
-
+            // Note: Instructions is a plain text type without segments, so no image check needed there.
             // Check for image segments in the most recent prompt
             for entry in session.transcript.reversed() {
                 if case .prompt(let p) = entry {
