@@ -357,19 +357,15 @@ import Foundation
     // MARK: - Tool Conversion
 
     private func convertToolToMLXSpec(_ tool: any Tool) -> ToolSpec {
-        // Convert AnyLanguageModel's GenerationSchema to JSON-compatible dictionary
-        let parametersDict: [String: Any]
+        // Convert AnyLanguageModel's GenerationSchema to Sendable dictionary
+        // using MLXLMCommon.JSONValue which is already Sendable
+        let parametersValue: JSONValue
         do {
             let resolvedSchema = tool.parameters.withResolvedRoot() ?? tool.parameters
-            let encoder = JSONEncoder()
-            let data = try encoder.encode(resolvedSchema)
-            if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                parametersDict = json
-            } else {
-                parametersDict = ["type": "object", "properties": [:], "required": []]
-            }
+            let data = try JSONEncoder().encode(resolvedSchema)
+            parametersValue = try JSONDecoder().decode(JSONValue.self, from: data)
         } catch {
-            parametersDict = ["type": "object", "properties": [:], "required": []]
+            parametersValue = .object(["type": .string("object"), "properties": .object([:]), "required": .array([])])
         }
 
         return [
@@ -377,8 +373,8 @@ import Foundation
             "function": [
                 "name": tool.name,
                 "description": tool.description,
-                "parameters": parametersDict,
-            ],
+                "parameters": parametersValue,
+            ] as [String: any Sendable],
         ]
     }
 
