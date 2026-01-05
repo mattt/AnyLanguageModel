@@ -88,17 +88,47 @@ public struct GeminiLanguageModel: LanguageModel {
         /// (URL context), code execution, and location services (Google Maps).
         public var serverTools: [ServerTool]?
 
+        /// Configures JSON mode for structured output.
+        ///
+        /// Use this type to enable JSON mode,
+        /// which constrains the model to output a valid JSON.
+        /// Optionally provide a schema for typed JSON output.
+        public enum JSONMode: Sendable, Hashable, ExpressibleByBooleanLiteral {
+            /// JSON mode is disabled (default text output).
+            case disabled
+
+            /// JSON mode is enabled without a schema constraint.
+            case enabled
+
+            /// JSON mode is enabled with a schema constraint for typed output.
+            case schema(JSONSchema)
+
+            public init(booleanLiteral value: Bool) {
+                self = value ? .enabled : .disabled
+            }
+        }
+
+        /// The JSON mode configuration for structured output.
+        ///
+        /// When set to `.enabled`, the model will output valid JSON.
+        /// When set to `.schema(_:)`, the model will output JSON
+        /// conforming to the provided schema.
+        public var jsonMode: JSONMode?
+
         /// Creates custom generation options for Gemini models.
         ///
         /// - Parameters:
         ///   - thinking: The thinking mode configuration. When `nil`, uses the model's default.
         ///   - serverTools: Server-side tools to enable. When `nil`, uses the model's default.
+        ///   - jsonMode: The JSON mode configuration. When `nil`, uses the model's default.
         public init(
             thinking: Thinking? = nil,
-            serverTools: [ServerTool]? = nil
+            serverTools: [ServerTool]? = nil,
+            jsonMode: JSONMode? = nil
         ) {
             self.thinking = thinking
             self.serverTools = serverTools
+            self.jsonMode = jsonMode
         }
     }
 
@@ -240,6 +270,7 @@ public struct GeminiLanguageModel: LanguageModel {
         let customOptions = options[custom: GeminiLanguageModel.self]
         let effectiveThinking = customOptions?.thinking ?? _thinking
         let effectiveServerTools = customOptions?.serverTools ?? _serverTools
+        let effectiveJsonMode = customOptions?.jsonMode
 
         let url =
             baseURL
@@ -262,7 +293,8 @@ public struct GeminiLanguageModel: LanguageModel {
                 contents: contents,
                 tools: geminiTools,
                 options: options,
-                thinking: effectiveThinking
+                thinking: effectiveThinking,
+                jsonMode: effectiveJsonMode
             )
 
             let body = try JSONEncoder().encode(params)
@@ -350,6 +382,7 @@ public struct GeminiLanguageModel: LanguageModel {
         let customOptions = options[custom: GeminiLanguageModel.self]
         let effectiveThinking = customOptions?.thinking ?? _thinking
         let effectiveServerTools = customOptions?.serverTools ?? _serverTools
+        let effectiveJsonMode = customOptions?.jsonMode
 
         let userSegments = extractPromptSegments(from: session, fallbackText: prompt.description)
         let contents = [
@@ -375,7 +408,8 @@ public struct GeminiLanguageModel: LanguageModel {
                         contents: contents,
                         tools: geminiTools,
                         options: options,
-                        thinking: effectiveThinking
+                        thinking: effectiveThinking,
+                        jsonMode: effectiveJsonMode
                     )
 
                     let body = try JSONEncoder().encode(params)
@@ -460,7 +494,8 @@ private func createGenerateContentParams(
     contents: [GeminiContent],
     tools: [GeminiTool]?,
     options: GenerationOptions,
-    thinking: GeminiLanguageModel.CustomGenerationOptions.Thinking
+    thinking: GeminiLanguageModel.CustomGenerationOptions.Thinking,
+    jsonMode: GeminiLanguageModel.CustomGenerationOptions.JSONMode?
 ) throws -> [String: JSONValue] {
     var params: [String: JSONValue] = [
         "contents": try JSONValue(contents)
@@ -499,6 +534,18 @@ private func createGenerateContentParams(
         }
     }
     generationConfig["thinkingConfig"] = .object(thinkingConfig)
+
+    if let jsonMode {
+        switch jsonMode {
+        case .disabled:
+            break
+        case .enabled:
+            generationConfig["responseMimeType"] = .string("application/json")
+        case .schema(let schema):
+            generationConfig["responseMimeType"] = .string("application/json")
+            generationConfig["responseSchema"] = try JSONValue(schema)
+        }
+    }
 
     if !generationConfig.isEmpty {
         params["generationConfig"] = .object(generationConfig)
