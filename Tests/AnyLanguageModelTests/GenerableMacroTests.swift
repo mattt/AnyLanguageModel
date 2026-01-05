@@ -141,3 +141,40 @@ struct GenerableMacroTests {
         #expect(args.asPartiallyGenerated().id == generationID)
     }
 }
+
+// MARK: - #Playground Usage
+
+// The `#Playground` macro doesn't see the memberwise initializer
+// that `@Generable` expands. This is a limitation of how macros compose:
+// one macro's expansion isn't visible within another macro's body.
+//
+// The following code demonstrates workarounds for this limitation.
+
+#if canImport(Playgrounds)
+    import Playgrounds
+
+    // Use the `GeneratedContent` initializer explicitly.
+    #Playground {
+        let content = GeneratedContent(properties: [
+            "name": "Alice",
+            "age": 30,
+        ])
+        let _ = try TestArguments(content)
+    }
+
+    // Define a factory method as an alternative to the memberwise initializer.
+    extension TestArguments {
+        static func create(name: String, age: Int) -> TestArguments {
+            try! TestArguments(
+                GeneratedContent(properties: [
+                    "name": name,
+                    "age": age,
+                ])
+            )
+        }
+    }
+
+    #Playground {
+        let _ = TestArguments.create(name: "Bob", age: 42)
+    }
+#endif  // canImport(Playgrounds)
