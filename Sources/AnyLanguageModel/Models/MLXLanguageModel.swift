@@ -175,7 +175,8 @@ import Foundation
             let hub = self.hub
             let directory = self.directory
 
-            let stream: AsyncThrowingStream<LanguageModelSession.ResponseStream<Content>.Snapshot, any Error> = .init { continuation in
+            let stream: AsyncThrowingStream<LanguageModelSession.ResponseStream<Content>.Snapshot, any Error> = .init {
+                continuation in
                 let task = Task { @Sendable in
                     do {
                         let context: ModelContext
@@ -213,7 +214,8 @@ import Foundation
                             case .chunk(let text):
                                 accumulatedText += text
                                 let raw = GeneratedContent(accumulatedText)
-                                let content: Content.PartiallyGenerated = (accumulatedText as! Content).asPartiallyGenerated()
+                                let content: Content.PartiallyGenerated = (accumulatedText as! Content)
+                                    .asPartiallyGenerated()
                                 continuation.yield(.init(content: content, rawContent: raw))
                             case .info, .toolCall:
                                 break
