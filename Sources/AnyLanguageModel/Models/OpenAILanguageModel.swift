@@ -1307,7 +1307,16 @@ private func extractConversationHistory(from session: LanguageModelSession) -> [
 }
 
 private func extractPromptSegments(from session: LanguageModelSession, fallbackText: String) -> [Transcript.Segment] {
-    // Always use fallbackText for current prompt (reliable source)
+    // Try to get segments from the last prompt in transcript (includes images)
+    if let lastPromptEntry = session.transcript.reversed().first(where: {
+        if case .prompt = $0 { return true }
+        return false
+    }) {
+        if case .prompt(let prompt) = lastPromptEntry {
+            return prompt.segments
+        }
+    }
+    // Fallback to text-only if no prompt in transcript
     return [.text(.init(content: fallbackText))]
 }
 
