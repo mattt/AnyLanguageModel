@@ -408,7 +408,13 @@ public struct OpenAILanguageModel: LanguageModel {
         apiKey tokenProvider: @escaping @autoclosure @Sendable () -> String,
         model: String,
         apiVariant: APIVariant = .chatCompletions,
-        session: URLSession = URLSession(configuration: .default)
+        session: URLSession = {
+            let config = URLSessionConfiguration.default
+            config.timeoutIntervalForRequest = 300  // 5 minutes
+            config.timeoutIntervalForResource = 300  // 5 minutes
+            return URLSession(configuration: config)
+        }()
+
     ) {
         var baseURL = baseURL
         if !baseURL.path.hasSuffix("/") {
@@ -707,7 +713,6 @@ public struct OpenAILanguageModel: LanguageModel {
             return LanguageModelSession.ResponseStream(stream: stream)
 
         case .chatCompletions:
-           
 
             let url = baseURL.appendingPathComponent("chat/completions")
 
@@ -723,7 +728,9 @@ public struct OpenAILanguageModel: LanguageModel {
 
                         // Add current prompt (always from fallbackText - reliable source)
                         let userSegments = extractPromptSegments(from: session, fallbackText: prompt.description)
-                        messages.append(OpenAIMessage(role: .user, content: .blocks(convertSegmentsToOpenAIBlocks(userSegments))))
+                        messages.append(
+                            OpenAIMessage(role: .user, content: .blocks(convertSegmentsToOpenAIBlocks(userSegments)))
+                        )
 
                         let params = ChatCompletions.createRequestBody(
                             model: model,
@@ -732,7 +739,7 @@ public struct OpenAILanguageModel: LanguageModel {
                             options: options,
                             stream: true
                         )
-                        
+
                         let body = try JSONEncoder().encode(params)
 
                         let events: AsyncThrowingStream<OpenAIChatCompletionsChunk, any Error> =
