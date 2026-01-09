@@ -110,30 +110,20 @@ struct OpenAILanguageModelTests {
         }
 
         @Test func multimodalWithImageURL() async throws {
-            let transcript = Transcript(entries: [
-                .prompt(
-                    Transcript.Prompt(segments: [
-                        .text(.init(content: "Describe this image")),
-                        .image(.init(url: testImageURL)),
-                    ])
-                )
-            ])
-            let session = LanguageModelSession(model: model, transcript: transcript)
-            let response = try await session.respond(to: "")
+            let session = LanguageModelSession(model: model)
+            let response = try await session.respond(
+                to: "Describe this image",
+                image: .init(url: testImageURL)
+            )
             #expect(!response.content.isEmpty)
         }
 
         @Test func multimodalWithImageData() async throws {
-            let transcript = Transcript(entries: [
-                .prompt(
-                    Transcript.Prompt(segments: [
-                        .text(.init(content: "Describe this image")),
-                        .image(.init(data: testImageData, mimeType: "image/png")),
-                    ])
-                )
-            ])
-            let session = LanguageModelSession(model: model, transcript: transcript)
-            let response = try await session.respond(to: "")
+            let session = LanguageModelSession(model: model)
+            let response = try await session.respond(
+                to: "Describe this image",
+                image: .init(data: testImageData, mimeType: "image/png")
+            )
             #expect(!response.content.isEmpty)
         }
 
@@ -144,7 +134,7 @@ struct OpenAILanguageModelTests {
             #expect(!firstResponse.content.isEmpty)
 
             let secondResponse = try await session.respond(to: "What did I just tell you?")
-            #expect(!secondResponse.content.isEmpty)
+            #expect(secondResponse.content.contains("color"))
         }
 
         @Test func withTools() async throws {
@@ -250,30 +240,20 @@ struct OpenAILanguageModelTests {
         }
 
         @Test func multimodalWithImageURL() async throws {
-            let transcript = Transcript(entries: [
-                .prompt(
-                    Transcript.Prompt(segments: [
-                        .text(.init(content: "Describe this image")),
-                        .image(.init(url: testImageURL)),
-                    ])
-                )
-            ])
-            let session = LanguageModelSession(model: model, transcript: transcript)
-            let response = try await session.respond(to: "")
+            let session = LanguageModelSession(model: model)
+            let response = try await session.respond(
+                to: "Describe this image",
+                image: .init(url: testImageURL)
+            )
             #expect(!response.content.isEmpty)
         }
 
         @Test func multimodalWithImageData() async throws {
-            let transcript = Transcript(entries: [
-                .prompt(
-                    Transcript.Prompt(segments: [
-                        .text(.init(content: "Describe this image")),
-                        .image(.init(data: testImageData, mimeType: "image/png")),
-                    ])
-                )
-            ])
-            let session = LanguageModelSession(model: model, transcript: transcript)
-            let response = try await session.respond(to: "")
+            let session = LanguageModelSession(model: model)
+            let response = try await session.respond(
+                to: "Describe this image",
+                image: .init(data: testImageData, mimeType: "image/png")
+            )
             #expect(!response.content.isEmpty)
         }
 
@@ -284,7 +264,7 @@ struct OpenAILanguageModelTests {
             #expect(!firstResponse.content.isEmpty)
 
             let secondResponse = try await session.respond(to: "What did I just tell you?")
-            #expect(!secondResponse.content.isEmpty)
+            #expect(secondResponse.content.contains("color"))
         }
 
         @Test func withTools() async throws {

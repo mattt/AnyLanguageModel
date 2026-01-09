@@ -434,15 +434,6 @@ public struct OpenAILanguageModel: LanguageModel {
             fatalError("OpenAILanguageModel only supports generating String content")
         }
 
-        var messages: [OpenAIMessage] = []
-        if let systemSegments = extractInstructionSegments(from: session) {
-            messages.append(
-                OpenAIMessage(role: .system, content: .blocks(convertSegmentsToOpenAIBlocks(systemSegments)))
-            )
-        }
-        let userSegments = extractPromptSegments(from: session, fallbackText: prompt.description)
-        messages.append(OpenAIMessage(role: .user, content: .blocks(convertSegmentsToOpenAIBlocks(userSegments))))
-
         // Convert tools if any are available in the session
         let openAITools: [OpenAITool]? = {
             guard !session.tools.isEmpty else { return nil }
@@ -457,14 +448,14 @@ public struct OpenAILanguageModel: LanguageModel {
         switch apiVariant {
         case .chatCompletions:
             return try await respondWithChatCompletions(
-                messages: messages,
+                messages: session.transcript.toOpenAIMessages(),
                 tools: openAITools,
                 options: options,
                 session: session
             )
         case .responses:
             return try await respondWithResponses(
-                messages: messages,
+                messages: session.transcript.toOpenAIMessages(),
                 tools: openAITools,
                 options: options,
                 session: session
@@ -619,15 +610,6 @@ public struct OpenAILanguageModel: LanguageModel {
             fatalError("OpenAILanguageModel only supports generating String content")
         }
 
-        var messages: [OpenAIMessage] = []
-        if let systemSegments = extractInstructionSegments(from: session) {
-            messages.append(
-                OpenAIMessage(role: .system, content: .blocks(convertSegmentsToOpenAIBlocks(systemSegments)))
-            )
-        }
-        let userSegments = extractPromptSegments(from: session, fallbackText: prompt.description)
-        messages.append(OpenAIMessage(role: .user, content: .blocks(convertSegmentsToOpenAIBlocks(userSegments))))
-
         // Convert tools if any are available in the session
         let openAITools: [OpenAITool]? = {
             guard !session.tools.isEmpty else { return nil }
@@ -643,7 +625,7 @@ public struct OpenAILanguageModel: LanguageModel {
         case .responses:
             let params = Responses.createRequestBody(
                 model: model,
-                messages: messages,
+                messages: session.transcript.toOpenAIMessages(),
                 tools: openAITools,
                 options: options,
                 stream: true
@@ -706,7 +688,7 @@ public struct OpenAILanguageModel: LanguageModel {
         case .chatCompletions:
             let params = ChatCompletions.createRequestBody(
                 model: model,
-                messages: messages,
+                messages: session.transcript.toOpenAIMessages(),
                 tools: openAITools,
                 options: options,
                 stream: true
@@ -934,7 +916,7 @@ private enum Responses {
                         case .imageURL(let url):
                             return .object([
                                 "type": .string("input_image"),
-                                "image_url": .object(["url": .string(url)]),
+                                "image_url": .string(url),
                             ])
                         }
                     }
@@ -1122,6 +1104,78 @@ private enum Responses {
 
 // MARK: - Supporting Types
 
+extension Transcript {
+    fileprivate func toOpenAIMessages() -> [OpenAIMessage] {
+        var messages = [OpenAIMessage]()
+        for item in self {
+            switch item {
+            case .instructions(let instructions):
+                messages.append(
+                    .init(
+                        role: .system,
+                        content: .blocks(convertSegmentsToOpenAIBlocks(instructions.segments))
+                    )
+                )
+            case .prompt(let prompt):
+                messages.append(
+                    .init(
+                        role: .user,
+                        content: .blocks(convertSegmentsToOpenAIBlocks(prompt.segments))
+                    )
+                )
+            case .response(let response):
+                messages.append(
+                    .init(
+                        role: .assistant,
+                        content: .blocks(convertSegmentsToOpenAIBlocks(response.segments))
+                    )
+                )
+            case .toolCalls(let toolCalls):
+                // Add assistant message with tool calls
+                let openAIToolCalls: [JSONValue] = toolCalls.map { call in
+                    let argumentsJSON: String
+                    if let data = try? JSONEncoder().encode(call.arguments),
+                       let jsonString = String(data: data, encoding: .utf8) {
+                        argumentsJSON = jsonString
+                    } else {
+                        argumentsJSON = "{}"
+                    }
+
+                    return .object([
+                        "id": .string(call.id),
+                        "type": .string("function"),
+                        "function": .object([
+                            "name": .string(call.toolName),
+                            "arguments": .string(argumentsJSON)
+                        ])
+                    ])
+                }
+
+                let rawMessage: JSONValue = .object([
+                    "role": .string("assistant"),
+                    "content": .null,
+                    "tool_calls": .array(openAIToolCalls)
+                ])
+
+                messages.append(
+                    .init(
+                        role: .raw(rawContent: rawMessage),
+                        content: .text("")
+                    )
+                )
+            case .toolOutput(let toolOutput):
+                messages.append(
+                    .init(
+                        role: .tool(id: toolOutput.id),
+                        content: .blocks(convertSegmentsToOpenAIBlocks(toolOutput.segments))
+                    )
+                )
+            }
+        }
+        return messages
+    }
+}
+
 private struct OpenAIMessage: Hashable, Codable, Sendable {
     enum Role: Hashable, Codable, Sendable {
         case system, user, assistant, raw(rawContent: JSONValue), tool(id: String)
@@ -1165,7 +1219,6 @@ private struct OpenAIMessage: Hashable, Codable, Sendable {
     }
 
     func jsonValue(for apiVariant: OpenAILanguageModel.APIVariant) -> JSONValue {
-
         switch role {
         case .raw(rawContent: let rawContent):
             return rawContent
@@ -1252,29 +1305,6 @@ private func convertSegmentsToOpenAIBlocks(_ segments: [Transcript.Segment]) -> 
         }
     }
     return blocks
-}
-
-private func extractPromptSegments(from session: LanguageModelSession, fallbackText: String) -> [Transcript.Segment] {
-    // Prefer the most recent Transcript.Prompt entry if present
-    for entry in session.transcript.reversed() {
-        if case .prompt(let p) = entry {
-            return p.segments
-        }
-    }
-    return [.text(.init(content: fallbackText))]
-}
-
-private func extractInstructionSegments(from session: LanguageModelSession) -> [Transcript.Segment]? {
-    // Prefer the first Transcript.Instructions entry if present
-    for entry in session.transcript {
-        if case .instructions(let i) = entry {
-            return i.segments
-        }
-    }
-    if let instructions = session.instructions?.description, !instructions.isEmpty {
-        return [.text(.init(content: instructions))]
-    }
-    return nil
 }
 
 private struct OpenAITool: Hashable, Codable, Sendable {
