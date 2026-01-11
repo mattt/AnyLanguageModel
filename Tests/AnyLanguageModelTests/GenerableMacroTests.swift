@@ -34,6 +34,18 @@ struct TestArguments {
     var age: Int
 }
 
+@Generable
+private struct ArrayItem {
+    @Guide(description: "A name")
+    var name: String
+}
+
+@Generable
+private struct ArrayContainer {
+    @Guide(description: "Items", .count(2))
+    var items: [ArrayItem]
+}
+
 @Suite("Generable Macro")
 struct GenerableMacroTests {
     @Test("@Guide description with multiline string")
@@ -139,6 +151,25 @@ struct GenerableMacroTests {
         #expect(args.name == "Bob")
         #expect(args.age == 25)
         #expect(args.asPartiallyGenerated().id == generationID)
+    }
+
+    @Test("Array properties use partially generated element types")
+    func arrayPropertyPartialTypes() throws {
+        let content = GeneratedContent(
+            properties: [
+                "items": GeneratedContent(
+                    kind: .array([
+                        GeneratedContent(properties: ["name": "Alpha"]),
+                        GeneratedContent(properties: ["name": "Beta"]),
+                    ])
+                ),
+            ]
+        )
+
+        let container = try ArrayContainer(content)
+        let partial = container.asPartiallyGenerated()
+        #expect(partial.items?.count == 2)
+        #expect(partial.items?.first?.name == "Alpha")
     }
 }
 
