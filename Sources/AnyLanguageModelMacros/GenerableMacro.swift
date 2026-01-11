@@ -718,7 +718,7 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
     ) -> DeclSyntax {
         let optionalProperties = properties.map { prop in
             let partialType = partiallyGeneratedTypeName(for: prop.type)
-            return "public var \(prop.name): \(partialType)?"
+            return "public let \(prop.name): \(partialType)?"
         }.joined(separator: "\n        ")
 
         let propertyExtractions = properties.map { prop in
