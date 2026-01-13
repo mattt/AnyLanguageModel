@@ -17,6 +17,21 @@ import Foundation
     import Tokenizers
     import Hub
 
+
+    /// Wrapper to store ModelContext in NSCache (requires NSObject subclass)
+    private final class CachedContext: NSObject {
+        let context: ModelContext
+        init(_ context: ModelContext) { self.context = context }
+    }
+
+    private nonisolated(unsafe) let modelCache: NSCache<NSString, CachedContext> = {
+        let cache = NSCache<NSString, CachedContext>()
+        cache.countLimit = 3
+        return cache
+    }()
+
+    // MARK: - MLXLanguageModel
+
     /// A language model that runs locally using MLX.
     ///
     /// Use this model to run language models on Apple silicon using the MLX framework.
@@ -51,6 +66,25 @@ import Foundation
             self.directory = directory
         }
 
+        /// Get or load model context with caching
+        private func loadContext(modelId: String, hub: HubApi?, directory: URL?) async throws -> ModelContext {
+            let key = (directory?.absoluteString ?? modelId) as NSString
+
+            if let cached = modelCache.object(forKey: key) {
+                return cached.context
+            }
+
+            let context: ModelContext
+            if let directory {
+                context = try await loadModel(directory: directory)
+            } else {
+                context = try await loadModel(hub: hub ?? HubApi(), id: modelId)
+            }
+
+            modelCache.setObject(CachedContext(context), forKey: key)
+            return context
+        }
+
         public func respond<Content>(
             within session: LanguageModelSession,
             to prompt: Prompt,
@@ -63,14 +97,8 @@ import Foundation
                 fatalError("MLXLanguageModel only supports generating String content")
             }
 
-            let context: ModelContext
-            if let directory {
-                context = try await loadModel(directory: directory)
-            } else if let hub {
-                context = try await loadModel(hub: hub, id: modelId)
-            } else {
-                context = try await loadModel(id: modelId)
-            }
+            // Get cached or load fresh ModelContext
+            let context = try await loadContext(modelId: modelId, hub: hub, directory: directory)
 
             // Convert session tools to MLX ToolSpec format
             let toolSpecs: [ToolSpec]? =
@@ -179,18 +207,11 @@ import Foundation
                 continuation in
                 let task = Task { @Sendable in
                     do {
-                        let context: ModelContext
-                        if let directory {
-                            context = try await loadModel(directory: directory)
-                        } else if let hub {
-                            context = try await loadModel(hub: hub, id: modelId)
-                        } else {
-                            context = try await loadModel(id: modelId)
-                        }
+                        // Get cached or load fresh ModelContext
+                        let context = try await loadContext(modelId: modelId, hub: hub, directory: directory)
 
+                        // Build chat inside task to avoid Sendable issues
                         let generateParameters = toGenerateParameters(options)
-
-                        // Build chat history from full transcript
                         let chat = convertTranscriptToMLXChat(session: session, fallbackPrompt: prompt.description)
 
                         let userInput = MLXLMCommon.UserInput(
@@ -461,5 +482,23 @@ import Foundation
             }
         }
         return textParts.joined(separator: "\n")
+    }
+
+    // MARK: - Cache Management
+
+    extension MLXLanguageModel {
+        /// Unloads this model from the shared cache.
+        ///
+        /// Call this to free memory when the model is no longer needed.
+        /// The model will be reloaded automatically on the next request.
+        public func unload() {
+            let key = (directory?.absoluteString ?? modelId) as NSString
+            modelCache.removeObject(forKey: key)
+        }
+
+        /// Unloads all MLX models from the shared cache.
+        public static func unloadAll() {
+            modelCache.removeAllObjects()
+        }
     }
 #endif  // MLX
