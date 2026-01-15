@@ -265,6 +265,13 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
 
     private static func partiallyGeneratedTypeName(for type: String, preserveOptional: Bool) -> String {
         let trimmed = type.trimmingCharacters(in: .whitespacesAndNewlines)
+        if preserveOptional, trimmed.hasSuffix("??") {
+            var normalized = trimmed
+            while normalized.hasSuffix("??") {
+                normalized = String(normalized.dropLast())
+            }
+            return partiallyGeneratedTypeName(for: normalized, preserveOptional: true)
+        }
         if preserveOptional, trimmed.hasSuffix("?") {
             let inner = String(trimmed.dropLast())
             return "\(partiallyGeneratedTypeName(for: inner, preserveOptional: true))?"
