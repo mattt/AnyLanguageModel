@@ -34,6 +34,69 @@ struct TestArguments {
     var age: Int
 }
 
+@Generable
+private struct ArrayItem {
+    @Guide(description: "A name")
+    var name: String
+}
+
+@Generable
+private struct ArrayContainer {
+    @Guide(description: "Items", .count(2))
+    var items: [ArrayItem]
+}
+
+@Generable
+private struct PrimitiveContainer {
+    @Guide(description: "A title")
+    var title: String
+
+    @Guide(description: "A count")
+    var count: Int
+}
+
+@Generable
+private struct PrimitiveArrayContainer {
+    @Guide(description: "Names", .count(2))
+    var names: [String]
+}
+
+@Generable
+private struct OptionalArrayContainer {
+    @Guide(description: "Optional names", .count(2))
+    var names: [String]?
+}
+
+@Generable
+private struct NestedArrayContainer {
+    @Guide(description: "Nested items", .count(2))
+    var items: [[ArrayItem]]
+}
+
+@Generable
+private struct OptionalPrimitiveContainer {
+    @Guide(description: "Optional title")
+    var title: String?
+
+    @Guide(description: "Optional count")
+    var count: Int?
+
+    @Guide(description: "Optional flag")
+    var flag: Bool?
+}
+
+@Generable
+private struct OptionalItemContainer {
+    @Guide(description: "Optional item")
+    var item: ArrayItem?
+}
+
+@Generable
+private struct OptionalItemsContainer {
+    @Guide(description: "Optional items", .count(2))
+    var items: [ArrayItem]?
+}
+
 @Suite("Generable Macro")
 struct GenerableMacroTests {
     @Test("@Guide description with multiline string")
@@ -139,6 +202,188 @@ struct GenerableMacroTests {
         #expect(args.name == "Bob")
         #expect(args.age == 25)
         #expect(args.asPartiallyGenerated().id == generationID)
+    }
+
+    @Test("Array properties use partially generated element types")
+    func arrayPropertiesUsePartiallyGeneratedElements() throws {
+        let content = GeneratedContent(
+            properties: [
+                "items": GeneratedContent(
+                    kind: .array([
+                        GeneratedContent(properties: ["name": "Alpha"]),
+                        GeneratedContent(properties: ["name": "Beta"]),
+                    ])
+                )
+            ]
+        )
+
+        let container = try ArrayContainer(content)
+        let partial = container.asPartiallyGenerated()
+        #expect(partial.items?.count == 2)
+        #expect(partial.items?.first?.name == "Alpha")
+    }
+
+    @Test("Primitive properties use concrete partial types")
+    func primitivePropertiesRemainUnchanged() throws {
+        let content = GeneratedContent(
+            properties: [
+                "title": "Hello",
+                "count": 3,
+            ]
+        )
+
+        let container = try PrimitiveContainer(content)
+        let partial = container.asPartiallyGenerated()
+        #expect(partial.title == "Hello")
+        #expect(partial.count == 3)
+    }
+
+    @Test("Array primitives use concrete element types")
+    func arrayPrimitivesRemainConcrete() throws {
+        let content = GeneratedContent(
+            properties: [
+                "names": GeneratedContent(
+                    kind: .array([
+                        GeneratedContent("Alpha"),
+                        GeneratedContent("Beta"),
+                    ])
+                )
+            ]
+        )
+
+        let container = try PrimitiveArrayContainer(content)
+        let partial = container.asPartiallyGenerated()
+        #expect(partial.names?.count == 2)
+        #expect(partial.names?.first == "Alpha")
+    }
+
+    @Test("Optional primitive arrays remain concrete")
+    func optionalPrimitiveArraysRemainConcrete() throws {
+        let content = GeneratedContent(
+            properties: [
+                "names": GeneratedContent(
+                    kind: .array([
+                        GeneratedContent("Alpha"),
+                        GeneratedContent("Beta"),
+                    ])
+                )
+            ]
+        )
+
+        let container = try OptionalArrayContainer(content)
+        let partial = container.asPartiallyGenerated()
+        #expect(partial.names?.count == 2)
+        #expect(partial.names?.first == "Alpha")
+    }
+
+    @Test("Nested arrays of generable types are handled")
+    func nestedArraysGenerateNestedPartialTypes() throws {
+        let content = GeneratedContent(
+            properties: [
+                "items": GeneratedContent(
+                    kind: .array([
+                        GeneratedContent(
+                            kind: .array([
+                                GeneratedContent(properties: ["name": "Alpha"]),
+                                GeneratedContent(properties: ["name": "Beta"]),
+                            ])
+                        ),
+                        GeneratedContent(
+                            kind: .array([
+                                GeneratedContent(properties: ["name": "Gamma"])
+                            ])
+                        ),
+                    ])
+                )
+            ]
+        )
+
+        let container = try NestedArrayContainer(content)
+        let partial = container.asPartiallyGenerated()
+        #expect(partial.items?.count == 2)
+        #expect(partial.items?.first?.count == 2)
+        #expect(partial.items?.first?.first?.name == "Alpha")
+        #expect(partial.items?.last?.first?.name == "Gamma")
+    }
+
+    @Test("Optional primitive properties are handled")
+    func optionalPrimitivePropertiesHandled() throws {
+        let content = GeneratedContent(
+            properties: [
+                "title": "Hello",
+                "count": 3,
+                "flag": true,
+            ]
+        )
+
+        let container = try OptionalPrimitiveContainer(content)
+        let partial = container.asPartiallyGenerated()
+        #expect(partial.title == "Hello")
+        #expect(partial.count == 3)
+        #expect(partial.flag == true)
+    }
+
+    @Test("Optional generable properties are handled")
+    func optionalGenerableItemBecomesPartial() throws {
+        let content = GeneratedContent(
+            properties: [
+                "item": GeneratedContent(properties: ["name": "Alpha"])
+            ]
+        )
+
+        let container = try OptionalItemContainer(content)
+        let partial = container.asPartiallyGenerated()
+        #expect(partial.item?.name == "Alpha")
+    }
+
+    @Test("Optional arrays of generable types are handled")
+    func optionalGenerableArraysTransformToPartialArrays() throws {
+        let content = GeneratedContent(
+            properties: [
+                "items": GeneratedContent(
+                    kind: .array([
+                        GeneratedContent(properties: ["name": "Alpha"]),
+                        GeneratedContent(properties: ["name": "Beta"]),
+                    ])
+                )
+            ]
+        )
+
+        let container = try OptionalItemsContainer(content)
+        let partial = container.asPartiallyGenerated()
+        #expect(partial.items?.count == 2)
+        #expect(partial.items?.first?.name == "Alpha")
+    }
+
+    @Test("Missing optional properties become nil in partials")
+    func missingOptionalProperties() throws {
+        let content = GeneratedContent(properties: [:])
+
+        let primitive = try OptionalPrimitiveContainer(content).asPartiallyGenerated()
+        #expect(primitive.title == nil)
+        #expect(primitive.count == nil)
+        #expect(primitive.flag == nil)
+
+        let item = try OptionalItemContainer(content).asPartiallyGenerated()
+        #expect(item.item == nil)
+
+        let items = try OptionalItemsContainer(content).asPartiallyGenerated()
+        #expect(items.items == nil)
+
+        let names = try OptionalArrayContainer(content).asPartiallyGenerated()
+        #expect(names.names == nil)
+    }
+
+    @Test("Schema generation includes optional properties")
+    func schemaIncludesOptionalProperties() throws {
+        let schema = OptionalPrimitiveContainer.generationSchema
+        let encoder = JSONEncoder()
+        let jsonData = try encoder.encode(schema)
+        let jsonString = String(data: jsonData, encoding: .utf8) ?? ""
+
+        #expect(jsonString.contains("\"title\""))
+        #expect(jsonString.contains("\"count\""))
+        #expect(jsonString.contains("\"flag\""))
     }
 }
 
