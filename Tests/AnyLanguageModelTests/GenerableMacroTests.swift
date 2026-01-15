@@ -257,7 +257,7 @@ struct GenerableMacroTests {
         #expect(partial.names?.first == "Alpha")
     }
 
-    @Test("Optional array properties are partially generated")
+    @Test("Optional primitive arrays remain concrete")
     func optionalPrimitiveArraysRemainConcrete() throws {
         let content = GeneratedContent(
             properties: [
