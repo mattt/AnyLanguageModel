@@ -169,28 +169,30 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
     }
 
     private static func topLevelColonIndex(in text: String) -> String.Index? {
-        var squareDepth = 0
-        var angleDepth = 0
-        var parenDepth = 0
+        var totalDepth = 0
 
         for index in text.indices {
             switch text[index] {
             case "[":
-                squareDepth += 1
+                totalDepth += 1
             case "]":
-                squareDepth = max(0, squareDepth - 1)
+                totalDepth -= 1
             case "<":
-                angleDepth += 1
+                totalDepth += 1
             case ">":
-                angleDepth = max(0, angleDepth - 1)
+                totalDepth -= 1
             case "(":
-                parenDepth += 1
+                totalDepth += 1
             case ")":
-                parenDepth = max(0, parenDepth - 1)
-            case ":" where squareDepth == 0 && angleDepth == 0 && parenDepth == 0:
+                totalDepth -= 1
+            case ":" where totalDepth == 0:
                 return index
             default:
                 break
+            }
+
+            if totalDepth < 0 {
+                return nil
             }
         }
 
