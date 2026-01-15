@@ -265,16 +265,19 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
 
     private static func partiallyGeneratedTypeName(for type: String, preserveOptional: Bool) -> String {
         let trimmed = type.trimmingCharacters(in: .whitespacesAndNewlines)
-        if preserveOptional, trimmed.hasSuffix("??") {
+        if preserveOptional {
             var normalized = trimmed
-            while normalized.hasSuffix("??") {
+            var optionalCount = 0
+            while normalized.hasSuffix("?") {
                 normalized = String(normalized.dropLast())
+                optionalCount += 1
             }
-            return partiallyGeneratedTypeName(for: normalized, preserveOptional: true)
-        }
-        if preserveOptional, trimmed.hasSuffix("?") {
-            let inner = String(trimmed.dropLast())
-            return "\(partiallyGeneratedTypeName(for: inner, preserveOptional: true))?"
+            if optionalCount > 1 {
+                return "\(partiallyGeneratedTypeName(for: normalized, preserveOptional: false))?"
+            }
+            if optionalCount == 1 {
+                return "\(partiallyGeneratedTypeName(for: normalized, preserveOptional: true))?"
+            }
         }
 
         let baseType = baseTypeName(trimmed)
