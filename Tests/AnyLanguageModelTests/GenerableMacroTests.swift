@@ -205,7 +205,7 @@ struct GenerableMacroTests {
     }
 
     @Test("Array properties use partially generated element types")
-    func arrayPropertyPartialTypes() throws {
+    func arrayPropertiesUsePartiallyGeneratedElements() throws {
         let content = GeneratedContent(
             properties: [
                 "items": GeneratedContent(
@@ -224,7 +224,7 @@ struct GenerableMacroTests {
     }
 
     @Test("Primitive properties use concrete partial types")
-    func primitivePropertyPartialTypes() throws {
+    func primitivePropertiesRemainUnchanged() throws {
         let content = GeneratedContent(
             properties: [
                 "title": "Hello",
@@ -239,7 +239,7 @@ struct GenerableMacroTests {
     }
 
     @Test("Array primitives use concrete element types")
-    func arrayPrimitivePartialTypes() throws {
+    func arrayPrimitivesRemainConcrete() throws {
         let content = GeneratedContent(
             properties: [
                 "names": GeneratedContent(
@@ -258,7 +258,7 @@ struct GenerableMacroTests {
     }
 
     @Test("Optional array properties are partially generated")
-    func optionalArrayPartialTypes() throws {
+    func optionalPrimitiveArraysRemainConcrete() throws {
         let content = GeneratedContent(
             properties: [
                 "names": GeneratedContent(
@@ -277,7 +277,7 @@ struct GenerableMacroTests {
     }
 
     @Test("Nested arrays of generable types are handled")
-    func nestedArrayPartialTypes() throws {
+    func nestedArraysGenerateNestedPartialTypes() throws {
         let content = GeneratedContent(
             properties: [
                 "items": GeneratedContent(
@@ -307,7 +307,7 @@ struct GenerableMacroTests {
     }
 
     @Test("Optional primitive properties are handled")
-    func optionalPrimitivePartialTypes() throws {
+    func optionalPrimitivePropertiesHandled() throws {
         let content = GeneratedContent(
             properties: [
                 "title": "Hello",
@@ -324,7 +324,7 @@ struct GenerableMacroTests {
     }
 
     @Test("Optional generable properties are handled")
-    func optionalItemPartialTypes() throws {
+    func optionalGenerableItemBecomesPartial() throws {
         let content = GeneratedContent(
             properties: [
                 "item": GeneratedContent(properties: ["name": "Alpha"])
@@ -337,7 +337,7 @@ struct GenerableMacroTests {
     }
 
     @Test("Optional arrays of generable types are handled")
-    func optionalItemsPartialTypes() throws {
+    func optionalGenerableArraysTransformToPartialArrays() throws {
         let content = GeneratedContent(
             properties: [
                 "items": GeneratedContent(
