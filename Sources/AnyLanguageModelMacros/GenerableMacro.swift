@@ -168,26 +168,127 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
         return GuideInfo(description: nil, guides: [], pattern: nil)
     }
 
-    private static func isDictionaryType(_ type: String) -> Bool {
-        let trimmed = type.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.hasPrefix("[") && trimmed.contains(":") && trimmed.hasSuffix("]")
+    private static func topLevelColonIndex(in text: String) -> String.Index? {
+        var totalDepth = 0
+
+        for index in text.indices {
+            switch text[index] {
+            case "[":
+                totalDepth += 1
+            case "]":
+                totalDepth -= 1
+            case "<":
+                totalDepth += 1
+            case ">":
+                totalDepth -= 1
+            case "(":
+                totalDepth += 1
+            case ")":
+                totalDepth -= 1
+            case ":" where totalDepth == 0:
+                return index
+            default:
+                break
+            }
+
+            if totalDepth < 0 {
+                return nil
+            }
+        }
+
+        return nil
     }
 
     private static func extractDictionaryTypes(_ type: String) -> (key: String, value: String)? {
         let trimmed = type.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        guard trimmed.hasPrefix("[") && trimmed.hasSuffix("]") && trimmed.contains(":") else {
+        guard trimmed.hasPrefix("[") && trimmed.hasSuffix("]") else {
             return nil
         }
 
         let inner = String(trimmed.dropFirst().dropLast())
-        let parts = inner.split(separator: ":", maxSplits: 1).map {
-            $0.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let colonIndex = topLevelColonIndex(in: inner) else {
+            return nil
         }
 
-        guard parts.count == 2 else { return nil }
+        let key = inner[..<colonIndex].trimmingCharacters(in: .whitespacesAndNewlines)
+        let value = inner[inner.index(after: colonIndex)...]
+            .trimmingCharacters(in: .whitespacesAndNewlines)
 
-        return (key: parts[0], value: parts[1])
+        guard !key.isEmpty && !value.isEmpty else {
+            return nil
+        }
+
+        return (key: key, value: value)
+    }
+
+    private static func isDictionaryType(_ type: String) -> Bool {
+        extractDictionaryTypes(type) != nil
+    }
+
+    private static func baseTypeName(_ type: String) -> String {
+        let trimmed = type.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasSuffix("?") {
+            return String(trimmed.dropLast()).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return trimmed
+    }
+
+    private static func arrayElementType(from type: String) -> String? {
+        let trimmed = type.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("[") && trimmed.hasSuffix("]") {
+            let inner = String(trimmed.dropFirst().dropLast())
+            guard topLevelColonIndex(in: inner) == nil else {
+                return nil
+            }
+            return inner.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if trimmed.hasPrefix("Array<") && trimmed.hasSuffix(">") {
+            return String(trimmed.dropFirst("Array<".count).dropLast())
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return nil
+    }
+
+    private static let primitiveTypes: Set<String> = [
+        "String",
+        "Int",
+        "Double",
+        "Float",
+        "Bool",
+        "Decimal",
+    ]
+
+    private static func partiallyGeneratedTypeName(for type: String) -> String {
+        partiallyGeneratedTypeName(for: type, preserveOptional: false)
+    }
+
+    private static func partiallyGeneratedTypeName(for type: String, preserveOptional: Bool) -> String {
+        let trimmed = type.trimmingCharacters(in: .whitespacesAndNewlines)
+        if preserveOptional {
+            var normalized = trimmed
+            var optionalCount = 0
+            while normalized.hasSuffix("?") {
+                normalized = String(normalized.dropLast())
+                optionalCount += 1
+            }
+            if optionalCount > 1 {
+                return "\(partiallyGeneratedTypeName(for: normalized, preserveOptional: false))?"
+            }
+            if optionalCount == 1 {
+                return "\(partiallyGeneratedTypeName(for: normalized, preserveOptional: true))?"
+            }
+        }
+
+        let baseType = baseTypeName(trimmed)
+        if primitiveTypes.contains(baseType) || isDictionaryType(baseType) {
+            return baseType
+        }
+        if let elementType = arrayElementType(from: baseType) {
+            let elementPartial = partiallyGeneratedTypeName(for: elementType, preserveOptional: true)
+            return "[\(elementPartial)]"
+        }
+        return "\(baseType).PartiallyGenerated"
     }
 
     private static func getDefaultValue(for type: String) -> String {
@@ -383,19 +484,20 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
         propertyName: String,
         propertyType: String
     ) -> String {
-        switch propertyType {
-        case "String", "String?":
+        let baseType = baseTypeName(propertyType)
+
+        switch baseType {
+        case "String":
             return "self.\(propertyName) = try? properties[\"\(propertyName)\"]?.value(String.self)"
-        case "Int", "Int?":
+        case "Int":
             return "self.\(propertyName) = try? properties[\"\(propertyName)\"]?.value(Int.self)"
-        case "Double", "Double?":
+        case "Double":
             return "self.\(propertyName) = try? properties[\"\(propertyName)\"]?.value(Double.self)"
-        case "Float", "Float?":
+        case "Float":
             return "self.\(propertyName) = try? properties[\"\(propertyName)\"]?.value(Float.self)"
-        case "Bool", "Bool?":
+        case "Bool":
             return "self.\(propertyName) = try? properties[\"\(propertyName)\"]?.value(Bool.self)"
         default:
-            let baseType = propertyType.replacingOccurrences(of: "?", with: "")
             if isDictionaryType(baseType) {
                 return """
                     if let value = properties[\"\(propertyName)\"] {
@@ -404,10 +506,21 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
                         self.\(propertyName) = nil
                     }
                     """
-            } else {
+            } else if let elementType = arrayElementType(from: baseType) {
+                let elementPartial = partiallyGeneratedTypeName(for: elementType, preserveOptional: true)
+                let arrayPartial = "[\(elementPartial)]"
                 return """
                     if let value = properties[\"\(propertyName)\"] {
-                        self.\(propertyName) = try? \(propertyType)(value)
+                        self.\(propertyName) = try? \(arrayPartial)(value)
+                    } else {
+                        self.\(propertyName) = nil
+                    }
+                    """
+            } else {
+                let partialType = partiallyGeneratedTypeName(for: baseType)
+                return """
+                    if let value = properties[\"\(propertyName)\"] {
+                        self.\(propertyName) = try? \(partialType)(value)
                     } else {
                         self.\(propertyName) = nil
                     }
@@ -676,12 +789,8 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
         properties: [PropertyInfo]
     ) -> DeclSyntax {
         let optionalProperties = properties.map { prop in
-            let propertyType = prop.type
-            if propertyType.hasSuffix("?") {
-                return "public let \(prop.name): \(propertyType)"
-            } else {
-                return "public let \(prop.name): \(propertyType)?"
-            }
+            let partialType = partiallyGeneratedTypeName(for: prop.type)
+            return "public let \(prop.name): \(partialType)?"
         }.joined(separator: "\n        ")
 
         let propertyExtractions = properties.map { prop in
