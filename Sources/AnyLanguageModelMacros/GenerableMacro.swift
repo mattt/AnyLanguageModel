@@ -168,26 +168,60 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
         return GuideInfo(description: nil, guides: [], pattern: nil)
     }
 
-    private static func isDictionaryType(_ type: String) -> Bool {
-        let trimmed = type.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.hasPrefix("[") && trimmed.contains(":") && trimmed.hasSuffix("]")
+    private static func topLevelColonIndex(in text: String) -> String.Index? {
+        var squareDepth = 0
+        var angleDepth = 0
+        var parenDepth = 0
+
+        for index in text.indices {
+            switch text[index] {
+            case "[":
+                squareDepth += 1
+            case "]":
+                squareDepth = max(0, squareDepth - 1)
+            case "<":
+                angleDepth += 1
+            case ">":
+                angleDepth = max(0, angleDepth - 1)
+            case "(":
+                parenDepth += 1
+            case ")":
+                parenDepth = max(0, parenDepth - 1)
+            case ":" where squareDepth == 0 && angleDepth == 0 && parenDepth == 0:
+                return index
+            default:
+                break
+            }
+        }
+
+        return nil
     }
 
     private static func extractDictionaryTypes(_ type: String) -> (key: String, value: String)? {
         let trimmed = type.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        guard trimmed.hasPrefix("[") && trimmed.hasSuffix("]") && trimmed.contains(":") else {
+        guard trimmed.hasPrefix("[") && trimmed.hasSuffix("]") else {
             return nil
         }
 
         let inner = String(trimmed.dropFirst().dropLast())
-        let parts = inner.split(separator: ":", maxSplits: 1).map {
-            $0.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let colonIndex = topLevelColonIndex(in: inner) else {
+            return nil
         }
 
-        guard parts.count == 2 else { return nil }
+        let key = inner[..<colonIndex].trimmingCharacters(in: .whitespacesAndNewlines)
+        let value = inner[inner.index(after: colonIndex)...]
+            .trimmingCharacters(in: .whitespacesAndNewlines)
 
-        return (key: parts[0], value: parts[1])
+        guard !key.isEmpty && !value.isEmpty else {
+            return nil
+        }
+
+        return (key: key, value: value)
+    }
+
+    private static func isDictionaryType(_ type: String) -> Bool {
+        extractDictionaryTypes(type) != nil
     }
 
     private static func baseTypeName(_ type: String) -> String {
@@ -200,8 +234,12 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
 
     private static func arrayElementType(from type: String) -> String? {
         let trimmed = type.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.hasPrefix("[") && trimmed.hasSuffix("]") && !trimmed.contains(":") {
-            return String(trimmed.dropFirst().dropLast()).trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("[") && trimmed.hasSuffix("]") {
+            let inner = String(trimmed.dropFirst().dropLast())
+            guard topLevelColonIndex(in: inner) == nil else {
+                return nil
+            }
+            return inner.trimmingCharacters(in: .whitespacesAndNewlines)
         }
         if trimmed.hasPrefix("Array<") && trimmed.hasSuffix(">") {
             return String(trimmed.dropFirst("Array<".count).dropLast())
@@ -210,10 +248,32 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
         return nil
     }
 
+    private static let primitiveTypes: Set<String> = [
+        "String",
+        "Int",
+        "Double",
+        "Float",
+        "Bool",
+        "Decimal",
+    ]
+
     private static func partiallyGeneratedTypeName(for type: String) -> String {
-        let baseType = baseTypeName(type)
+        partiallyGeneratedTypeName(for: type, preserveOptional: false)
+    }
+
+    private static func partiallyGeneratedTypeName(for type: String, preserveOptional: Bool) -> String {
+        let trimmed = type.trimmingCharacters(in: .whitespacesAndNewlines)
+        if preserveOptional, trimmed.hasSuffix("?") {
+            let inner = String(trimmed.dropLast())
+            return "\(partiallyGeneratedTypeName(for: inner, preserveOptional: true))?"
+        }
+
+        let baseType = baseTypeName(trimmed)
+        if primitiveTypes.contains(baseType) || isDictionaryType(baseType) {
+            return baseType
+        }
         if let elementType = arrayElementType(from: baseType) {
-            let elementPartial = partiallyGeneratedTypeName(for: elementType)
+            let elementPartial = partiallyGeneratedTypeName(for: elementType, preserveOptional: true)
             return "[\(elementPartial)]"
         }
         return "\(baseType).PartiallyGenerated"
@@ -435,7 +495,7 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
                     }
                     """
             } else if let elementType = arrayElementType(from: baseType) {
-                let elementPartial = partiallyGeneratedTypeName(for: elementType)
+                let elementPartial = partiallyGeneratedTypeName(for: elementType, preserveOptional: true)
                 let arrayPartial = "[\(elementPartial)]"
                 return """
                     if let value = properties[\"\(propertyName)\"] {

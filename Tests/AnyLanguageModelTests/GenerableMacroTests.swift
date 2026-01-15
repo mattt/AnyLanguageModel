@@ -46,6 +46,21 @@ private struct ArrayContainer {
     var items: [ArrayItem]
 }
 
+@Generable
+private struct PrimitiveContainer {
+    @Guide(description: "A title")
+    var title: String
+
+    @Guide(description: "A count")
+    var count: Int
+}
+
+@Generable
+private struct PrimitiveArrayContainer {
+    @Guide(description: "Names", .count(2))
+    var names: [String]
+}
+
 @Suite("Generable Macro")
 struct GenerableMacroTests {
     @Test("@Guide description with multiline string")
@@ -162,7 +177,7 @@ struct GenerableMacroTests {
                         GeneratedContent(properties: ["name": "Alpha"]),
                         GeneratedContent(properties: ["name": "Beta"]),
                     ])
-                ),
+                )
             ]
         )
 
@@ -170,6 +185,40 @@ struct GenerableMacroTests {
         let partial = container.asPartiallyGenerated()
         #expect(partial.items?.count == 2)
         #expect(partial.items?.first?.name == "Alpha")
+    }
+
+    @Test("Primitive properties use concrete partial types")
+    func primitivePropertyPartialTypes() throws {
+        let content = GeneratedContent(
+            properties: [
+                "title": "Hello",
+                "count": 3,
+            ]
+        )
+
+        let container = try PrimitiveContainer(content)
+        let partial = container.asPartiallyGenerated()
+        #expect(partial.title == "Hello")
+        #expect(partial.count == 3)
+    }
+
+    @Test("Array primitives use concrete element types")
+    func arrayPrimitivePartialTypes() throws {
+        let content = GeneratedContent(
+            properties: [
+                "names": GeneratedContent(
+                    kind: .array([
+                        GeneratedContent("Alpha"),
+                        GeneratedContent("Beta"),
+                    ])
+                )
+            ]
+        )
+
+        let container = try PrimitiveArrayContainer(content)
+        let partial = container.asPartiallyGenerated()
+        #expect(partial.names?.count == 2)
+        #expect(partial.names?.first == "Alpha")
     }
 }
 
