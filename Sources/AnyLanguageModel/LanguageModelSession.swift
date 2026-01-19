@@ -779,6 +779,7 @@ extension LanguageModelSession {
         public struct Snapshot: Sendable where Content.PartiallyGenerated: Sendable {
             public var content: Content.PartiallyGenerated
             public var rawContent: GeneratedContent
+            var transcriptEntries: [Transcript.Entry] = []
         }
     }
 }
@@ -851,7 +852,7 @@ extension LanguageModelSession.ResponseStream: AsyncSequence {
                 return LanguageModelSession.Response(
                     content: finalContent,
                     rawContent: last.rawContent,
-                    transcriptEntries: []
+                    transcriptEntries: ArraySlice(last.transcriptEntries)
                 )
             }
         }
