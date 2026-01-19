@@ -600,7 +600,8 @@ extension Transcript {
                 messages.append(
                     .init(
                         role: .user,
-                        parts: convertSegmentsToGeminiParts(instructions.segments))
+                        parts: convertSegmentsToGeminiParts(instructions.segments)
+                    )
                 )
             case .prompt(let prompt):
                 messages.append(

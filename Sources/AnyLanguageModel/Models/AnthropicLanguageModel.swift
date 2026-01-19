@@ -672,11 +672,13 @@ extension Transcript {
                 // Add assistant message with tool use blocks
                 let toolUseBlocks: [AnthropicContent] = toolCalls.map { call in
                     let input = try? fromGeneratedContent(call.arguments)
-                    return .toolUse(AnthropicToolUse(
-                        id: call.id,
-                        name: call.toolName,
-                        input: input
-                    ))
+                    return .toolUse(
+                        AnthropicToolUse(
+                            id: call.id,
+                            name: call.toolName,
+                            input: input
+                        )
+                    )
                 }
                 messages.append(
                     .init(
@@ -689,10 +691,14 @@ extension Transcript {
                 messages.append(
                     .init(
                         role: .user,
-                        content: [.toolResult(AnthropicToolResult(
-                            toolUseId: toolOutput.id,
-                            content: convertSegmentsToAnthropicContent(toolOutput.segments)
-                        ))]
+                        content: [
+                            .toolResult(
+                                AnthropicToolResult(
+                                    toolUseId: toolOutput.id,
+                                    content: convertSegmentsToAnthropicContent(toolOutput.segments)
+                                )
+                            )
+                        ]
                     )
                 )
             }
@@ -728,7 +734,9 @@ private enum AnthropicContent: Codable, Sendable {
 
     enum CodingKeys: String, CodingKey { case type }
 
-    enum ContentType: String, Codable { case text = "text", image = "image", toolUse = "tool_use", toolResult = "tool_result" }
+    enum ContentType: String, Codable {
+        case text = "text", image = "image", toolUse = "tool_use", toolResult = "tool_result"
+    }
 
     init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
