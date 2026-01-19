@@ -626,6 +626,7 @@ extension LanguageModelSession {
                 responseFormat: nil
             )
         )
+        transcript.append(promptEntry)
 
         // Extract text content for the Prompt parameter
         let textPrompt = Prompt(prompt)
