@@ -106,5 +106,17 @@ import AnyLanguageModel
             #expect(content.contains("San Francisco"))
             #expect(content.contains("72°F"))
         }
+
+        @available(macOS 26.0, *)
+        @Test func conversationContext() async throws {
+            let model: SystemLanguageModel = SystemLanguageModel()
+            let session = LanguageModelSession(model: model)
+
+            let firstResponse = try await session.respond(to: "My favorite color is blue")
+            #expect(!firstResponse.content.isEmpty)
+
+            let secondResponse = try await session.respond(to: "What did I just tell you?")
+            #expect(secondResponse.content.contains("color"))
+        }
     }
 #endif
