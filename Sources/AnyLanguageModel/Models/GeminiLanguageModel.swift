@@ -247,19 +247,14 @@ public struct GeminiLanguageModel: LanguageModel {
             .appendingPathComponent("models/\(model):generateContent")
         let headers = buildHeaders()
 
-        let userSegments = extractPromptSegments(from: session, fallbackText: prompt.description)
-        var contents = [
-            GeminiContent(role: .user, parts: convertSegmentsToGeminiParts(userSegments))
-        ]
-
         let geminiTools = try buildTools(from: session.tools, serverTools: effectiveServerTools)
 
-        var allEntries: [Transcript.Entry] = []
+        var transcript = session.transcript
 
         // Multi-turn conversation loop for tool calling
         while true {
             let params = try createGenerateContentParams(
-                contents: contents,
+                contents: transcript.toGeminiContent(),
                 tools: geminiTools,
                 options: options,
                 thinking: effectiveThinking
@@ -285,33 +280,14 @@ public struct GeminiLanguageModel: LanguageModel {
                 } ?? []
 
             if !functionCalls.isEmpty {
-                // Append the model's response with function calls to the conversation
-                contents.append(firstCandidate.content)
-
                 // Resolve function calls
                 let invocations = try await resolveFunctionCalls(functionCalls, session: session)
                 if !invocations.isEmpty {
-                    allEntries.append(.toolCalls(Transcript.ToolCalls(invocations.map(\.call))))
+                    transcript.append(.toolCalls(Transcript.ToolCalls(invocations.map(\.call))))
 
-                    // Build tool response parts for Gemini
-                    var toolParts: [GeminiPart] = []
                     for invocation in invocations {
-                        allEntries.append(.toolOutput(invocation.output))
-
-                        // Convert tool output to function response
-                        let responseValue = try toJSONValue(invocation.output)
-                        toolParts.append(
-                            .functionResponse(
-                                GeminiFunctionResponse(
-                                    name: invocation.call.toolName,
-                                    response: responseValue
-                                )
-                            )
-                        )
+                        transcript.append(.toolOutput(invocation.output))
                     }
-
-                    // Append tool responses to the conversation
-                    contents.append(GeminiContent(role: .tool, parts: toolParts))
                 }
 
                 // Continue the loop to send the next request with tool results
@@ -329,7 +305,7 @@ public struct GeminiLanguageModel: LanguageModel {
                 return LanguageModelSession.Response(
                     content: text as! Content,
                     rawContent: GeneratedContent(text),
-                    transcriptEntries: ArraySlice(allEntries)
+                    transcriptEntries: ArraySlice(transcript)
                 )
             }
         }
@@ -351,11 +327,6 @@ public struct GeminiLanguageModel: LanguageModel {
         let effectiveThinking = customOptions?.thinking ?? _thinking
         let effectiveServerTools = customOptions?.serverTools ?? _serverTools
 
-        let userSegments = extractPromptSegments(from: session, fallbackText: prompt.description)
-        let contents = [
-            GeminiContent(role: .user, parts: convertSegmentsToGeminiParts(userSegments))
-        ]
-
         var streamURL =
             baseURL
             .appendingPathComponent(apiVersion)
@@ -372,7 +343,7 @@ public struct GeminiLanguageModel: LanguageModel {
                     let geminiTools = try buildTools(from: session.tools, serverTools: effectiveServerTools)
 
                     let params = try createGenerateContentParams(
-                        contents: contents,
+                        contents: session.transcript.toGeminiContent(),
                         tools: geminiTools,
                         options: options,
                         thinking: effectiveThinking
@@ -586,6 +557,16 @@ private func toGeneratedContent(_ value: [String: JSONValue]?) throws -> Generat
     return try GeneratedContent(json: json)
 }
 
+private func fromGeneratedContent(_ content: GeneratedContent) throws -> [String: JSONValue] {
+    let data = try JSONEncoder().encode(content)
+    let jsonValue = try JSONDecoder().decode(JSONValue.self, from: data)
+
+    guard case .object(let dict) = jsonValue else {
+        return [:]
+    }
+    return dict
+}
+
 private func toJSONValue(_ toolOutput: Transcript.ToolOutput) throws -> [String: JSONValue] {
     var result: [String: JSONValue] = [:]
 
@@ -606,6 +587,64 @@ private func toJSONValue(_ toolOutput: Transcript.ToolOutput) throws -> [String:
     }
 
     return result
+}
+
+// MARK: - Supporting Types
+
+extension Transcript {
+    fileprivate func toGeminiContent() -> [GeminiContent] {
+        var messages = [GeminiContent]()
+        for item in self {
+            switch item {
+            case .instructions(let instructions):
+                messages.append(
+                    .init(
+                        role: .user,
+                        parts: convertSegmentsToGeminiParts(instructions.segments))
+                )
+            case .prompt(let prompt):
+                messages.append(
+                    .init(
+                        role: .user,
+                        parts: convertSegmentsToGeminiParts(prompt.segments)
+                    )
+                )
+            case .response(let response):
+                messages.append(
+                    .init(
+                        role: .model,
+                        parts: convertSegmentsToGeminiParts(response.segments)
+                    )
+                )
+            case .toolCalls(let toolCalls):
+                // Add model's response with function calls
+                let functionCallParts: [GeminiPart] = toolCalls.map { call in
+                    let args = try? fromGeneratedContent(call.arguments)
+                    return .functionCall(GeminiFunctionCall(name: call.toolName, args: args))
+                }
+                messages.append(
+                    .init(
+                        role: .model,
+                        parts: functionCallParts
+                    )
+                )
+            case .toolOutput(let toolOutput):
+                // Add function response as a user message (Gemini API expects function responses from user role)
+                let response = try? toJSONValue(toolOutput)
+                let functionResponse = GeminiFunctionResponse(
+                    name: toolOutput.toolName,
+                    response: response ?? [:]
+                )
+                messages.append(
+                    .init(
+                        role: .user,
+                        parts: [.functionResponse(functionResponse)]
+                    )
+                )
+            }
+        }
+        return messages
+    }
 }
 
 private enum GeminiTool: Sendable {
@@ -766,15 +805,6 @@ private func convertSegmentsToGeminiParts(_ segments: [Transcript.Segment]) -> [
         }
     }
     return parts
-}
-
-private func extractPromptSegments(from session: LanguageModelSession, fallbackText: String) -> [Transcript.Segment] {
-    for entry in session.transcript.reversed() {
-        if case .prompt(let p) = entry {
-            return p.segments
-        }
-    }
-    return [.text(.init(content: fallbackText))]
 }
 
 private struct GeminiFunctionCall: Codable, Sendable {

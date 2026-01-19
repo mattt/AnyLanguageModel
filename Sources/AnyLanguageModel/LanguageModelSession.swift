@@ -117,11 +117,6 @@ public final class LanguageModelSession: @unchecked Sendable {
         let relay = AsyncThrowingStream<ResponseStream<Content>.Snapshot, any Error> { continuation in
             let stream = upstream
             Task {
-                // Add prompt to transcript when stream starts
-                await MainActor.run {
-                    session.transcript.append(promptEntry)
-                }
-
                 await session.beginResponding()
                 var lastSnapshot: ResponseStream<Content>.Snapshot?
                 do {
@@ -225,7 +220,7 @@ public final class LanguageModelSession: @unchecked Sendable {
         includeSchemaInPrompt: Bool = true,
         options: GenerationOptions = GenerationOptions()
     ) -> sending ResponseStream<Content> where Content: Generable {
-        // Create prompt entry that will be added when stream starts
+        // Add prompt to transcript
         let promptEntry = Transcript.Entry.prompt(
             Transcript.Prompt(
                 segments: [.text(.init(content: prompt.description))],
@@ -233,6 +228,7 @@ public final class LanguageModelSession: @unchecked Sendable {
                 responseFormat: nil
             )
         )
+        transcript.append(promptEntry)
 
         return wrapStream(
             model.streamResponse(
@@ -630,6 +626,7 @@ extension LanguageModelSession {
                 responseFormat: nil
             )
         )
+        transcript.append(promptEntry)
 
         // Extract text content for the Prompt parameter
         let textPrompt = Prompt(prompt)
