@@ -1135,7 +1135,8 @@ extension Transcript {
                 let openAIToolCalls: [JSONValue] = toolCalls.map { call in
                     let argumentsJSON: String
                     if let data = try? JSONEncoder().encode(call.arguments),
-                       let jsonString = String(data: data, encoding: .utf8) {
+                        let jsonString = String(data: data, encoding: .utf8)
+                    {
                         argumentsJSON = jsonString
                     } else {
                         argumentsJSON = "{}"
@@ -1146,15 +1147,15 @@ extension Transcript {
                         "type": .string("function"),
                         "function": .object([
                             "name": .string(call.toolName),
-                            "arguments": .string(argumentsJSON)
-                        ])
+                            "arguments": .string(argumentsJSON),
+                        ]),
                     ])
                 }
 
                 let rawMessage: JSONValue = .object([
                     "role": .string("assistant"),
                     "content": .null,
-                    "tool_calls": .array(openAIToolCalls)
+                    "tool_calls": .array(openAIToolCalls),
                 ])
 
                 messages.append(
