@@ -268,12 +268,12 @@
                                         .init(content: placeholder.content, rawContent: placeholder.rawContent)
                                     )
                                 }
-                                continuation.finish()
+                                continuation.finish(throwing: error)
                             }
                         }
 
+                        var didYield = false
                         do {
-                            var didYield = false
                             for try await snapshot in fmStream {
                                 let jsonString = snapshot.content.jsonString
                                 let raw =
@@ -309,18 +309,22 @@
                             }
                             continuation.finish()
                         } catch {
-                            await processTextFallback()
+                            if didYield {
+                                continuation.finish(throwing: error)
+                            } else {
+                                await processTextFallback()
+                            }
                         }
                     }
 
-                    let task: _Concurrency.Task<Void, Never> = _Concurrency.Task(priority: nil) {
+                    let streamingTask: _Concurrency.Task<Void, Never> = _Concurrency.Task(priority: nil) {
                         if type == String.self {
                             await processStringStream()
                         } else {
                             await processStructuredStream()
                         }
                     }
-                    continuation.onTermination = { _ in task.cancel() }
+                    continuation.onTermination = { _ in streamingTask.cancel() }
                 }
 
             return LanguageModelSession.ResponseStream(stream: stream)
