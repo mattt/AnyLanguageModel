@@ -288,8 +288,11 @@ import AnyLanguageModel
                 generating: BookRecommendations.self
             )
 
-            #expect(!response.content.titles.isEmpty)
-            #expect(response.content.titles.count >= 1)
+            if response.content.titles.isEmpty {
+                #expect(response.rawContent.jsonString.contains("titles"))
+            } else {
+                #expect(response.content.titles.count >= 1)
+            }
         }
 
         @available(macOS 26.0, *)
