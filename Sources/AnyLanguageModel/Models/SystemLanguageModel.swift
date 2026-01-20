@@ -357,12 +357,6 @@
 
     // MARK: - Helpers
 
-    // Minimal box to allow capturing non-Sendable values in @Sendable closures safely.
-    private final class UnsafeSendableBox<T>: @unchecked Sendable {
-        var value: T
-        init(value: T) { self.value = value }
-    }
-
     @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
     extension Prompt {
         fileprivate func toFoundationModels() -> FoundationModels.Prompt {
