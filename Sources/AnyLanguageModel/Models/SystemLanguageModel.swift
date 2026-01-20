@@ -101,7 +101,11 @@
 
                 func finalize(content: Content) -> LanguageModelSession.Response<Content> {
                     let normalizedRaw = content.generatedContent
-                    if normalizedRaw.jsonString.contains("[]"), let placeholder = placeholderContent(for: type) {
+                    if let jsonValue = try? JSONValue(normalizedRaw),
+                        case .array(let values) = jsonValue,
+                        values.isEmpty,
+                        let placeholder = placeholderContent(for: type)
+                    {
                         return LanguageModelSession.Response(
                             content: placeholder.content,
                             rawContent: placeholder.rawContent,
