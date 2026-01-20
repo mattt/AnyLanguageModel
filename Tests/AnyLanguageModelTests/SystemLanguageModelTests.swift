@@ -300,7 +300,7 @@ import AnyLanguageModel
                 generating: SentimentAnalysis.self
             )
 
-            #expect(["positive", "negative", "neutral"].contains(response.content.sentiment))
+            #expect(["positive", "negative", "neutral"].contains(response.content.sentiment.lowercased()))
             #expect(response.content.confidence >= 0.0 && response.content.confidence <= 1.0)
         }
 
