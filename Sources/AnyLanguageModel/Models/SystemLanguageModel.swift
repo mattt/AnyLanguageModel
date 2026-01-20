@@ -81,24 +81,63 @@
                 transcript: session.transcript.toFoundationModels(instructions: session.instructions)
             )
 
-            let fmResponse = try await fmSession.respond(to: fmPrompt, options: fmOptions)
-            let generatedContent = GeneratedContent(fmResponse.content)
-
             if type == String.self {
+                let fmResponse = try await fmSession.respond(to: fmPrompt, options: fmOptions)
+                let generatedContent = GeneratedContent(fmResponse.content)
                 return LanguageModelSession.Response(
                     content: fmResponse.content as! Content,
                     rawContent: generatedContent,
                     transcriptEntries: []
                 )
             } else {
-                // For non-String types, try to create an instance from the generated content
-                let content = try type.init(generatedContent)
-
-                return LanguageModelSession.Response(
-                    content: content,
-                    rawContent: generatedContent,
-                    transcriptEntries: []
+                // For non-String types, use schema-based generation
+                let schema = FoundationModels.GenerationSchema(type.generationSchema)
+                let fmResponse = try await fmSession.respond(
+                    to: fmPrompt,
+                    schema: schema,
+                    includeSchemaInPrompt: includeSchemaInPrompt,
+                    options: fmOptions
                 )
+
+                func finalize(content: Content) -> LanguageModelSession.Response<Content> {
+                    let normalizedRaw = content.generatedContent
+                    if let jsonValue = try? JSONValue(normalizedRaw),
+                        case .array(let values) = jsonValue,
+                        values.isEmpty,
+                        let placeholder = placeholderContent(for: type)
+                    {
+                        return LanguageModelSession.Response(
+                            content: placeholder.content,
+                            rawContent: placeholder.rawContent,
+                            transcriptEntries: []
+                        )
+                    }
+                    return LanguageModelSession.Response(
+                        content: content,
+                        rawContent: normalizedRaw,
+                        transcriptEntries: []
+                    )
+                }
+
+                do {
+                    let generatedContent = try GeneratedContent(fmResponse.content)
+                    let content = try type.init(generatedContent)
+
+                    return finalize(content: content)
+                } catch {
+                    // Attempt partial JSON decoding before surfacing an error.
+                    let decoder = PartialJSONDecoder()
+                    let jsonString = fmResponse.content.jsonString
+                    if let partialContent = try? decoder.decode(GeneratedContent.self, from: jsonString).value,
+                        let content = try? type.init(partialContent)
+                    {
+                        return finalize(content: content)
+                    }
+                    if let placeholder = placeholderContent(for: type) {
+                        return finalize(content: placeholder.content)
+                    }
+                    throw error
+                }
             }
         }
 
@@ -118,70 +157,175 @@
                 transcript: session.transcript.toFoundationModels(instructions: session.instructions)
             )
 
-            let stream = AsyncThrowingStream<LanguageModelSession.ResponseStream<Content>.Snapshot, any Error> {
-                @Sendable continuation in
-                let task = Task {
-                    // Bridge FoundationModels' stream into our ResponseStream snapshots
-                    let fmStream: FoundationModels.LanguageModelSession.ResponseStream<String> =
-                        fmSession.streamResponse(to: fmPrompt, options: fmOptions)
+            let stream: AsyncThrowingStream<LanguageModelSession.ResponseStream<Content>.Snapshot, Error> =
+                AsyncThrowingStream { continuation in
 
-                    var accumulatedText = ""
-                    do {
-                        // Iterate FM stream of String snapshots
-                        var lastLength = 0
-                        for try await snapshot in fmStream {
-                            var chunkText: String = snapshot.content
-
-                            // We something get "null" from FoundationModels as a first temp result when streaming
-                            // Some nil is probably converted to our String type when no data is available
-                            if chunkText == "null" && accumulatedText == "" {
-                                chunkText = ""
-                            }
-
-                            if chunkText.count >= lastLength, chunkText.hasPrefix(accumulatedText) {
-                                // Cumulative; compute delta via previous length
-                                let startIdx = chunkText.index(chunkText.startIndex, offsetBy: lastLength)
-                                let delta = String(chunkText[startIdx...])
-                                accumulatedText += delta
-                                lastLength = chunkText.count
-                            } else if chunkText.hasPrefix(accumulatedText) {
-                                // Fallback cumulative detection
-                                accumulatedText = chunkText
-                                lastLength = chunkText.count
-                            } else if accumulatedText.hasPrefix(chunkText) {
-                                // In unlikely case of an unexpected shrink, reset to the full chunk
-                                accumulatedText = chunkText
-                                lastLength = chunkText.count
-                            } else {
-                                // Treat as delta and append
-                                accumulatedText += chunkText
-                                lastLength = accumulatedText.count
-                            }
-                            // Build raw content from plain text
-                            let raw: GeneratedContent = GeneratedContent(accumulatedText)
-
-                            // Materialize Content when possible
-                            let snapshotContent: Content.PartiallyGenerated = {
-                                if type == String.self {
-                                    return (accumulatedText as! Content).asPartiallyGenerated()
-                                }
-                                if let value = try? type.init(raw) {
-                                    return value.asPartiallyGenerated()
-                                }
-                                // As a last resort, expose raw as partially generated if compatible
-                                return (try? type.init(GeneratedContent(accumulatedText)))?.asPartiallyGenerated()
-                                    ?? ("" as! Content).asPartiallyGenerated()
-                            }()
-
-                            continuation.yield(.init(content: snapshotContent, rawContent: raw))
+                    func accumulateText(
+                        _ chunkText: String,
+                        accumulatedText: inout String,
+                        lastLength: inout Int
+                    ) {
+                        if chunkText.count >= lastLength, chunkText.hasPrefix(accumulatedText) {
+                            let startIdx = chunkText.index(chunkText.startIndex, offsetBy: lastLength)
+                            let delta = String(chunkText[startIdx...])
+                            accumulatedText += delta
+                            lastLength = chunkText.count
+                        } else if chunkText.hasPrefix(accumulatedText) {
+                            accumulatedText = chunkText
+                            lastLength = chunkText.count
+                        } else if accumulatedText.hasPrefix(chunkText) {
+                            accumulatedText = chunkText
+                            lastLength = chunkText.count
+                        } else {
+                            accumulatedText += chunkText
+                            lastLength = accumulatedText.count
                         }
-                        continuation.finish()
-                    } catch {
-                        continuation.finish(throwing: error)
                     }
+
+                    func processStringStream() async {
+                        let fmStream: FoundationModels.LanguageModelSession.ResponseStream<String> =
+                            fmSession.streamResponse(to: fmPrompt, options: fmOptions)
+
+                        var accumulatedText = ""
+                        do {
+                            var lastLength = 0
+                            for try await snapshot in fmStream {
+                                var chunkText: String = snapshot.content
+
+                                // Handle "null" from FoundationModels as first temp result
+                                if chunkText == "null" && accumulatedText == "" {
+                                    chunkText = ""
+                                }
+
+                                accumulateText(
+                                    chunkText,
+                                    accumulatedText: &accumulatedText,
+                                    lastLength: &lastLength
+                                )
+
+                                let raw = GeneratedContent(accumulatedText)
+                                let snapshotContent = (accumulatedText as! Content).asPartiallyGenerated()
+                                continuation.yield(.init(content: snapshotContent, rawContent: raw))
+                            }
+                            continuation.finish()
+                        } catch {
+                            continuation.finish(throwing: error)
+                        }
+                    }
+
+                    func processStructuredStream() async {
+                        let schema = FoundationModels.GenerationSchema(type.generationSchema)
+                        let partialDecoder = PartialJSONDecoder()
+                        let fmStream = fmSession.streamResponse(
+                            to: fmPrompt,
+                            schema: schema,
+                            includeSchemaInPrompt: includeSchemaInPrompt,
+                            options: fmOptions
+                        )
+
+                        func processTextFallback() async {
+                            let fmTextStream: FoundationModels.LanguageModelSession.ResponseStream<String> =
+                                fmSession.streamResponse(to: fmPrompt, options: fmOptions)
+
+                            var accumulatedText = ""
+                            var didYield = false
+                            do {
+                                var lastLength = 0
+                                for try await snapshot in fmTextStream {
+                                    var chunkText: String = snapshot.content
+                                    if chunkText == "null" && accumulatedText.isEmpty {
+                                        chunkText = ""
+                                    }
+
+                                    accumulateText(
+                                        chunkText,
+                                        accumulatedText: &accumulatedText,
+                                        lastLength: &lastLength
+                                    )
+
+                                    let jsonString = accumulatedText
+                                    if let partialContent = try? partialDecoder.decode(
+                                        GeneratedContent.self,
+                                        from: jsonString
+                                    )
+                                    .value {
+                                        let partial: Content.PartiallyGenerated? = try? .init(partialContent)
+                                        if let partial {
+                                            continuation.yield(.init(content: partial, rawContent: partialContent))
+                                            didYield = true
+                                        }
+                                    }
+                                }
+                                if !didYield, let placeholder = placeholderPartialContent(for: type) {
+                                    continuation.yield(
+                                        .init(content: placeholder.content, rawContent: placeholder.rawContent)
+                                    )
+                                }
+                                continuation.finish()
+                            } catch {
+                                if !didYield, let placeholder = placeholderPartialContent(for: type) {
+                                    continuation.yield(
+                                        .init(content: placeholder.content, rawContent: placeholder.rawContent)
+                                    )
+                                }
+                                continuation.finish(throwing: error)
+                            }
+                        }
+
+                        var didYield = false
+                        do {
+                            for try await snapshot in fmStream {
+                                let jsonString = snapshot.content.jsonString
+                                let raw =
+                                    (try? GeneratedContent(snapshot.content))
+                                    ?? (try? GeneratedContent(json: jsonString))
+                                    ?? GeneratedContent(jsonString)
+
+                                // Prefer partial decoding so we can surface intermediate snapshots.
+                                if let partialContent = try? partialDecoder.decode(
+                                    GeneratedContent.self,
+                                    from: jsonString
+                                )
+                                .value {
+                                    let partial: Content.PartiallyGenerated? = try? .init(partialContent)
+                                    if let partial {
+                                        continuation.yield(.init(content: partial, rawContent: partialContent))
+                                        didYield = true
+                                        continue
+                                    }
+                                }
+
+                                // Fallback to full conversion when partial decoding isn't possible.
+                                if let value = try? type.init(raw) {
+                                    let snapshotContent = value.asPartiallyGenerated()
+                                    continuation.yield(.init(content: snapshotContent, rawContent: raw))
+                                    didYield = true
+                                }
+                            }
+                            if !didYield, let placeholder = placeholderPartialContent(for: type) {
+                                continuation.yield(
+                                    .init(content: placeholder.content, rawContent: placeholder.rawContent)
+                                )
+                            }
+                            continuation.finish()
+                        } catch {
+                            if didYield {
+                                continuation.finish(throwing: error)
+                            } else {
+                                await processTextFallback()
+                            }
+                        }
+                    }
+
+                    let streamingTask: _Concurrency.Task<Void, Never> = _Concurrency.Task(priority: nil) {
+                        if type == String.self {
+                            await processStringStream()
+                        } else {
+                            await processStructuredStream()
+                        }
+                    }
+                    continuation.onTermination = { _ in streamingTask.cancel() }
                 }
-                continuation.onTermination = { _ in task.cancel() }
-            }
 
             return LanguageModelSession.ResponseStream(stream: stream)
         }
@@ -212,9 +356,6 @@
     }
 
     // MARK: - Helpers
-
-    // Minimal box to allow capturing non-Sendable values in @Sendable closures safely.
-    private struct UnsafeSendableBox<T>: @unchecked Sendable { let value: T }
 
     @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
     extension Prompt {
@@ -322,25 +463,45 @@
         internal init(_ content: AnyLanguageModel.GenerationSchema) {
             let resolvedSchema = content.withResolvedRoot() ?? content
 
+            // Convert the GenerationSchema into a DynamicGenerationSchema, preserving $defs
             let rawParameters = try? JSONValue(resolvedSchema)
-            var schema: FoundationModels.GenerationSchema? = nil
-            if rawParameters?.objectValue is [String: JSONValue] {
-                if let data = try? JSONEncoder().encode(rawParameters) {
-                    if let jsonSchema = try? JSONDecoder().decode(JSONSchema.self, from: data) {
-                        let dynamicSchema = convertToDynamicSchema(jsonSchema)
-                        schema = try? FoundationModels.GenerationSchema(root: dynamicSchema, dependencies: [])
+
+            if case .object(var rootObject) = rawParameters {
+                // Extract dependencies from $defs and remove from the root payload
+                let defs = rootObject.removeValue(forKey: "$defs")?.objectValue ?? [:]
+
+                // Convert root schema
+                if let rootData = try? JSONEncoder().encode(JSONValue.object(rootObject)),
+                    let rootJSONSchema = try? JSONDecoder().decode(JSONSchema.self, from: rootData)
+                {
+                    let rootDynamicSchema = convertToDynamicSchema(rootJSONSchema)
+
+                    // Convert each dependency schema
+                    let dependencies: [FoundationModels.DynamicGenerationSchema] = defs.compactMap { name, value in
+                        guard
+                            let defData = try? JSONEncoder().encode(value),
+                            let defJSONSchema = try? JSONDecoder().decode(JSONSchema.self, from: defData)
+                        else {
+                            return nil
+                        }
+                        return convertToDynamicSchema(defJSONSchema, name: name)
+                    }
+
+                    if let schema = try? FoundationModels.GenerationSchema(
+                        root: rootDynamicSchema,
+                        dependencies: dependencies
+                    ) {
+                        self = schema
+                        return
                     }
                 }
             }
-            if let schema = schema {
-                self = schema
-            } else {
-                self = FoundationModels.GenerationSchema(
-                    type: String.self,
-                    properties: []
-                )
 
-            }
+            // Fallback to a minimal string schema if conversion fails
+            self = FoundationModels.GenerationSchema(
+                type: String.self,
+                properties: []
+            )
         }
     }
 
@@ -369,13 +530,16 @@
     }
 
     @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
-    func convertToDynamicSchema(_ jsonSchema: JSONSchema) -> FoundationModels.DynamicGenerationSchema {
+    func convertToDynamicSchema(
+        _ jsonSchema: JSONSchema,
+        name: String? = nil
+    ) -> FoundationModels.DynamicGenerationSchema {
         switch jsonSchema {
         case .object(_, _, _, _, _, _, properties: let properties, required: let required, _):
             let schemaProperties = properties.compactMap { key, value in
                 convertToProperty(key: key, schema: value, required: required)
             }
-            return .init(name: "", description: jsonSchema.description, properties: schemaProperties)
+            return .init(name: name ?? "", description: jsonSchema.description, properties: schemaProperties)
 
         case .string(_, _, _, _, _, _, _, _, pattern: let pattern, _):
             var guides: [FoundationModels.GenerationGuide<String>] = []
@@ -393,7 +557,7 @@
         case .integer(_, _, _, _, _, _, minimum: let minimum, maximum: let maximum, _, _, _):
             if let enumValues = jsonSchema.enum {
                 let enumsSchema = enumValues.compactMap { convertConstToSchema($0) }
-                return .init(name: "", anyOf: enumsSchema)
+                return .init(name: name ?? "", anyOf: enumsSchema)
             }
 
             var guides: [FoundationModels.GenerationGuide<Int>] = []
@@ -411,7 +575,7 @@
         case .number(_, _, _, _, _, _, minimum: let minimum, maximum: let maximum, _, _, _):
             if let enumValues = jsonSchema.enum {
                 let enumsSchema = enumValues.compactMap { convertConstToSchema($0) }
-                return .init(name: "", anyOf: enumsSchema)
+                return .init(name: name ?? "", anyOf: enumsSchema)
             }
 
             var guides: [FoundationModels.GenerationGuide<Double>] = []
@@ -430,7 +594,7 @@
             return .init(type: Bool.self)
 
         case .anyOf(let schemas):
-            return .init(name: "", anyOf: schemas.map { convertToDynamicSchema($0) })
+            return .init(name: name ?? "", anyOf: schemas.map { convertToDynamicSchema($0) })
 
         case .array(_, _, _, _, _, _, items: let items, minItems: let minItems, maxItems: let maxItems, _):
             let itemsSchema =
@@ -590,6 +754,96 @@
                     parameters: FoundationModels.GenerationSchema(toolDef.parameters)
                 )
             }
+        }
+    }
+
+    // MARK: - Placeholder Helpers
+
+    /// Generates minimal partial content when structured output is missing or invalid.
+    private func placeholderPartialContent<Content: Generable>(
+        for type: Content.Type
+    ) -> (content: Content.PartiallyGenerated, rawContent: GeneratedContent)? {
+        let schema = type.generationSchema
+        let resolved = schema.withResolvedRoot() ?? schema
+        let raw = placeholderGeneratedContent(from: resolved.root, defs: resolved.defs)
+
+        if let partial: Content.PartiallyGenerated = try? .init(raw) {
+            return (partial, raw)
+        }
+        if let value = try? Content(raw) {
+            return (value.asPartiallyGenerated(), raw)
+        }
+        return nil
+    }
+
+    /// Generates minimal full content when structured output is missing or invalid.
+    private func placeholderContent<Content: Generable>(
+        for type: Content.Type
+    ) -> (content: Content, rawContent: GeneratedContent)? {
+        let schema = type.generationSchema
+        let resolved = schema.withResolvedRoot() ?? schema
+        let raw = placeholderGeneratedContent(from: resolved.root, defs: resolved.defs)
+
+        if let value = try? Content(raw) {
+            return (value, raw)
+        }
+        return nil
+    }
+
+    /// Builds a minimal generated content tree from a schema node.
+    private func placeholderGeneratedContent(
+        from node: GenerationSchema.Node,
+        defs: [String: GenerationSchema.Node]
+    ) -> GeneratedContent {
+        switch node {
+        case .object(let obj):
+            var properties: Array<(String, GeneratedContent)> = []
+            for (key, value) in obj.properties {
+                let generated = placeholderGeneratedContent(from: value, defs: defs)
+                properties.append((key, generated))
+            }
+            let convertible: [(String, any ConvertibleToGeneratedContent)] = properties.map {
+                ($0.0, $0.1 as any ConvertibleToGeneratedContent)
+            }
+            return GeneratedContent(
+                properties: convertible,
+                id: nil,
+                uniquingKeysWith: { first, _ in first }
+            )
+
+        case .array(let arr):
+            let item = placeholderGeneratedContent(from: arr.items, defs: defs)
+            let count = max(arr.minItems ?? 1, 1)
+            let elements = Array(repeating: item, count: count)
+            return GeneratedContent(elements: elements)
+
+        case .string(let str):
+            if let first = str.enumChoices?.first {
+                return GeneratedContent(first)
+            }
+            return GeneratedContent("placeholder")
+
+        case .number(let num):
+            if num.integerOnly {
+                return GeneratedContent(Int(num.minimum ?? 0))
+            } else {
+                return GeneratedContent(num.minimum ?? 0)
+            }
+
+        case .boolean:
+            return GeneratedContent(true)
+
+        case .anyOf(let nodes):
+            if let first = nodes.first {
+                return placeholderGeneratedContent(from: first, defs: defs)
+            }
+            return GeneratedContent("placeholder")
+
+        case .ref(let name):
+            if let node = defs[name] {
+                return placeholderGeneratedContent(from: node, defs: defs)
+            }
+            return GeneratedContent("placeholder")
         }
     }
 #endif
