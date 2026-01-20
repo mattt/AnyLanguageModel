@@ -145,12 +145,15 @@ private struct SupportedModel: Sendable {
 
         #if Llama
             if let modelPath = environmentValue("LLAMA_MODEL_PATH") {
-                models.append(SupportedModel(name: "LlamaLanguageModel", model: LlamaLanguageModel(modelPath: modelPath)))
+                models.append(
+                    SupportedModel(name: "LlamaLanguageModel", model: LlamaLanguageModel(modelPath: modelPath))
+                )
             }
         #endif
 
         #if MLX
-            let shouldRunMLX = environmentValue("ENABLE_MLX_TESTS") != nil
+            let shouldRunMLX =
+                environmentValue("ENABLE_MLX_TESTS") != nil
                 || (environmentValue("CI") == nil
                     && environmentValue("HF_TOKEN") != nil
                     && environmentValue("XCTestConfigurationFilePath") != nil)
@@ -201,9 +204,9 @@ private func testAllModels(_ test: (SupportedModel) async throws -> Void) async 
 private func logGenerated<T: Generable>(_ content: T, model: String) {
     let json = content.generatedContent.jsonString
     if let data = json.data(using: .utf8),
-       let object = try? JSONSerialization.jsonObject(with: data),
-       let prettyData = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]),
-       let prettyJSON = String(data: prettyData, encoding: .utf8)
+        let object = try? JSONSerialization.jsonObject(with: data),
+        let prettyData = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]),
+        let prettyJSON = String(data: prettyData, encoding: .utf8)
     {
         print("\n[\(model)]\n\(prettyJSON)\n")
     } else {

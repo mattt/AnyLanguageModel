@@ -148,7 +148,8 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
                         if let functionCall = guideExpression.as(FunctionCallExprSyntax.self) {
                             applyConstraints(from: functionCall, into: &constraints)
                         } else if let memberAccess = guideExpression.as(MemberAccessExprSyntax.self),
-                                  let functionCall = memberAccess.base?.as(FunctionCallExprSyntax.self) {
+                            let functionCall = memberAccess.base?.as(FunctionCallExprSyntax.self)
+                        {
                             applyConstraints(from: functionCall, into: &constraints)
                         }
                     }
@@ -175,7 +176,8 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
         switch functionName {
         case "count":
             if let intLiteral = firstArgument.expression.as(IntegerLiteralExprSyntax.self),
-               let value = Int(intLiteral.literal.text) {
+                let value = Int(intLiteral.literal.text)
+            {
                 constraints.minimumCount = value
                 constraints.maximumCount = value
             } else if let rangeExpression = firstArgument.expression.as(SequenceExprSyntax.self) {
@@ -185,12 +187,14 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
             }
         case "minimumCount":
             if let intLiteral = firstArgument.expression.as(IntegerLiteralExprSyntax.self),
-               let value = Int(intLiteral.literal.text) {
+                let value = Int(intLiteral.literal.text)
+            {
                 constraints.minimumCount = value
             }
         case "maximumCount":
             if let intLiteral = firstArgument.expression.as(IntegerLiteralExprSyntax.self),
-               let value = Int(intLiteral.literal.text) {
+                let value = Int(intLiteral.literal.text)
+            {
                 constraints.maximumCount = value
             }
         case "minimum":
@@ -220,8 +224,9 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
             }
 
             if functionName == "pattern",
-               let firstArg = functionCall.arguments.first,
-               let stringLiteral = firstArg.expression.as(StringLiteralExprSyntax.self) {
+                let firstArg = functionCall.arguments.first,
+                let stringLiteral = firstArg.expression.as(StringLiteralExprSyntax.self)
+            {
                 return stringLiteral.segments.description.trimmingCharacters(in: .init(charactersIn: "\""))
             }
         }
@@ -269,7 +274,8 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
     /// Multi-line strings need newlines converted to `\n` escape sequences, and special characters
     /// (backslashes and quotes) must be escaped.
     private static func makeSwiftStringLiteralExpression(_ value: String) -> String {
-        let escaped = value
+        let escaped =
+            value
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
             .replacingOccurrences(of: "\n", with: "\\n")
@@ -306,7 +312,8 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
         } else if let floatLiteral = expression.as(FloatLiteralExprSyntax.self) {
             return Double(floatLiteral.literal.text)
         } else if let prefixExpression = expression.as(PrefixOperatorExprSyntax.self),
-                  prefixExpression.operator.text == "-" {
+            prefixExpression.operator.text == "-"
+        {
             if let value = parseNumericLiteral(prefixExpression.expression) {
                 return -value
             }
@@ -317,8 +324,8 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
     private static func parseClosedRangeInt(_ expression: SequenceExprSyntax) -> (Int?, Int?) {
         let elements = Array(expression.elements)
         guard elements.count == 3,
-              let lowerBound = elements[0].as(IntegerLiteralExprSyntax.self),
-              let upperBound = elements[2].as(IntegerLiteralExprSyntax.self)
+            let lowerBound = elements[0].as(IntegerLiteralExprSyntax.self),
+            let upperBound = elements[2].as(IntegerLiteralExprSyntax.self)
         else { return (nil, nil) }
         return (Int(lowerBound.literal.text), Int(upperBound.literal.text))
     }

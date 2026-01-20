@@ -157,10 +157,12 @@ package struct ConstrainedJSONGenerator<Backend: TokenBackend> {
         while backend.remainingTokens > 0 {
             if prefixes.contains(where: { $0.count == position }) { break }
 
-            let allowed = Set(prefixes.compactMap { tokens -> Int? in
-                guard position < tokens.count else { return nil }
-                return tokens[position]
-            })
+            let allowed = Set(
+                prefixes.compactMap { tokens -> Int? in
+                    guard position < tokens.count else { return nil }
+                    return tokens[position]
+                }
+            )
 
             let token = try backend.sample(from: allowed)
             emitted += backend.tokenText(token) ?? ""

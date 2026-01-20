@@ -730,7 +730,9 @@ extension GenerationSchema {
                     if let max = guide.maximum { maximum = max }
                 }
                 return (
-                    .number(NumberNode(description: description, minimum: minimum, maximum: maximum, integerOnly: true)), [:]
+                    .number(
+                        NumberNode(description: description, minimum: minimum, maximum: maximum, integerOnly: true)
+                    ), [:]
                 )
             } else if type == Float.self || type == Double.self || type == Decimal.self {
                 var minimum: Double?
@@ -740,7 +742,9 @@ extension GenerationSchema {
                     if let max = guide.maximum { maximum = max }
                 }
                 return (
-                    .number(NumberNode(description: description, minimum: minimum, maximum: maximum, integerOnly: false)), [:]
+                    .number(
+                        NumberNode(description: description, minimum: minimum, maximum: maximum, integerOnly: false)
+                    ), [:]
                 )
             } else {
                 // Complex type - use its schema
@@ -858,7 +862,8 @@ extension GenerationSchema {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         guard let data = try? encoder.encode(self),
-              let schemaJSON = String(data: data, encoding: .utf8) else {
+            let schemaJSON = String(data: data, encoding: .utf8)
+        else {
             return "Respond with valid JSON only."
         }
         return "Respond with valid JSON matching this schema:\n\(schemaJSON)"

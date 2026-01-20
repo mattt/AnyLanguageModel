@@ -199,22 +199,22 @@ import Foundation
             // Get cached or load fresh ModelContext
             let context = try await loadContext(modelId: modelId, hub: hub, directory: directory)
 
-        if type != String.self {
-            let jsonString = try await generateStructuredJSON(
-                context: context,
-                session: session,
-                prompt: prompt,
-                schema: type.generationSchema,
-                options: options
-            )
-            let generatedContent = try GeneratedContent(json: jsonString)
-            let content = try type.init(generatedContent)
-            return LanguageModelSession.Response(
-                content: content,
-                rawContent: generatedContent,
-                transcriptEntries: ArraySlice([])
-            )
-        }
+            if type != String.self {
+                let jsonString = try await generateStructuredJSON(
+                    context: context,
+                    session: session,
+                    prompt: prompt,
+                    schema: type.generationSchema,
+                    options: options
+                )
+                let generatedContent = try GeneratedContent(json: jsonString)
+                let content = try type.init(generatedContent)
+                return LanguageModelSession.Response(
+                    content: content,
+                    rawContent: generatedContent,
+                    transcriptEntries: ArraySlice([])
+                )
+            }
 
             // Convert session tools to MLX ToolSpec format
             let toolSpecs: [ToolSpec]? =
@@ -726,7 +726,8 @@ import Foundation
             }
         }
 
-        let systemPrefix = systemMessageParts
+        let systemPrefix =
+            systemMessageParts
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
             .joined(separator: "\n\n")
@@ -784,8 +785,10 @@ import Foundation
                 tokenizer: context.tokenizer,
                 configuration: context.configuration
             )
-            
-            self.tokensExcludedFromRepetitionPenalty = Self.buildTokensExcludedFromRepetitionPenalty(tokenizer: context.tokenizer)
+
+            self.tokensExcludedFromRepetitionPenalty = Self.buildTokensExcludedFromRepetitionPenalty(
+                tokenizer: context.tokenizer
+            )
 
             processor?.prompt(input.text.tokens)
 
