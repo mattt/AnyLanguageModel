@@ -852,14 +852,12 @@ extension LanguageModelSession.ResponseStream: AsyncSequence {
             )
         }
 
-        // As a last resort, return an empty payload.
-        let empty = GeneratedContent("")
-        return LanguageModelSession.Response(
-            content: try Content(empty),
-            rawContent: empty,
-            transcriptEntries: []
-        )
+        throw ResponseStreamError.noSnapshots
     }
+}
+
+private enum ResponseStreamError: Error {
+    case noSnapshots
 }
 
 // MARK: -
