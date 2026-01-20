@@ -160,6 +160,28 @@
             let stream: AsyncThrowingStream<LanguageModelSession.ResponseStream<Content>.Snapshot, Error> =
                 AsyncThrowingStream { continuation in
 
+                    func accumulateText(
+                        _ chunkText: String,
+                        accumulatedText: inout String,
+                        lastLength: inout Int
+                    ) {
+                        if chunkText.count >= lastLength, chunkText.hasPrefix(accumulatedText) {
+                            let startIdx = chunkText.index(chunkText.startIndex, offsetBy: lastLength)
+                            let delta = String(chunkText[startIdx...])
+                            accumulatedText += delta
+                            lastLength = chunkText.count
+                        } else if chunkText.hasPrefix(accumulatedText) {
+                            accumulatedText = chunkText
+                            lastLength = chunkText.count
+                        } else if accumulatedText.hasPrefix(chunkText) {
+                            accumulatedText = chunkText
+                            lastLength = chunkText.count
+                        } else {
+                            accumulatedText += chunkText
+                            lastLength = accumulatedText.count
+                        }
+                    }
+
                     func processStringStream() async {
                         let fmStream: FoundationModels.LanguageModelSession.ResponseStream<String> =
                             fmSession.streamResponse(to: fmPrompt, options: fmOptions)
@@ -175,21 +197,11 @@
                                     chunkText = ""
                                 }
 
-                                if chunkText.count >= lastLength, chunkText.hasPrefix(accumulatedText) {
-                                    let startIdx = chunkText.index(chunkText.startIndex, offsetBy: lastLength)
-                                    let delta = String(chunkText[startIdx...])
-                                    accumulatedText += delta
-                                    lastLength = chunkText.count
-                                } else if chunkText.hasPrefix(accumulatedText) {
-                                    accumulatedText = chunkText
-                                    lastLength = chunkText.count
-                                } else if accumulatedText.hasPrefix(chunkText) {
-                                    accumulatedText = chunkText
-                                    lastLength = chunkText.count
-                                } else {
-                                    accumulatedText += chunkText
-                                    lastLength = accumulatedText.count
-                                }
+                                accumulateText(
+                                    chunkText,
+                                    accumulatedText: &accumulatedText,
+                                    lastLength: &lastLength
+                                )
 
                                 let raw = GeneratedContent(accumulatedText)
                                 let snapshotContent = (accumulatedText as! Content).asPartiallyGenerated()
@@ -225,21 +237,11 @@
                                         chunkText = ""
                                     }
 
-                                    if chunkText.count >= lastLength, chunkText.hasPrefix(accumulatedText) {
-                                        let startIdx = chunkText.index(chunkText.startIndex, offsetBy: lastLength)
-                                        let delta = String(chunkText[startIdx...])
-                                        accumulatedText += delta
-                                        lastLength = chunkText.count
-                                    } else if chunkText.hasPrefix(accumulatedText) {
-                                        accumulatedText = chunkText
-                                        lastLength = chunkText.count
-                                    } else if accumulatedText.hasPrefix(chunkText) {
-                                        accumulatedText = chunkText
-                                        lastLength = chunkText.count
-                                    } else {
-                                        accumulatedText += chunkText
-                                        lastLength = accumulatedText.count
-                                    }
+                                    accumulateText(
+                                        chunkText,
+                                        accumulatedText: &accumulatedText,
+                                        lastLength: &lastLength
+                                    )
 
                                     let jsonString = accumulatedText
                                     if let partialContent = try? partialDecoder.decode(
