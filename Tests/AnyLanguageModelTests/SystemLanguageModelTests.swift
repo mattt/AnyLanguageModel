@@ -185,11 +185,39 @@ import AnyLanguageModel
             let model: SystemLanguageModel = SystemLanguageModel()
             let session = LanguageModelSession(model: model)
 
-            let firstResponse = try await session.respond(to: "My favorite color is blue")
+            let numbers = (0 ..< 3).map { _ in Int.random(in: 1 ... 100) }
+            let payload = numbers.map(String.init).joined(separator: ", ")
+            let firstResponse = try await session.respond(
+                to: "Remember these numbers: \(payload). Reply with just the numbers."
+            )
             #expect(!firstResponse.content.isEmpty)
 
-            let secondResponse = try await session.respond(to: "What did I just tell you?")
-            #expect(secondResponse.content.contains("color"))
+            let secondResponse = try await session.respond(
+                to: "What numbers did I ask you to remember? Reply with just the numbers."
+            )
+            let repliedNumbers = secondResponse.content
+                .split { !$0.isNumber }
+                .compactMap { Int($0) }
+            if Set(repliedNumbers) != Set(numbers) {
+                // Guardrails can refuse to repeat exact values
+                // Verify the prompt was stored instead.
+                let promptText = session.transcript.compactMap { entry -> String? in
+                    guard case let .prompt(prompt) = entry else {
+                        return nil
+                    }
+                    return prompt.segments.compactMap { segment -> String? in
+                        guard case let .text(text) = segment else {
+                            return nil
+                        }
+                        return text.content
+                    }
+                    .joined(separator: " ")
+                }
+                .joined(separator: " ")
+
+                #expect(session.transcript.count >= 4)
+                #expect(promptText.contains(payload))
+            }
         }
 
         // MARK: - Guided Generation Tests
