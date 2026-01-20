@@ -692,6 +692,7 @@ import Foundation
             )
         }
 
+        /// Builds structured-generation defaults while honoring explicit overrides.
         private func resolvedStructuredOptions(from options: GenerationOptions) -> ResolvedGenerationOptions {
             var base = legacyDefaults
             if let temp = options.temperature {
@@ -880,6 +881,7 @@ import Foundation
             return generatedText
         }
 
+        /// Builds a JSONSchema-informed prompt for structured output.
         private func schemaPrompt(for schema: GenerationSchema) -> String {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]

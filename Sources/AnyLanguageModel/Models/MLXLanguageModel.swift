@@ -389,6 +389,7 @@ import Foundation
         )
     }
 
+    /// Builds MLX parameters tuned for structured generation.
     private func toStructuredGenerateParameters(_ options: GenerationOptions) -> MLXLMCommon.GenerateParameters {
         MLXLMCommon.GenerateParameters(
             maxTokens: options.maximumResponseTokens,
@@ -664,6 +665,7 @@ import Foundation
         return textParts.joined(separator: "\n")
     }
 
+    /// Builds a JSONSchema-informed prompt for structured output.
     private func schemaPrompt(for schema: GenerationSchema) -> String {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -736,6 +738,7 @@ import Foundation
         return json
     }
 
+    /// Merges system prompts and schema instructions into a user message.
     private func normalizeChatForStructuredGeneration(
         _ chat: [MLXLMCommon.Chat.Message],
         schemaPrompt: String?
