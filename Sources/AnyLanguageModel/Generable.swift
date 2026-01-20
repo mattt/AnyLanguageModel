@@ -78,7 +78,13 @@ public macro Guide<RegexOutput>(
 extension Generable {
     /// The partially generated type of this struct.
     public func asPartiallyGenerated() -> Self.PartiallyGenerated {
-        self as! Self.PartiallyGenerated
+        if let partial = self as? Self.PartiallyGenerated {
+            return partial
+        }
+        if let partial: Self.PartiallyGenerated = try? .init(self.generatedContent) {
+            return partial
+        }
+        fatalError("Unable to convert \(Self.self) to partially generated form")
     }
 }
 

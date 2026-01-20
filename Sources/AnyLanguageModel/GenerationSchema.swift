@@ -204,7 +204,7 @@ public struct GenerationSchema: Sendable, Codable, CustomDebugStringConvertible 
     }
 
     let root: Node
-    private var defs: [String: Node]
+    var defs: [String: Node]
 
     /// A string representation of the debug description.
     ///
