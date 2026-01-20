@@ -273,6 +273,33 @@ let response = try await session.respond {
 > [!NOTE]
 > Image inputs are not yet supported by Apple Foundation Models.
 
+`SystemLanguageModel` supports guided generation,
+letting you request strongly typed outputs using `@Generable` and `@Guide`
+instead of parsing raw strings.
+For more details, see
+[Generating Swift data structures with guided generation](https://developer.apple.com/documentation/foundationmodels/generating-swift-data-structures-with-guided-generation).
+
+```swift
+@Generable(description: "Basic profile information about a cat")
+struct CatProfile {
+    // A guide isn't necessary for basic fields.
+    var name: String
+
+    @Guide(description: "The age of the cat", .range(0...20))
+    var age: Int
+
+    @Guide(description: "A one sentence profile about the cat's personality")
+    var profile: String
+}
+
+let session = LanguageModelSession(model: .default)
+let response = try await session.respond(
+    to: "Generate a cute rescue cat",
+    generating: CatProfile.self
+)
+print(response.content)
+```
+
 ### Core ML
 
 Run [Core ML](https://developer.apple.com/documentation/coreml) models
