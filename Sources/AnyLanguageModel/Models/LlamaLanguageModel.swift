@@ -1,5 +1,6 @@
 import Foundation
 #if Llama
+    import JSONSchema
     import LlamaSwift
 
     /// Global storage for the current log level threshold.
@@ -483,6 +484,7 @@ import Foundation
             try await ensureModelLoaded()
 
             let runtimeOptions = resolvedOptions(from: options)
+            let structuredOptions = resolvedStructuredOptions(from: options)
             let contextParams = createContextParams(from: runtimeOptions)
 
             // Try to create context with error handling
@@ -507,7 +509,7 @@ import Foundation
             if includeSchemaInPrompt, type != String.self {
                 fullPrompt = try formatPrompt(
                     for: session,
-                    extraSystemMessage: type.generationSchema.schemaPrompt()
+                    extraSystemMessage: schemaPrompt(for: type.generationSchema)
                 )
             } else {
                 fullPrompt = try formatPrompt(for: session)
@@ -529,13 +531,13 @@ import Foundation
                     transcriptEntries: ArraySlice([])
                 )
             } else {
-                let maxTokens = runtimeOptions.maximumResponseTokens ?? 512
+                let maxTokens = structuredOptions.maximumResponseTokens ?? 512
                 let jsonString = try generateStructuredJSON(
                     context: context,
                     prompt: fullPrompt,
                     schema: type.generationSchema,
                     maxTokens: maxTokens,
-                    options: runtimeOptions
+                    options: structuredOptions
                 )
                 let generatedContent = try GeneratedContent(json: jsonString)
                 let content = try type.init(generatedContent)
@@ -681,6 +683,25 @@ import Foundation
             if let temp = options.temperature {
                 base.temperature = Float(temp)
             }
+
+            return ResolvedGenerationOptions(
+                base: base,
+                overrides: options[custom: LlamaLanguageModel.self],
+                sampling: options.sampling,
+                maximumResponseTokens: options.maximumResponseTokens
+            )
+        }
+
+        private func resolvedStructuredOptions(from options: GenerationOptions) -> ResolvedGenerationOptions {
+            var base = legacyDefaults
+            if let temp = options.temperature {
+                base.temperature = Float(temp)
+            } else {
+                base.temperature = 0.2
+            }
+            base.topP = 0.95
+            base.repeatPenalty = 1.1
+            base.repeatLastN = 64
 
             return ResolvedGenerationOptions(
                 base: base,
@@ -857,6 +878,37 @@ import Foundation
             }
 
             return generatedText
+        }
+
+        private func schemaPrompt(for schema: GenerationSchema) -> String {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            guard
+                let data = try? encoder.encode(schema),
+                let jsonSchema = try? JSONDecoder().decode(JSONSchema.self, from: data),
+                let schemaJSON = String(data: data, encoding: .utf8)
+            else {
+                return schema.schemaPrompt()
+            }
+
+            var header = "Respond with valid JSON matching this \(jsonSchema.typeName) schema"
+            if let description = jsonSchema.description, !description.isEmpty {
+                header += " (\(description))"
+            }
+
+            if let constValue = jsonSchema.const,
+                let data = try? encoder.encode(constValue),
+                let constString = String(data: data, encoding: .utf8)
+            {
+                header += ". Expected value: \(constString)"
+            } else if let enumValues = jsonSchema.enum, !enumValues.isEmpty,
+                let data = try? encoder.encode(JSONValue.array(enumValues)),
+                let enumString = String(data: data, encoding: .utf8)
+            {
+                header += ". Allowed values: \(enumString)"
+            }
+
+            return "\(header):\n\(schemaJSON)"
         }
 
         // MARK: - Structured JSON Generation
