@@ -327,7 +327,6 @@ import AnyLanguageModel
 
         @available(macOS 26.0, *)
         @Test func guidedGenerationStreaming() async throws {
-            guard isSystemLanguageModelAvailable else { return }
             let session = LanguageModelSession(model: SystemLanguageModel.default)
 
             let stream = session.streamResponse(

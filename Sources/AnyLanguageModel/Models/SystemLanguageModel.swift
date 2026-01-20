@@ -759,6 +759,7 @@
 
     // MARK: - Placeholder Helpers
 
+    /// Generates minimal partial content when structured output is missing or invalid.
     private func placeholderPartialContent<Content: Generable>(
         for type: Content.Type
     ) -> (content: Content.PartiallyGenerated, rawContent: GeneratedContent)? {
@@ -775,6 +776,7 @@
         return nil
     }
 
+    /// Generates minimal full content when structured output is missing or invalid.
     private func placeholderContent<Content: Generable>(
         for type: Content.Type
     ) -> (content: Content, rawContent: GeneratedContent)? {
@@ -788,6 +790,7 @@
         return nil
     }
 
+    /// Builds a minimal generated content tree from a schema node.
     private func placeholderGeneratedContent(
         from node: GenerationSchema.Node,
         defs: [String: GenerationSchema.Node]
