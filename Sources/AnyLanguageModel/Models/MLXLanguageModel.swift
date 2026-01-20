@@ -11,6 +11,7 @@ import Foundation
 #endif
 
 #if MLX
+    import JSONSchema
     import MLXLMCommon
     import MLX
     import MLXVLM
@@ -205,7 +206,8 @@ import Foundation
                     session: session,
                     prompt: prompt,
                     schema: type.generationSchema,
-                    options: options
+                    options: options,
+                    includeSchemaInPrompt: includeSchemaInPrompt
                 )
                 let generatedContent = try GeneratedContent(json: jsonString)
                 let content = try type.init(generatedContent)
@@ -662,6 +664,37 @@ import Foundation
         return textParts.joined(separator: "\n")
     }
 
+    private func schemaPrompt(for schema: GenerationSchema) -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        guard
+            let data = try? encoder.encode(schema),
+            let jsonSchema = try? JSONDecoder().decode(JSONSchema.self, from: data),
+            let schemaJSON = String(data: data, encoding: .utf8)
+        else {
+            return schema.schemaPrompt()
+        }
+
+        var header = "Respond with valid JSON matching this \(jsonSchema.typeName) schema"
+        if let description = jsonSchema.description, !description.isEmpty {
+            header += " (\(description))"
+        }
+
+        if let constValue = jsonSchema.const,
+            let data = try? encoder.encode(constValue),
+            let constString = String(data: data, encoding: .utf8)
+        {
+            header += ". Expected value: \(constString)"
+        } else if let enumValues = jsonSchema.enum, !enumValues.isEmpty,
+            let data = try? encoder.encode(JSONValue.array(enumValues)),
+            let enumString = String(data: data, encoding: .utf8)
+        {
+            header += ". Allowed values: \(enumString)"
+        }
+
+        return "\(header):\n\(schemaJSON)"
+    }
+
     // MARK: - Structured JSON Generation
 
     private enum StructuredGenerationError: Error {
@@ -674,13 +707,15 @@ import Foundation
         session: LanguageModelSession,
         prompt: Prompt,
         schema: GenerationSchema,
-        options: GenerationOptions
+        options: GenerationOptions,
+        includeSchemaInPrompt: Bool
     ) async throws -> String {
         let maxTokens = options.maximumResponseTokens ?? 512
         let generateParameters = toStructuredGenerateParameters(options)
 
         let baseChat = convertTranscriptToMLXChat(session: session, fallbackPrompt: prompt.description)
-        let chat = normalizeChatForStructuredGeneration(baseChat, schemaPrompt: schema.schemaPrompt())
+        let schemaPrompt = includeSchemaInPrompt ? schemaPrompt(for: schema) : nil
+        let chat = normalizeChatForStructuredGeneration(baseChat, schemaPrompt: schemaPrompt)
         let userInput = MLXLMCommon.UserInput(
             chat: chat,
             processing: .init(resize: .init(width: 512, height: 512)),
@@ -703,8 +738,12 @@ import Foundation
 
     private func normalizeChatForStructuredGeneration(
         _ chat: [MLXLMCommon.Chat.Message],
-        schemaPrompt: String
+        schemaPrompt: String?
     ) -> [MLXLMCommon.Chat.Message] {
+        guard let schemaPrompt, !schemaPrompt.isEmpty else {
+            return chat
+        }
+
         var systemMessageParts: [String] = []
         systemMessageParts.append(schemaPrompt)
 
