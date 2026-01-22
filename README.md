@@ -9,6 +9,7 @@ All you need to do is change your import statement:
 - import FoundationModels
 + import AnyLanguageModel
 ```
+qualquer coia
 
 ```swift
 struct WeatherTool: Tool {
