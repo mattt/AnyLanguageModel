@@ -456,7 +456,7 @@ extension Transcript.ImageSegment {
     }
 }
 
-#if canImport(UIKit)
+#if canImport(UIKit) || targetEnvironment(macCatalyst)
     import UIKit
 
     extension Transcript.ImageSegment {
@@ -486,9 +486,7 @@ extension Transcript.ImageSegment {
             self.init(data: data, mimeType: mimeType)
         }
     }
-#endif
-
-#if canImport(AppKit)
+#elseif canImport(AppKit)
     import AppKit
 
     extension Transcript.ImageSegment {
