@@ -514,9 +514,14 @@ public struct OpenAILanguageModel: LanguageModel {
                     for invocation in invocations {
                         let output = invocation.output
                         entries.append(.toolOutput(output))
-                        let toolSegments: [Transcript.Segment] = output.segments
-                        let blocks = convertSegmentsToOpenAIBlocks(toolSegments)
-                        messages.append(OpenAIMessage(role: .tool(id: invocation.call.id), content: .blocks(blocks)))
+                        // Convert tool output segments to plain text for DeepSeek API compatibility
+                        let toolContent = output.segments.map { segment -> String in
+                            switch segment {
+                            case .text(let textSegment): return textSegment.content
+                            default: return segment.description
+                            }
+                        }.joined()
+                        messages.append(OpenAIMessage(role: .tool(id: invocation.call.id), content: .text(toolContent)))
                     }
                     continue
                 }
@@ -579,9 +584,14 @@ public struct OpenAILanguageModel: LanguageModel {
                     for invocation in invocations {
                         let output = invocation.output
                         entries.append(.toolOutput(output))
-                        let toolSegments: [Transcript.Segment] = output.segments
-                        let blocks = convertSegmentsToOpenAIBlocks(toolSegments)
-                        messages.append(OpenAIMessage(role: .tool(id: invocation.call.id), content: .blocks(blocks)))
+                        // Convert tool output segments to plain text for DeepSeek API compatibility
+                        let toolContent = output.segments.map { segment -> String in
+                            switch segment {
+                            case .text(let textSegment): return textSegment.content
+                            default: return segment.description
+                            }
+                        }.joined()
+                        messages.append(OpenAIMessage(role: .tool(id: invocation.call.id), content: .text(toolContent)))
                     }
                     continue
                 }
@@ -1165,10 +1175,17 @@ extension Transcript {
                     )
                 )
             case .toolOutput(let toolOutput):
+                // Convert tool output segments to plain text for DeepSeek API compatibility
+                let toolContent = toolOutput.segments.map { segment -> String in
+                    switch segment {
+                    case .text(let textSegment): return textSegment.content
+                    default: return segment.description
+                    }
+                }.joined()
                 messages.append(
                     .init(
                         role: .tool(id: toolOutput.id),
-                        content: .blocks(convertSegmentsToOpenAIBlocks(toolOutput.segments))
+                        content: .text(toolContent)
                     )
                 )
             }
