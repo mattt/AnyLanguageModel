@@ -160,6 +160,16 @@ public struct GenerationSchema: Sendable, Codable, CustomDebugStringConvertible 
                 )
             }
         }
+
+        var nodeDescription: String? {
+            switch self {
+            case .object(let node): node.description
+            case .array(let node): node.description
+            case .string(let node): node.description
+            case .number(let node): node.description
+            case .boolean, .anyOf, .ref: nil
+            }
+        }
     }
 
     struct ObjectNode: Sendable, Codable {
@@ -504,12 +514,32 @@ public struct GenerationSchema: Sendable, Codable, CustomDebugStringConvertible 
     }
 
     private static func nodesEqual(_ a: Node, _ b: Node) -> Bool {
-        // Simple structural equality - could be enhanced
         switch (a, b) {
         case (.boolean, .boolean):
             return true
         case (.ref(let aName), .ref(let bName)):
             return aName == bName
+        case (.string(let aString), .string(let bString)):
+            return aString.pattern == bString.pattern
+                && aString.enumChoices == bString.enumChoices
+        case (.number(let aNumber), .number(let bNumber)):
+            return aNumber.integerOnly == bNumber.integerOnly
+                && aNumber.minimum == bNumber.minimum
+                && aNumber.maximum == bNumber.maximum
+        case (.array(let aArray), .array(let bArray)):
+            return aArray.minItems == bArray.minItems
+                && aArray.maxItems == bArray.maxItems
+                && nodesEqual(aArray.items, bArray.items)
+        case (.object(let aObject), .object(let bObject)):
+            return aObject.required == bObject.required
+                && aObject.properties.keys == bObject.properties.keys
+                && aObject.properties.allSatisfy { key, aNode in
+                    guard let bNode = bObject.properties[key] else { return false }
+                    return nodesEqual(aNode, bNode)
+                }
+        case (.anyOf(let aNodes), .anyOf(let bNodes)):
+            return aNodes.count == bNodes.count
+                && zip(aNodes, bNodes).allSatisfy(nodesEqual)
         default:
             return false
         }
@@ -693,16 +723,43 @@ extension GenerationSchema {
             } else if type == String.self {
                 return (.string(StringNode(description: description, pattern: nil, enumChoices: nil)), [:])
             } else if type == Int.self {
+                var minimum: Double?
+                var maximum: Double?
+                for guide in guides {
+                    if let min = guide.minimum { minimum = min }
+                    if let max = guide.maximum { maximum = max }
+                }
                 return (
-                    .number(NumberNode(description: description, minimum: nil, maximum: nil, integerOnly: true)), [:]
+                    .number(
+                        NumberNode(description: description, minimum: minimum, maximum: maximum, integerOnly: true)
+                    ), [:]
                 )
             } else if type == Float.self || type == Double.self || type == Decimal.self {
+                var minimum: Double?
+                var maximum: Double?
+                for guide in guides {
+                    if let min = guide.minimum { minimum = min }
+                    if let max = guide.maximum { maximum = max }
+                }
                 return (
-                    .number(NumberNode(description: description, minimum: nil, maximum: nil, integerOnly: false)), [:]
+                    .number(
+                        NumberNode(description: description, minimum: minimum, maximum: maximum, integerOnly: false)
+                    ), [:]
                 )
             } else {
                 // Complex type - use its schema
                 let schema = Value.generationSchema
+
+                // Arrays should be inlined, not referenced
+                if case .array(var arrayNode) = schema.root {
+                    arrayNode.description = description
+                    for guide in guides {
+                        if let min = guide.minimumCount { arrayNode.minItems = min }
+                        if let max = guide.maximumCount { arrayNode.maxItems = max }
+                    }
+                    return (.array(arrayNode), schema.defs)
+                }
+
                 let typeName = String(reflecting: Value.self)
 
                 var deps = schema.defs
@@ -800,4 +857,41 @@ extension GenerationSchema {
     /// let data = try encoder.encode(schema)
     /// ```
     static let omitAdditionalPropertiesKey = CodingUserInfoKey(rawValue: "GenerationSchema.omitAdditionalProperties")!
+
+    package func schemaPrompt() -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        guard let data = try? encoder.encode(self),
+            let schemaJSON = String(data: data, encoding: .utf8)
+        else {
+            return "Respond with valid JSON only."
+        }
+        return "Respond with valid JSON matching this schema:\n\(schemaJSON)"
+    }
+}
+
+extension Character {
+    package static let jsonQuoteScalars: Set<UInt32> = [0x22, 0x201C, 0x201D, 0x2018, 0x2019]
+    package static let jsonAllowedWhitespaceCharacters: Set<Character> = [" ", "\t", "\n"]
+
+    package var containsEmojiScalar: Bool {
+        unicodeScalars.contains { scalar in
+            scalar.properties.isEmojiPresentation || scalar.properties.isEmoji
+        }
+    }
+
+    package var isValidJSONStringCharacter: Bool {
+        guard self != "\\" else { return false }
+        guard let scalar = unicodeScalars.first, scalar.value >= 0x20 else { return false }
+        guard !Self.jsonQuoteScalars.contains(scalar.value) else { return false }
+
+        if let ascii = asciiValue {
+            let char = Character(UnicodeScalar(ascii))
+            if Self.jsonAllowedWhitespaceCharacters.contains(char) { return true }
+            return isLetter || isNumber || (isASCII && (isPunctuation || isSymbol))
+        }
+
+        // Allow non-ASCII letters/numbers and emoji, but disallow non-ASCII punctuation (e.g. "】")
+        return isLetter || isNumber || containsEmojiScalar
+    }
 }
