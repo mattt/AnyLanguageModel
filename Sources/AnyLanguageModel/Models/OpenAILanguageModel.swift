@@ -145,6 +145,9 @@ public struct OpenAILanguageModel: LanguageModel {
         /// Defaults to `true`.
         public var parallelToolCalls: Bool?
 
+        /// Whether to stop generation immediately after tool calls are generated.
+        public var stopAfterToolCalls: Bool?
+
         /// The maximum number of total calls to built-in tools that can be processed
         /// in a response.
         ///
@@ -346,6 +349,7 @@ public struct OpenAILanguageModel: LanguageModel {
             reasoningEffort: ReasoningEffort? = nil,
             reasoning: ReasoningConfiguration? = nil,
             parallelToolCalls: Bool? = nil,
+            stopAfterToolCalls: Bool? = nil,
             maxToolCalls: Int? = nil,
             serviceTier: ServiceTier? = nil,
             store: Bool? = nil,
@@ -369,6 +373,7 @@ public struct OpenAILanguageModel: LanguageModel {
             self.reasoningEffort = reasoningEffort
             self.reasoning = reasoning
             self.parallelToolCalls = parallelToolCalls
+            self.stopAfterToolCalls = stopAfterToolCalls
             self.maxToolCalls = maxToolCalls
             self.serviceTier = serviceTier
             self.store = store
@@ -508,6 +513,23 @@ public struct OpenAILanguageModel: LanguageModel {
                 if let value = try? JSONValue(toolCallMessage) {
                     messages.append(OpenAIMessage(role: .raw(rawContent: value), content: .text("")))
                 }
+
+                if let stop = options[custom: OpenAILanguageModel.self]?.stopAfterToolCalls, stop {
+                    let calls = toolCalls.map { tc in
+                        Transcript.ToolCall(
+                            id: tc.id ?? UUID().uuidString,
+                            toolName: tc.function?.name ?? "",
+                            arguments: (try? GeneratedContent(json: tc.function?.arguments ?? "{}")) ?? GeneratedContent(tc.function?.arguments ?? "")
+                        )
+                    }
+                    entries.append(.toolCalls(Transcript.ToolCalls(calls)))
+                    return LanguageModelSession.Response(
+                        content: "" as! Content,
+                        rawContent: GeneratedContent(""),
+                        transcriptEntries: ArraySlice(entries)
+                    )
+                }
+
                 let invocations = try await resolveToolCalls(toolCalls, session: session)
                 if !invocations.isEmpty {
                     entries.append(.toolCalls(Transcript.ToolCalls(invocations.map { $0.call })))
