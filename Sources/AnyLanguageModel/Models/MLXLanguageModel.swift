@@ -358,7 +358,7 @@ import Foundation
             return LanguageModelSession.ResponseStream(stream: stream)
         }
 
-        /// Prewarms the model for the given session and optional prompt prefix.
+        /// Prewarms the model
         public func prewarm(
             for session: LanguageModelSession,
             promptPrefix: Prompt?
@@ -367,39 +367,12 @@ import Foundation
             let hub = self.hub
             let directory = self.directory
 
-            let instructions = session.instructions?.description
-            let tools = session.tools
-
             Task {
-
-                let context = try await loadContext(modelId: modelId, hub: hub, directory: directory)
-
-                // Build chat history similar to respond() to prime the cache effectively
-                var chat: [MLXLMCommon.Chat.Message] = []
-
-                // Add system instructions if present
-                if let instructions, !instructions.isEmpty {
-                    chat.append(.init(role: .system, content: instructions))
+                do {
+                    _ = try await loadContext(modelId: modelId, hub: hub, directory: directory)
+                } catch {
+                    // Ignore errors during prewarm
                 }
-
-                // Add prompt prefix or minimal user message
-                let promptText = promptPrefix?.description ?? "."
-                chat.append(.init(role: .user, content: promptText))
-
-                // Convert tools to MLX format
-                let toolSpecs: [ToolSpec]? =
-                    tools.isEmpty
-                    ? nil
-                    : tools.map { convertToolToMLXSpec($0) }
-
-                let userInput = MLXLMCommon.UserInput(
-                    chat: chat,
-                    processing: .init(resize: .init(width: 512, height: 512)),
-                    tools: toolSpecs
-                )
-
-                // Prepare input - triggers tokenization and processor initialization
-                _ = try await context.processor.prepare(input: userInput)
             }
         }
     }
