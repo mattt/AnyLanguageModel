@@ -328,5 +328,78 @@ import Testing
                 #expect(error == .insufficientMemory)
             }
         }
+
+        @Test func structuredGenerationBasicStruct() async throws {
+            let session = LanguageModelSession(
+                model: model,
+                instructions: "You are a helpful assistant that generates structured data."
+            )
+            let response = try await session.respond(
+                to: "Generate a person with name Alice, age 30, active status true, and score 95.5",
+                generating: BasicStruct.self
+            )
+            #expect(!response.content.name.isEmpty)
+            #expect(response.content.age >= 0)
+        }
+
+        @Test func structuredGenerationNestedStruct() async throws {
+            let session = LanguageModelSession(
+                model: model,
+                instructions: "You are a helpful assistant that generates structured data."
+            )
+            let response = try await session.respond(
+                to: "Generate a person named John, age 25, living at 123 Main St, Springfield, 12345",
+                generating: StructuredPerson.self
+            )
+            #expect(!response.content.name.isEmpty)
+            #expect(response.content.age >= 0)
+            #expect(!response.content.address.street.isEmpty)
+            #expect(!response.content.address.city.isEmpty)
+        }
+
+        @Test func structuredGenerationStructWithEnum() async throws {
+            let session = LanguageModelSession(
+                model: model,
+                instructions: "You are a helpful assistant that generates structured data."
+            )
+            let response = try await session.respond(
+                to: "Generate a task titled 'Complete project' with high priority, not completed",
+                generating: TaskItem.self
+            )
+            #expect(!response.content.title.isEmpty)
+            #expect([Priority.low, Priority.medium, Priority.high].contains(response.content.priority))
+        }
+
+        @Test func structuredGenerationSimpleArray() async throws {
+            let session = LanguageModelSession(
+                model: model,
+                instructions: "You are a helpful assistant that generates structured data."
+            )
+            let response = try await session.respond(
+                to: "Generate a list of 3 color names: red, green, blue",
+                generating: SimpleArray.self
+            )
+            #expect(!response.content.colors.isEmpty)
+        }
+
+        @Test func structuredGenerationStructWithArray() async throws {
+            let session = LanguageModelSession(
+                model: model,
+                instructions: "You are a helpful assistant that generates structured data."
+            )
+            let response = try await session.respond(
+                to: """
+                    Generate a quiz question:
+                    - Question: What is the capital of France?
+                    - Choices: London, Paris, Berlin, Madrid
+                    - Answer: Paris
+                    - Explanation: Paris is the capital city of France
+                    """,
+                generating: MultiChoiceQuestion.self
+            )
+            #expect(!response.content.text.isEmpty)
+            #expect(response.content.choices.count == 4)
+            #expect(!response.content.answer.isEmpty)
+        }
     }
 #endif  // Llama

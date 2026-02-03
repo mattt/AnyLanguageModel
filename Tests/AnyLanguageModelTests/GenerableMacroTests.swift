@@ -55,6 +55,7 @@ private struct PrimitiveContainer {
     var count: Int
 }
 
+@Generable
 private enum TestEnum: Equatable {
     case optionA
     case optionB

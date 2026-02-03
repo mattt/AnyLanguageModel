@@ -159,6 +159,16 @@ public final class LanguageModelSession: @unchecked Sendable {
         public let content: Content
         public let rawContent: GeneratedContent
         public let transcriptEntries: ArraySlice<Transcript.Entry>
+
+        init(
+            content: Content,
+            rawContent: GeneratedContent,
+            transcriptEntries: ArraySlice<Transcript.Entry>
+        ) {
+            self.content = content
+            self.rawContent = rawContent
+            self.transcriptEntries = transcriptEntries
+        }
     }
 
     @discardableResult

@@ -121,5 +121,87 @@ import Testing
             let response = try await session.respond(to: "")
             #expect(!response.content.isEmpty)
         }
+
+        @Test func structuredGenerationSimpleString() async throws {
+            let session = LanguageModelSession(
+                model: model,
+                instructions: "You are a helpful assistant that generates structured data."
+            )
+            let response = try await session.respond(
+                to: "Generate a greeting message that says hello",
+                generating: SimpleString.self
+            )
+            #expect(!response.content.message.isEmpty)
+        }
+
+        @Test func structuredGenerationSimpleInt() async throws {
+            let session = LanguageModelSession(
+                model: model,
+                instructions: "You are a helpful assistant that generates structured data."
+            )
+            let response = try await session.respond(
+                to: "Generate a count value of 42",
+                generating: SimpleInt.self
+            )
+            #expect(response.content.count >= 0)
+        }
+
+        @Test func structuredGenerationSimpleDouble() async throws {
+            let session = LanguageModelSession(
+                model: model,
+                instructions: "You are a helpful assistant that generates structured data."
+            )
+            let response = try await session.respond(
+                to: "Generate a temperature value of 72.5 degrees",
+                generating: SimpleDouble.self
+            )
+            #expect(!response.content.temperature.isNaN)
+        }
+
+        @Test func structuredGenerationSimpleBool() async throws {
+            let session = LanguageModelSession(
+                model: model,
+                instructions: "You are a helpful assistant that generates structured data."
+            )
+            let response = try await session.respond(
+                to: "Generate a boolean value: true",
+                generating: SimpleBool.self
+            )
+            let jsonData = response.rawContent.jsonString.data(using: .utf8)
+            #expect(jsonData != nil)
+            if let jsonData {
+                let json = try JSONSerialization.jsonObject(with: jsonData)
+                let dictionary = json as? [String: Any]
+                let boolValue = dictionary?["value"] as? Bool
+                #expect(boolValue != nil)
+            }
+        }
+
+        @Test func structuredGenerationOptionalFields() async throws {
+            let session = LanguageModelSession(
+                model: model,
+                instructions: "You are a helpful assistant that generates structured data."
+            )
+            let response = try await session.respond(
+                to: "Generate a person named Alex with nickname 'Lex'. Nickname may be omitted if unsure.",
+                generating: OptionalFields.self
+            )
+            #expect(!response.content.name.isEmpty)
+            if let nickname = response.content.nickname {
+                #expect(!nickname.isEmpty)
+            }
+        }
+
+        @Test func structuredGenerationEnum() async throws {
+            let session = LanguageModelSession(
+                model: model,
+                instructions: "You are a helpful assistant that generates structured data."
+            )
+            let response = try await session.respond(
+                to: "Generate a high priority value",
+                generating: Priority.self
+            )
+            #expect([Priority.low, Priority.medium, Priority.high].contains(response.content))
+        }
     }
 #endif  // MLX
