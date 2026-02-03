@@ -966,7 +966,7 @@ import Foundation
             let initialPosition: Int32 = hasEncoder ? 1 : batch.n_tokens
 
             return try withUnsafeMutablePointer(to: &batch) { batchPointer in
-                var backend = LlamaTokenBackend(
+                let backend = LlamaTokenBackend(
                     context: context,
                     vocab: vocab,
                     vocabSize: vocabSize,
