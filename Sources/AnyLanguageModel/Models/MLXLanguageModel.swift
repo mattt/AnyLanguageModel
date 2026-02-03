@@ -357,6 +357,24 @@ import Foundation
 
             return LanguageModelSession.ResponseStream(stream: stream)
         }
+
+        /// Prewarms the model
+        public func prewarm(
+            for session: LanguageModelSession,
+            promptPrefix: Prompt?
+        ) {
+            let modelId = self.modelId
+            let hub = self.hub
+            let directory = self.directory
+
+            Task {
+                do {
+                    _ = try await loadContext(modelId: modelId, hub: hub, directory: directory)
+                } catch {
+                    // Ignore errors during prewarm
+                }
+            }
+        }
     }
 
     // MARK: - Options Mapping
