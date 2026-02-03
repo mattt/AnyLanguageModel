@@ -338,11 +338,14 @@ package struct ConstrainedJSONGenerator<Backend: TokenBackend> {
         let count: Int
 
         if let minItems = node.minItems, let maxItems = node.maxItems {
-            if minItems <= maxItems {
-                count = Int.random(in: minItems ... maxItems)
-            } else {
-                count = min(minItems, maxItems)
+            if minItems > maxItems {
+                throw ConstrainedGenerationError.invalidArrayBounds(
+                    "Minimum items \(minItems) exceeds maximum \(maxItems)"
+                )
             }
+            let rangeSize = maxItems - minItems + 1
+            let offset = rangeSize > 0 ? backend.remainingTokens % rangeSize : 0
+            count = minItems + offset
         } else if let minItems = node.minItems {
             count = minItems
         } else if let maxItems = node.maxItems {
@@ -453,6 +456,11 @@ package enum ConstrainedGenerationError: LocalizedError {
     /// The associated value contains the partial output.
     case earlyTermination(String)
 
+    /// The array bounds are invalid.
+    ///
+    /// The associated value contains a user-facing description.
+    case invalidArrayBounds(String)
+
     /// A referenced schema definition is missing.
     case missingReference(String)
 
@@ -473,6 +481,8 @@ package enum ConstrainedGenerationError: LocalizedError {
             return details
         case .earlyTermination:
             return "End token was generated before completion"
+        case .invalidArrayBounds(let details):
+            return details
         case .missingReference(let name):
             return "Missing referenced schema definition '\(name)'"
         case .emptyAnyOf:

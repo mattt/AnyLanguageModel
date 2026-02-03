@@ -397,4 +397,57 @@ struct StructuredGenerationTests {
             }
         }
     }
+
+    @Test func invalidArrayBoundsThrows() throws {
+        let maps = baseTokenMaps()
+        let arrayNode = GenerationSchema.ArrayNode(
+            description: nil,
+            items: .string(.init()),
+            minItems: 3,
+            maxItems: 1
+        )
+        let schema = GenerationSchema.primitive([String].self, node: .array(arrayNode))
+        let eosToken = 50
+        let backend = MockTokenBackend(
+            tokenToText: maps.tokenToText,
+            textToTokens: maps.textToTokens,
+            eosToken: eosToken,
+            endTokens: [eosToken],
+            maximumTokens: 6
+        )
+
+        var generator = try ConstrainedJSONGenerator(backend: backend, schema: schema)
+        do {
+            _ = try generator.generate()
+            Issue.record("Expected invalid array bounds error.")
+        } catch let error as ConstrainedGenerationError {
+            guard case .invalidArrayBounds = error else {
+                Issue.record("Unexpected error: \(error).")
+                return
+            }
+        }
+    }
+
+    @Test func arrayCountIsDeterministic() throws {
+        let maps = baseTokenMaps()
+        let arrayNode = GenerationSchema.ArrayNode(
+            description: nil,
+            items: .string(.init(enumChoices: ["a"])),
+            minItems: 1,
+            maxItems: 3
+        )
+        let schema = GenerationSchema.primitive([String].self, node: .array(arrayNode))
+        let eosToken = 50
+        let backend = MockTokenBackend(
+            tokenToText: maps.tokenToText,
+            textToTokens: maps.textToTokens,
+            eosToken: eosToken,
+            endTokens: [eosToken],
+            maximumTokens: 17
+        )
+
+        var generator = try ConstrainedJSONGenerator(backend: backend, schema: schema)
+        let result = try generator.generate()
+        #expect(result == "[\"a\",\"a\",\"a\"]")
+    }
 }

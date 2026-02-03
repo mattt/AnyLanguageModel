@@ -764,13 +764,14 @@ extension GenerationSchema {
                 let schema = Value.generationSchema
 
                 // Arrays should be inlined, not referenced
-                if case .array(var arrayNode) = schema.root {
-                    arrayNode.description = description
+                if case .array(let arrayNode) = schema.root {
+                    var updatedArrayNode = arrayNode
+                    updatedArrayNode.description = description
                     for guide in guides {
-                        if let min = guide.minimumCount { arrayNode.minItems = min }
-                        if let max = guide.maximumCount { arrayNode.maxItems = max }
+                        if let min = guide.minimumCount { updatedArrayNode.minItems = min }
+                        if let max = guide.maximumCount { updatedArrayNode.maxItems = max }
                     }
-                    return (.array(arrayNode), schema.defs)
+                    return (.array(updatedArrayNode), schema.defs)
                 }
 
                 let typeName = String(reflecting: Value.self)
