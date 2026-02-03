@@ -150,8 +150,9 @@ struct ConstrainedJSONGenerator<Backend: TokenBackend> {
     }
 
     private func maxFreeStringTokens() -> Int {
-        let perStringLimit = max(32, backend.totalTokenBudget / 4)
-        return min(backend.remainingTokens, perStringLimit)
+        let perStringLimit = max(16, backend.totalTokenBudget / 16)
+        let remainingAfterClosingQuote = max(0, backend.remainingTokens - 1)
+        return min(remainingAfterClosingQuote, perStringLimit)
     }
 
     private mutating func generateFreeString(maxTokens: Int) throws -> String {
