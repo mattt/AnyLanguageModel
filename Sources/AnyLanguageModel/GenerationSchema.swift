@@ -871,7 +871,7 @@ extension GenerationSchema {
     /// ```
     static let omitAdditionalPropertiesKey = CodingUserInfoKey(rawValue: "GenerationSchema.omitAdditionalProperties")!
 
-    package func schemaPrompt() -> String {
+    func schemaPrompt() -> String {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         guard let data = try? encoder.encode(self),

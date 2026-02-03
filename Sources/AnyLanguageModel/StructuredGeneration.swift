@@ -6,7 +6,7 @@ import Foundation
 ///
 /// Implementations provide tokenization, sampling, and decoding state so the
 /// generator can constrain output to valid JSON for a schema.
-package protocol TokenBackend {
+protocol TokenBackend {
     func tokenize(_ text: String) throws -> [Int]
     func tokenText(_ token: Int) -> String?
     func isSpecialToken(_ token: Int) -> Bool
@@ -23,7 +23,7 @@ package protocol TokenBackend {
 // MARK: - JSON Generator
 
 /// Generates JSON that conforms to a schema using constrained token sampling.
-package struct ConstrainedJSONGenerator<Backend: TokenBackend> {
+struct ConstrainedJSONGenerator<Backend: TokenBackend> {
     private var backend: Backend
     private let schema: GenerationSchema
     private var emittedText = ""
@@ -44,7 +44,7 @@ package struct ConstrainedJSONGenerator<Backend: TokenBackend> {
     ///   - backend: A backend that provides tokenization and sampling.
     ///   - schema: The generation schema to satisfy.
     /// - Throws: ``ConstrainedGenerationError`` when required tokens cannot be tokenized.
-    package init(backend: Backend, schema: GenerationSchema) throws {
+    init(backend: Backend, schema: GenerationSchema) throws {
         self.backend = backend
         self.schema = schema
 
@@ -71,7 +71,7 @@ package struct ConstrainedJSONGenerator<Backend: TokenBackend> {
     ///
     /// - Returns: A JSON string that satisfies the schema.
     /// - Throws: ``ConstrainedGenerationError`` if generation fails.
-    package mutating func generate() throws -> String {
+    mutating func generate() throws -> String {
         do {
             return try generateNode(schema.root)
         } catch let error as ConstrainedGenerationError {
@@ -429,7 +429,7 @@ package struct ConstrainedJSONGenerator<Backend: TokenBackend> {
 // MARK: - Errors
 
 /// An error that can occur during constrained JSON generation.
-package enum ConstrainedGenerationError: LocalizedError {
+enum ConstrainedGenerationError: LocalizedError {
     /// A required value failed to tokenize.
     case tokenizationFailed
 
@@ -467,7 +467,7 @@ package enum ConstrainedGenerationError: LocalizedError {
     /// An any-of schema has no choices.
     case emptyAnyOf
 
-    package var errorDescription: String? {
+    var errorDescription: String? {
         switch self {
         case .tokenizationFailed:
             return "Failed to tokenize a required value"

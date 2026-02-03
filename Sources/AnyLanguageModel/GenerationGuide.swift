@@ -3,19 +3,19 @@ import class Foundation.NSDecimalNumber
 
 /// Guides that control how values are generated.
 public struct GenerationGuide<Value>: Sendable {
-    package var minimumCount: Int?
-    package var maximumCount: Int?
-    package var minimum: Double?
-    package var maximum: Double?
+    var minimumCount: Int?
+    var maximumCount: Int?
+    var minimum: Double?
+    var maximum: Double?
 
     public init() {}
 
-    package init(minimumCount: Int?, maximumCount: Int?) {
+    init(minimumCount: Int?, maximumCount: Int?) {
         self.minimumCount = minimumCount
         self.maximumCount = maximumCount
     }
 
-    package init(minimum: Double?, maximum: Double?) {
+    init(minimum: Double?, maximum: Double?) {
         self.minimum = minimum
         self.maximum = maximum
     }
@@ -114,19 +114,19 @@ extension GenerationGuide where Value == Float {
     ///
     /// The bounds are inclusive.
     public static func minimum(_ value: Float) -> GenerationGuide<Float> {
-        GenerationGuide<Float>()
+        GenerationGuide<Float>(minimum: Double(value), maximum: nil)
     }
 
     /// Enforces a maximum value.
     ///
     /// The bounds are inclusive.
     public static func maximum(_ value: Float) -> GenerationGuide<Float> {
-        GenerationGuide<Float>()
+        GenerationGuide<Float>(minimum: nil, maximum: Double(value))
     }
 
     /// Enforces values fall within a range.
     public static func range(_ range: ClosedRange<Float>) -> GenerationGuide<Float> {
-        GenerationGuide<Float>()
+        GenerationGuide<Float>(minimum: Double(range.lowerBound), maximum: Double(range.upperBound))
     }
 }
 
@@ -138,19 +138,22 @@ extension GenerationGuide where Value == Decimal {
     ///
     /// The bounds are inclusive.
     public static func minimum(_ value: Decimal) -> GenerationGuide<Decimal> {
-        GenerationGuide<Decimal>()
+        GenerationGuide<Decimal>(minimum: NSDecimalNumber(decimal: value).doubleValue, maximum: nil)
     }
 
     /// Enforces a maximum value.
     ///
     /// The bounds are inclusive.
     public static func maximum(_ value: Decimal) -> GenerationGuide<Decimal> {
-        GenerationGuide<Decimal>()
+        GenerationGuide<Decimal>(minimum: nil, maximum: NSDecimalNumber(decimal: value).doubleValue)
     }
 
     /// Enforces values fall within a range.
     public static func range(_ range: ClosedRange<Decimal>) -> GenerationGuide<Decimal> {
-        GenerationGuide<Decimal>()
+        GenerationGuide<Decimal>(
+            minimum: NSDecimalNumber(decimal: range.lowerBound).doubleValue,
+            maximum: NSDecimalNumber(decimal: range.upperBound).doubleValue
+        )
     }
 }
 
