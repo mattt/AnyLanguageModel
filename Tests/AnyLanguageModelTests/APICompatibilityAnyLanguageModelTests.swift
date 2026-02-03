@@ -4,7 +4,7 @@ import Testing
     import AnyLanguageModel
 
     private let isSystemLanguageModelAvailable: Bool = {
-        if #available(macOS 26.0, iOS 26.0, visionOS 26.0, *) {
+        if #available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *) {
             return SystemLanguageModel.default.isAvailable
         }
         return false
