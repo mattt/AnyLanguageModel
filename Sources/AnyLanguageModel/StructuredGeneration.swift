@@ -51,9 +51,9 @@ struct ConstrainedJSONGenerator<Backend: TokenBackend> {
         let quoteToken = try Self.singleToken(for: "\"", backend: backend)
         self.quoteToken = quoteToken
 
-        self.stringTerminators = backend.endTokens.union([quoteToken])
+        self.stringTerminators = [quoteToken]
 
-        var structuralTerminators = backend.endTokens
+        var structuralTerminators = Set<Int>()
         for structuralText in [",", "}", "]", ":"] {
             let token = try Self.singleToken(for: structuralText, backend: backend)
             structuralTerminators.insert(token)
