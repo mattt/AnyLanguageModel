@@ -10,7 +10,7 @@ import Testing
         return false
     }()
 
-    @available(macOS 26.0, iOS 26.0, visionOS 26.0, *)
+    @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
     @Test("AnyLanguageModel Drop-In Compatibility", .enabled(if: isSystemLanguageModelAvailable))
     func anyLanguageModelCompatibility() async throws {
         let model = SystemLanguageModel.default
