@@ -284,26 +284,65 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
 
     private static func buildGuidesArray(for property: PropertyInfo) -> String {
         let baseType = property.type.replacingOccurrences(of: "?", with: "")
+        var guides: [String] = []
 
         if baseType.hasPrefix("[") && baseType.hasSuffix("]") && !isDictionaryType(baseType) {
-            if property.guide.constraints.minimumCount != nil || property.guide.constraints.maximumCount != nil {
-                let minStr = property.guide.constraints.minimumCount.map { String($0) } ?? "nil"
-                let maxStr = property.guide.constraints.maximumCount.map { String($0) } ?? "nil"
-                return "[GenerationGuide(minimumCount: \(minStr), maximumCount: \(maxStr))]"
+            let minCount = property.guide.constraints.minimumCount
+            let maxCount = property.guide.constraints.maximumCount
+
+            if let min = minCount, let max = maxCount {
+                if min == max {
+                    guides.append(".count(\(min))")
+                } else {
+                    guides.append(".count(\(min)...\(max))")
+                }
+            } else {
+                if let min = minCount {
+                    guides.append(".minimumCount(\(min))")
+                }
+                if let max = maxCount {
+                    guides.append(".maximumCount(\(max))")
+                }
             }
-            return "[]"
+
+            return guides.isEmpty ? "[]" : "[\(guides.joined(separator: ", "))]"
         }
 
         if baseType == "Int" || baseType == "Double" || baseType == "Float" {
-            if property.guide.constraints.minimum != nil || property.guide.constraints.maximum != nil {
-                let minStr = property.guide.constraints.minimum.map { String($0) } ?? "nil"
-                let maxStr = property.guide.constraints.maximum.map { String($0) } ?? "nil"
-                return "[GenerationGuide(minimum: \(minStr), maximum: \(maxStr))]"
+            let minValue = property.guide.constraints.minimum
+            let maxValue = property.guide.constraints.maximum
+
+            if let min = minValue, let max = maxValue {
+                if let minExpr = numericLiteralExpression(for: baseType, value: min),
+                    let maxExpr = numericLiteralExpression(for: baseType, value: max)
+                {
+                    guides.append(".range(\(minExpr)...\(maxExpr))")
+                }
+            } else {
+                if let min = minValue, let minExpr = numericLiteralExpression(for: baseType, value: min) {
+                    guides.append(".minimum(\(minExpr))")
+                }
+                if let max = maxValue, let maxExpr = numericLiteralExpression(for: baseType, value: max) {
+                    guides.append(".maximum(\(maxExpr))")
+                }
             }
-            return "[]"
+
+            return guides.isEmpty ? "[]" : "[\(guides.joined(separator: ", "))]"
         }
 
         return "[]"
+    }
+
+    private static func numericLiteralExpression(for baseType: String, value: Double) -> String? {
+        switch baseType {
+        case "Int":
+            guard value.rounded() == value else { return nil }
+            return String(Int(value))
+        case "Float":
+            return String(Float(value))
+        default:
+            return String(value)
+        }
     }
 
     private static func parseNumericLiteral(_ expression: ExprSyntax) -> Double? {
