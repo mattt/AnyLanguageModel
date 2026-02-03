@@ -974,6 +974,7 @@ import Foundation
                     batch: batchPointer,
                     position: initialPosition,
                     maximumTokens: maxTokens,
+                    endTokens: [],
                     tokenToTextFn: { [self] token in self.tokenToText(vocab: vocab, token: llama_token(token)) }
                 )
                 var generator = try ConstrainedJSONGenerator(backend: backend, schema: schema)
@@ -1004,6 +1005,7 @@ import Foundation
                 batch: UnsafeMutablePointer<llama_batch>,
                 position: Int32,
                 maximumTokens: Int,
+                endTokens: Set<Int>? = nil,
                 tokenToTextFn: @escaping (Int) -> String?
             ) {
                 self.context = context
@@ -1016,9 +1018,13 @@ import Foundation
                 self.totalTokenBudget = maximumTokens
                 self.eosToken = Int(llama_vocab_eos(vocab))
 
-                let eotTokenValue = llama_vocab_eot(vocab)
-                let endOfTurnToken = eotTokenValue != LLAMA_TOKEN_NULL ? Int(eotTokenValue) : eosToken
-                self.endTokens = [self.eosToken, endOfTurnToken]
+                if let endTokens {
+                    self.endTokens = endTokens
+                } else {
+                    let eotTokenValue = llama_vocab_eot(vocab)
+                    let endOfTurnToken = eotTokenValue != LLAMA_TOKEN_NULL ? Int(eotTokenValue) : eosToken
+                    self.endTokens = [self.eosToken, endOfTurnToken]
+                }
 
                 self.tokenToTextFn = tokenToTextFn
                 self.tokensExcludedFromRepetitionPenalty = Self.buildTokensExcludedFromRepetitionPenalty(

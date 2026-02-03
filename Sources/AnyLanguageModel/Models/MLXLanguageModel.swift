@@ -726,7 +726,8 @@ import Foundation
             context: context,
             input: lmInput,
             parameters: generateParameters,
-            maximumTokens: maxTokens
+            maximumTokens: maxTokens,
+            endTokens: []
         )
 
         var generator = try ConstrainedJSONGenerator(backend: backend, schema: schema)
@@ -805,7 +806,8 @@ import Foundation
             context: ModelContext,
             input: MLXLMCommon.LMInput,
             parameters: MLXLMCommon.GenerateParameters,
-            maximumTokens: Int
+            maximumTokens: Int,
+            endTokens: Set<Int>? = nil
         ) throws {
             self.model = context.model
             self.tokenizer = context.tokenizer
@@ -819,11 +821,15 @@ import Foundation
                 throw StructuredGenerationError.invalidVocabSize
             }
             self.eosToken = eosTokenId
-            self.endTokens = Self.buildEndTokens(
-                eosTokenId: eosTokenId,
-                tokenizer: context.tokenizer,
-                configuration: context.configuration
-            )
+            if let endTokens {
+                self.endTokens = endTokens
+            } else {
+                self.endTokens = Self.buildEndTokens(
+                    eosTokenId: eosTokenId,
+                    tokenizer: context.tokenizer,
+                    configuration: context.configuration
+                )
+            }
 
             self.tokensExcludedFromRepetitionPenalty = Self.buildTokensExcludedFromRepetitionPenalty(
                 tokenizer: context.tokenizer
