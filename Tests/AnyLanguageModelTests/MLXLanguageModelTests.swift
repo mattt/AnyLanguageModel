@@ -167,6 +167,7 @@ import Testing
                 to: "Generate a boolean value: true",
                 generating: SimpleBool.self
             )
+            #expect(response.content.value == true)
             let jsonData = response.rawContent.jsonString.data(using: .utf8)
             #expect(jsonData != nil)
             if let jsonData {

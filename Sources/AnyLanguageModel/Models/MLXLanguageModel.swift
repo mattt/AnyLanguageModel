@@ -567,9 +567,6 @@ import Foundation
         if let intValue = value as? Int { return intValue }
         if let doubleValue = value as? Double { return doubleValue }
         if let numberValue = value as? NSNumber {
-            if CFGetTypeID(numberValue) == CFBooleanGetTypeID() {
-                return numberValue.boolValue
-            }
             return numberValue.doubleValue
         }
         if let arrayValue = value as? [Any] {

@@ -90,7 +90,9 @@ package struct ConstrainedJSONGenerator<Backend: TokenBackend> {
         var allowed = Set<Int>()
         for token in 0 ..< backend.vocabSize {
             guard let text = backend.tokenText(token), !text.isEmpty else { continue }
-            if text.allSatisfy({ $0.isNumber || $0 == "-" }) {
+            if text.allSatisfy({ $0.isNumber || $0 == "-" }),
+                text.contains(where: { $0.isNumber })
+            {
                 allowed.insert(token)
             }
         }
@@ -101,7 +103,9 @@ package struct ConstrainedJSONGenerator<Backend: TokenBackend> {
         var allowed = Set<Int>()
         for token in 0 ..< backend.vocabSize {
             guard let text = backend.tokenText(token), !text.isEmpty else { continue }
-            if text.allSatisfy({ $0.isNumber || $0 == "-" || $0 == "." }) {
+            if text.allSatisfy({ $0.isNumber || $0 == "-" || $0 == "." }),
+                text.contains(where: { $0.isNumber })
+            {
                 allowed.insert(token)
             }
         }
@@ -180,13 +184,15 @@ package struct ConstrainedJSONGenerator<Backend: TokenBackend> {
         let allowedTokens = node.integerOnly ? integerTerminators : doubleTerminators
         var result = ""
         let maxTokens = 16
+        var generatedTokens = 0
 
-        while backend.remainingTokens > 0, result.count < maxTokens {
+        while backend.remainingTokens > 0, generatedTokens < maxTokens {
             let token = try backend.sample(from: allowedTokens)
             if basicTerminators.contains(token) { break }
 
             guard let text = backend.tokenText(token) else { break }
             result += text
+            generatedTokens += 1
             try backend.decode(token)
         }
 
@@ -252,22 +258,27 @@ package struct ConstrainedJSONGenerator<Backend: TokenBackend> {
             }
             return try generateNode(referenced)
         case .anyOf(let variants):
-            guard let first = variants.first else {
+            guard !variants.isEmpty else {
                 throw ConstrainedGenerationError.emptyAnyOf
             }
-            return try generateNode(first)
+            if variants.count == 1 {
+                return try generateNode(variants[0])
+            }
+            let chosenIndex = backend.remainingTokens % variants.count
+            return try generateNode(variants[chosenIndex])
         }
     }
 
     private mutating func generateObject(_ node: GenerationSchema.ObjectNode) throws -> String {
         let keys = node.properties.keys.sorted()
+        let includedKeys = keys.filter { shouldIncludeOptionalProperty($0, required: node.required) }
         var output = try emit("{")
 
-        for (index, key) in keys.enumerated() {
+        for (index, key) in includedKeys.enumerated() {
             output += try emit("\"\(key)\":")
             output += try generateNode(node.properties[key] ?? .string(.init()))
 
-            if index < keys.count - 1 {
+            if index < includedKeys.count - 1 {
                 output += try emit(",")
             }
         }
@@ -277,7 +288,22 @@ package struct ConstrainedJSONGenerator<Backend: TokenBackend> {
     }
 
     private mutating func generateArray(_ node: GenerationSchema.ArrayNode) throws -> String {
-        let count = node.minItems ?? node.maxItems ?? 4
+        let defaultCount = 4
+        let count: Int
+
+        if let minItems = node.minItems, let maxItems = node.maxItems {
+            if minItems <= maxItems {
+                count = Int.random(in: minItems ... maxItems)
+            } else {
+                count = min(minItems, maxItems)
+            }
+        } else if let minItems = node.minItems {
+            count = minItems
+        } else if let maxItems = node.maxItems {
+            count = maxItems
+        } else {
+            count = defaultCount
+        }
         var output = try emit("[")
 
         for index in 0 ..< count {
@@ -303,6 +329,14 @@ package struct ConstrainedJSONGenerator<Backend: TokenBackend> {
 
         output += try emit("\"")
         return output
+    }
+
+    private func shouldIncludeOptionalProperty(_ key: String, required: Set<String>) -> Bool {
+        if required.contains(key) { return true }
+        let minimumBudget = max(8, backend.totalTokenBudget / 10)
+        guard backend.remainingTokens > minimumBudget else { return false }
+        let hash = key.utf8.reduce(0) { ($0 &* 31) &+ Int($1) }
+        return (hash ^ backend.remainingTokens) % 2 == 0
     }
 }
 

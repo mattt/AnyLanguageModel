@@ -520,18 +520,22 @@ public struct GenerationSchema: Sendable, Codable, CustomDebugStringConvertible 
         case (.ref(let aName), .ref(let bName)):
             return aName == bName
         case (.string(let aString), .string(let bString)):
-            return aString.pattern == bString.pattern
+            return aString.description == bString.description
+                && aString.pattern == bString.pattern
                 && aString.enumChoices == bString.enumChoices
         case (.number(let aNumber), .number(let bNumber)):
-            return aNumber.integerOnly == bNumber.integerOnly
+            return aNumber.description == bNumber.description
+                && aNumber.integerOnly == bNumber.integerOnly
                 && aNumber.minimum == bNumber.minimum
                 && aNumber.maximum == bNumber.maximum
         case (.array(let aArray), .array(let bArray)):
-            return aArray.minItems == bArray.minItems
+            return aArray.description == bArray.description
+                && aArray.minItems == bArray.minItems
                 && aArray.maxItems == bArray.maxItems
                 && nodesEqual(aArray.items, bArray.items)
         case (.object(let aObject), .object(let bObject)):
-            return aObject.required == bObject.required
+            return aObject.description == bObject.description
+                && aObject.required == bObject.required
                 && aObject.properties.keys == bObject.properties.keys
                 && aObject.properties.allSatisfy { key, aNode in
                     guard let bNode = bObject.properties[key] else { return false }
