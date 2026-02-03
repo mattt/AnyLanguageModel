@@ -2,7 +2,10 @@ import Foundation
 
 // MARK: - Token Backend
 
-/// Abstracts token-level operations for structured JSON generation.
+/// A token-level backend used by ``ConstrainedJSONGenerator``.
+///
+/// Implementations provide tokenization, sampling, and decoding state so the
+/// generator can constrain output to valid JSON for a schema.
 package protocol TokenBackend {
     func tokenize(_ text: String) throws -> [Int]
     func tokenText(_ token: Int) -> String?
@@ -19,10 +22,11 @@ package protocol TokenBackend {
 
 // MARK: - JSON Generator
 
-/// Generates JSON conforming to a schema using constrained token sampling.
+/// Generates JSON that conforms to a schema using constrained token sampling.
 package struct ConstrainedJSONGenerator<Backend: TokenBackend> {
     private var backend: Backend
     private let schema: GenerationSchema
+    private var emittedText = ""
 
     private let quoteToken: Int
 
@@ -34,22 +38,25 @@ package struct ConstrainedJSONGenerator<Backend: TokenBackend> {
     private let integerTerminators: Set<Int>
     private let doubleTerminators: Set<Int>
 
+    /// Creates a constrained JSON generator.
+    ///
+    /// - Parameters:
+    ///   - backend: A backend that provides tokenization and sampling.
+    ///   - schema: The generation schema to satisfy.
+    /// - Throws: ``ConstrainedGenerationError`` when required tokens cannot be tokenized.
     package init(backend: Backend, schema: GenerationSchema) throws {
         self.backend = backend
         self.schema = schema
 
-        guard let quoteToken = try backend.tokenize("\"").first else {
-            throw ConstrainedGenerationError.tokenizationFailed
-        }
+        let quoteToken = try Self.singleToken(for: "\"", backend: backend)
         self.quoteToken = quoteToken
 
         self.stringTerminators = backend.endTokens.union([quoteToken])
 
         var structuralTerminators = backend.endTokens
         for structuralText in [",", "}", "]", ":"] {
-            if let token = try backend.tokenize(structuralText).first {
-                structuralTerminators.insert(token)
-            }
+            let token = try Self.singleToken(for: structuralText, backend: backend)
+            structuralTerminators.insert(token)
         }
         self.basicTerminators = structuralTerminators
         self.integerTerminators = Self.buildValidIntegerTokens(backend: backend).union(structuralTerminators)
@@ -60,8 +67,27 @@ package struct ConstrainedJSONGenerator<Backend: TokenBackend> {
         self.stringContinuationAllowedTokens = stringContentTokens.union(stringTerminators)
     }
 
+    /// Generates a JSON string that conforms to the schema.
+    ///
+    /// - Returns: A JSON string that satisfies the schema.
+    /// - Throws: ``ConstrainedGenerationError`` if generation fails.
     package mutating func generate() throws -> String {
-        try generateNode(schema.root)
+        do {
+            return try generateNode(schema.root)
+        } catch let error as ConstrainedGenerationError {
+            if case .earlyTermination(let partial) = error {
+                return partial
+            }
+            throw error
+        }
+    }
+
+    private static func singleToken(for text: String, backend: Backend) throws -> Int {
+        let tokens = try backend.tokenize(text)
+        guard tokens.count == 1, let token = tokens.first else {
+            throw ConstrainedGenerationError.unsupportedTokenizer("Expected single-token encoding for '\(text)'")
+        }
+        return token
     }
 
     private static func buildValidStringTokens(backend: Backend) -> Set<Int> {
@@ -119,6 +145,7 @@ package struct ConstrainedJSONGenerator<Backend: TokenBackend> {
             }
             try backend.decode(token)
         }
+        emittedText += text
         return text
     }
 
@@ -134,13 +161,14 @@ package struct ConstrainedJSONGenerator<Backend: TokenBackend> {
         while backend.remainingTokens > 0, generated < maxTokens {
             let allowed = result.isEmpty ? stringInitialAllowedTokens : stringContinuationAllowedTokens
             let token = try backend.sample(from: allowed)
-            if stringTerminators.contains(token) { break }
-
-            var text = backend.tokenText(token) ?? ""
-            if result.last?.isWhitespace == true && text.first?.isWhitespace == true {
-                text = String(text.drop(while: { $0.isWhitespace }))
+            if backend.endTokens.contains(token) {
+                throw ConstrainedGenerationError.earlyTermination(emittedText)
             }
+            if token == quoteToken { break }
+
+            let text = backend.tokenText(token) ?? ""
             result += text
+            emittedText += text
             generated += 1
             try backend.decode(token)
         }
@@ -149,9 +177,26 @@ package struct ConstrainedJSONGenerator<Backend: TokenBackend> {
     }
 
     private mutating func generateChoice(_ candidates: [String]) throws -> String {
-        let tokenized = try candidates.map { try backend.tokenize($0) }.filter { !$0.isEmpty }
-        guard !tokenized.isEmpty else {
+        guard !candidates.isEmpty else {
             throw ConstrainedGenerationError.tokenizationFailed
+        }
+
+        let tokenized = try candidates.map { try backend.tokenize($0) }
+        for (candidate, tokens) in zip(candidates, tokenized) {
+            if candidate.isEmpty { continue }
+            if tokens.isEmpty {
+                throw ConstrainedGenerationError.tokenizationFailed
+            }
+        }
+
+        let hasEmptyCandidate = candidates.contains("")
+        let hasPrefixCollision = Self.hasPrefixCollision(tokenized: tokenized)
+        if hasEmptyCandidate || hasPrefixCollision {
+            let chosen = deterministicChoice(from: candidates)
+            if !chosen.isEmpty {
+                _ = try emit(chosen)
+            }
+            return chosen
         }
 
         var prefixes = tokenized
@@ -169,7 +214,12 @@ package struct ConstrainedJSONGenerator<Backend: TokenBackend> {
             )
 
             let token = try backend.sample(from: allowed)
-            emitted += backend.tokenText(token) ?? ""
+            if backend.endTokens.contains(token) {
+                throw ConstrainedGenerationError.earlyTermination(emittedText)
+            }
+            let text = backend.tokenText(token) ?? ""
+            emitted += text
+            emittedText += text
             try backend.decode(token)
 
             prefixes = prefixes.filter { $0.count > position && $0[position] == token }
@@ -188,52 +238,48 @@ package struct ConstrainedJSONGenerator<Backend: TokenBackend> {
 
         while backend.remainingTokens > 0, generatedTokens < maxTokens {
             let token = try backend.sample(from: allowedTokens)
+            if backend.endTokens.contains(token) {
+                throw ConstrainedGenerationError.earlyTermination(emittedText)
+            }
             if basicTerminators.contains(token) { break }
 
             guard let text = backend.tokenText(token) else { break }
             result += text
+            emittedText += text
             generatedTokens += 1
             try backend.decode(token)
         }
 
-        return clampNumberString(result.isEmpty ? "0" : result, node: node)
+        guard !result.isEmpty else {
+            throw ConstrainedGenerationError.numberOutOfRange("Missing number value")
+        }
+        return try validateNumberString(result, node: node)
     }
 
-    private func clampNumberString(_ text: String, node: GenerationSchema.NumberNode) -> String {
+    private func validateNumberString(_ text: String, node: GenerationSchema.NumberNode) throws -> String {
         if node.integerOnly {
-            let value = Int(text) ?? 0
-            let clamped = clampInt(value, min: node.minimum, max: node.maximum)
-            return String(clamped)
+            guard let value = Int(text) else {
+                throw ConstrainedGenerationError.numberOutOfRange("Invalid integer: \(text)")
+            }
+            if let minimum = node.minimum, Double(value) < minimum {
+                throw ConstrainedGenerationError.numberOutOfRange("Integer \(value) is below minimum \(minimum)")
+            }
+            if let maximum = node.maximum, Double(value) > maximum {
+                throw ConstrainedGenerationError.numberOutOfRange("Integer \(value) exceeds maximum \(maximum)")
+            }
+            return text
         } else {
-            let value = Double(text) ?? 0
-            let clamped = clampDouble(value, min: node.minimum, max: node.maximum)
-            return formatDouble(clamped)
+            guard let value = Double(text), !value.isNaN, value.isFinite else {
+                throw ConstrainedGenerationError.numberOutOfRange("Invalid number: \(text)")
+            }
+            if let minimum = node.minimum, value < minimum {
+                throw ConstrainedGenerationError.numberOutOfRange("Number \(value) is below minimum \(minimum)")
+            }
+            if let maximum = node.maximum, value > maximum {
+                throw ConstrainedGenerationError.numberOutOfRange("Number \(value) exceeds maximum \(maximum)")
+            }
+            return text
         }
-    }
-
-    private func clampInt(_ value: Int, min: Double?, max: Double?) -> Int {
-        let lower = min.map { Int(ceil($0)) }
-        let upper = max.map { Int(floor($0)) }
-        return clamp(value, min: lower, max: upper)
-    }
-
-    private func clampDouble(_ value: Double, min: Double?, max: Double?) -> Double {
-        clamp(value, min: min, max: max)
-    }
-
-    private func clamp<T: Comparable>(_ value: T, min: T?, max: T?) -> T {
-        var result = value
-        if let min { result = Swift.max(result, min) }
-        if let max { result = Swift.min(result, max) }
-        return result
-    }
-
-    private func formatDouble(_ value: Double) -> String {
-        if value.truncatingRemainder(dividingBy: 1) == 0 {
-            return String(Int(value))
-        }
-        let formatted = String(format: "%.6g", value)
-        return formatted
     }
 
     private mutating func generateNode(_ node: GenerationSchema.Node) throws -> String {
@@ -319,14 +365,23 @@ package struct ConstrainedJSONGenerator<Backend: TokenBackend> {
 
     private mutating func generateString(_ node: GenerationSchema.StringNode) throws -> String {
         var output = try emit("\"")
+        let content: String
 
         if let choices = node.enumChoices, !choices.isEmpty {
-            output += try generateChoice(choices)
+            content = try generateChoice(choices)
         } else {
-            let content = try generateFreeString(maxTokens: maxFreeStringTokens())
-            output += content.trimmingCharacters(in: .whitespaces)
+            content = try generateFreeString(maxTokens: maxFreeStringTokens())
         }
 
+        if let pattern = node.pattern {
+            if !matchesPattern(content, pattern: pattern) {
+                throw ConstrainedGenerationError.patternMismatch(
+                    "Value '\(content)' does not match pattern '\(pattern)'"
+                )
+            }
+        }
+
+        output += content
         output += try emit("\"")
         return output
     }
@@ -338,13 +393,90 @@ package struct ConstrainedJSONGenerator<Backend: TokenBackend> {
         let hash = key.utf8.reduce(0) { ($0 &* 31) &+ Int($1) }
         return (hash ^ backend.remainingTokens) % 2 == 0
     }
+
+    private func deterministicChoice(from candidates: [String]) -> String {
+        guard !candidates.isEmpty else { return "" }
+        let index = abs(backend.remainingTokens) % candidates.count
+        return candidates[index]
+    }
+
+    private static func hasPrefixCollision(tokenized: [[Int]]) -> Bool {
+        for (index, candidate) in tokenized.enumerated() {
+            for (otherIndex, other) in tokenized.enumerated() where otherIndex != index {
+                guard candidate.count < other.count else { continue }
+                if Array(other.prefix(candidate.count)) == candidate {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    private func matchesPattern(_ value: String, pattern: String) -> Bool {
+        do {
+            let regex = try NSRegularExpression(pattern: pattern)
+            let range = NSRange(value.startIndex..., in: value)
+            return regex.firstMatch(in: value, range: range) != nil
+        } catch {
+            return false
+        }
+    }
 }
 
 // MARK: - Errors
 
-package enum ConstrainedGenerationError: Error {
+/// An error that can occur during constrained JSON generation.
+package enum ConstrainedGenerationError: LocalizedError {
+    /// A required value failed to tokenize.
     case tokenizationFailed
+
+    /// The generation exceeded the available token budget.
     case tokenBudgetExceeded
+
+    /// The tokenizer does not support a required single-token encoding.
+    ///
+    /// The associated value contains a user-facing description.
+    case unsupportedTokenizer(String)
+
+    /// The generated value does not match the required pattern.
+    ///
+    /// The associated value contains a user-facing description.
+    case patternMismatch(String)
+
+    /// The generated number violates numeric bounds or is invalid.
+    ///
+    /// The associated value contains a user-facing description.
+    case numberOutOfRange(String)
+
+    /// The backend emitted an end token before completion.
+    ///
+    /// The associated value contains the partial output.
+    case earlyTermination(String)
+
+    /// A referenced schema definition is missing.
     case missingReference(String)
+
+    /// An any-of schema has no choices.
     case emptyAnyOf
+
+    package var errorDescription: String? {
+        switch self {
+        case .tokenizationFailed:
+            return "Failed to tokenize a required value"
+        case .tokenBudgetExceeded:
+            return "Generation exceeded the available token budget"
+        case .unsupportedTokenizer(let details):
+            return details
+        case .patternMismatch(let details):
+            return details
+        case .numberOutOfRange(let details):
+            return details
+        case .earlyTermination:
+            return "End token was generated before completion"
+        case .missingReference(let name):
+            return "Missing referenced schema definition '\(name)'"
+        case .emptyAnyOf:
+            return "Any-of schema has no choices"
+        }
+    }
 }
