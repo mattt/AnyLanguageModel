@@ -1,11 +1,11 @@
 import Foundation
 
-#if canImport(UIKit)
+#if canImport(UIKit) && canImport(CoreImage)
     import UIKit
     import CoreImage
 #endif
 
-#if canImport(AppKit)
+#if canImport(AppKit) && canImport(CoreImage)
     import AppKit
     import CoreImage
 #endif
