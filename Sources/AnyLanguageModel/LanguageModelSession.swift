@@ -160,7 +160,12 @@ public final class LanguageModelSession: @unchecked Sendable {
         public let rawContent: GeneratedContent
         public let transcriptEntries: ArraySlice<Transcript.Entry>
 
-        init(
+        /// Creates a response value from generated content and transcript entries.
+        /// - Parameters:
+        ///   - content: The decoded response content.
+        ///   - rawContent: The raw content produced by the model.
+        ///   - transcriptEntries: Transcript entries associated with the response.
+        public init(
             content: Content,
             rawContent: GeneratedContent,
             transcriptEntries: ArraySlice<Transcript.Entry>
@@ -768,12 +773,18 @@ extension LanguageModelSession {
         private let fallbackSnapshot: Snapshot?
         private let streaming: AsyncThrowingStream<Snapshot, any Error>?
 
-        init(content: Content, rawContent: GeneratedContent) {
+        /// Creates a response stream that yields a single snapshot.
+        /// - Parameters:
+        ///   - content: The complete response content.
+        ///   - rawContent: The raw content produced by the model.
+        public init(content: Content, rawContent: GeneratedContent) {
             self.fallbackSnapshot = Snapshot(content: content.asPartiallyGenerated(), rawContent: rawContent)
             self.streaming = nil
         }
 
-        init(stream: AsyncThrowingStream<Snapshot, any Error>) {
+        /// Creates a response stream that yields snapshots from an async stream.
+        /// - Parameter stream: The snapshot stream to relay.
+        public init(stream: AsyncThrowingStream<Snapshot, any Error>) {
             // When streaming, snapshots arrive from the upstream sequence, so no fallback is required.
             self.fallbackSnapshot = nil
             self.streaming = stream
@@ -782,6 +793,15 @@ extension LanguageModelSession {
         public struct Snapshot: Sendable where Content.PartiallyGenerated: Sendable {
             public var content: Content.PartiallyGenerated
             public var rawContent: GeneratedContent
+
+            /// Creates a snapshot from partially generated content and raw content.
+            /// - Parameters:
+            ///   - content: The partially generated content.
+            ///   - rawContent: The raw content produced by the model.
+            public init(content: Content.PartiallyGenerated, rawContent: GeneratedContent) {
+                self.content = content
+                self.rawContent = rawContent
+            }
         }
     }
 }
