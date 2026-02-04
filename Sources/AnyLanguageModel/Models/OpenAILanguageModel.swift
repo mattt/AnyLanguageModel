@@ -514,19 +514,12 @@ public struct OpenAILanguageModel: LanguageModel {
                     for invocation in invocations {
                         let output = invocation.output
                         entries.append(.toolOutput(output))
-                        // Convert tool output segments to plain text for DeepSeek API compatibility
-                        let toolContent = output.segments.map { segment -> String in
-                            switch segment {
-                            case .text(let textSegment): return textSegment.content
-                            case .structure(let structuredSegment):
-                                switch structuredSegment.content.kind {
-                                case .string(let text): return text
-                                default: return structuredSegment.content.jsonString
-                                }
-                            case .image: return "<image>"
-                            }
-                        }.joined()
-                        messages.append(OpenAIMessage(role: .tool(id: invocation.call.id), content: .text(toolContent)))
+                        messages.append(
+                            OpenAIMessage(
+                                role: .tool(id: invocation.call.id),
+                                content: .text(convertSegmentsToToolContentString(output.segments))
+                            )
+                        )
                     }
                     continue
                 }
@@ -589,19 +582,12 @@ public struct OpenAILanguageModel: LanguageModel {
                     for invocation in invocations {
                         let output = invocation.output
                         entries.append(.toolOutput(output))
-                        // Convert tool output segments to plain text for DeepSeek API compatibility
-                        let toolContent = output.segments.map { segment -> String in
-                            switch segment {
-                            case .text(let textSegment): return textSegment.content
-                            case .structure(let structuredSegment):
-                                switch structuredSegment.content.kind {
-                                case .string(let text): return text
-                                default: return structuredSegment.content.jsonString
-                                }
-                            case .image: return "<image>"
-                            }
-                        }.joined()
-                        messages.append(OpenAIMessage(role: .tool(id: invocation.call.id), content: .text(toolContent)))
+                        messages.append(
+                            OpenAIMessage(
+                                role: .tool(id: invocation.call.id),
+                                content: .text(convertSegmentsToToolContentString(output.segments))
+                            )
+                        )
                     }
                     continue
                 }
@@ -1185,22 +1171,10 @@ extension Transcript {
                     )
                 )
             case .toolOutput(let toolOutput):
-                // Convert tool output segments to plain text for DeepSeek API compatibility
-                let toolContent = toolOutput.segments.map { segment -> String in
-                    switch segment {
-                    case .text(let textSegment): return textSegment.content
-                    case .structure(let structuredSegment):
-                        switch structuredSegment.content.kind {
-                        case .string(let text): return text
-                        default: return structuredSegment.content.jsonString
-                        }
-                    case .image: return "<image>"
-                    }
-                }.joined()
                 messages.append(
                     .init(
                         role: .tool(id: toolOutput.id),
-                        content: .text(toolContent)
+                        content: .text(convertSegmentsToToolContentString(toolOutput.segments))
                     )
                 )
             }
@@ -1338,6 +1312,26 @@ private func convertSegmentsToOpenAIBlocks(_ segments: [Transcript.Segment]) -> 
         }
     }
     return blocks
+}
+
+/// Converts a list of transcript segments to a string representation suitable for tool message content.
+private func convertSegmentsToToolContentString(_ segments: [Transcript.Segment]) -> String {
+    // Tool message content must be string (or text-only parts) per API spec.
+    // String is used for broad provider compatibility.
+    // Image segments are intentionally omitted because tool outputs only support text.
+    segments.compactMap { segment in
+        switch segment {
+        case .text(let textSegment):
+            return textSegment.content
+        case .structure(let structuredSegment):
+            switch structuredSegment.content.kind {
+            case .string(let text): return text
+            default: return structuredSegment.content.jsonString
+            }
+        case .image:
+            return nil
+        }
+    }.joined(separator: "\n")
 }
 
 private struct OpenAITool: Hashable, Codable, Sendable {
