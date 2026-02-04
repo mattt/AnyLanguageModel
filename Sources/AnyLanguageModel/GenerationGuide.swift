@@ -2,7 +2,24 @@ import struct Foundation.Decimal
 import class Foundation.NSDecimalNumber
 
 /// Guides that control how values are generated.
-public struct GenerationGuide<Value> {}
+public struct GenerationGuide<Value>: Sendable {
+    var minimumCount: Int?
+    var maximumCount: Int?
+    var minimum: Double?
+    var maximum: Double?
+
+    public init() {}
+
+    init(minimumCount: Int?, maximumCount: Int?) {
+        self.minimumCount = minimumCount
+        self.maximumCount = maximumCount
+    }
+
+    init(minimum: Double?, maximum: Double?) {
+        self.minimum = minimum
+        self.maximum = maximum
+    }
+}
 
 // MARK: - String Guides
 
@@ -45,7 +62,7 @@ extension GenerationGuide where Value == Int {
     /// }
     /// ```
     public static func minimum(_ value: Int) -> GenerationGuide<Int> {
-        GenerationGuide<Int>()
+        GenerationGuide<Int>(minimum: Double(value), maximum: nil)
     }
 
     /// Enforces a maximum value.
@@ -65,7 +82,7 @@ extension GenerationGuide where Value == Int {
     /// }
     /// ```
     public static func maximum(_ value: Int) -> GenerationGuide<Int> {
-        GenerationGuide<Int>()
+        GenerationGuide<Int>(minimum: nil, maximum: Double(value))
     }
 
     /// Enforces values fall within a range.
@@ -85,7 +102,7 @@ extension GenerationGuide where Value == Int {
     /// }
     /// ```
     public static func range(_ range: ClosedRange<Int>) -> GenerationGuide<Int> {
-        GenerationGuide<Int>()
+        GenerationGuide<Int>(minimum: Double(range.lowerBound), maximum: Double(range.upperBound))
     }
 }
 
@@ -97,19 +114,19 @@ extension GenerationGuide where Value == Float {
     ///
     /// The bounds are inclusive.
     public static func minimum(_ value: Float) -> GenerationGuide<Float> {
-        GenerationGuide<Float>()
+        GenerationGuide<Float>(minimum: Double(value), maximum: nil)
     }
 
     /// Enforces a maximum value.
     ///
     /// The bounds are inclusive.
     public static func maximum(_ value: Float) -> GenerationGuide<Float> {
-        GenerationGuide<Float>()
+        GenerationGuide<Float>(minimum: nil, maximum: Double(value))
     }
 
     /// Enforces values fall within a range.
     public static func range(_ range: ClosedRange<Float>) -> GenerationGuide<Float> {
-        GenerationGuide<Float>()
+        GenerationGuide<Float>(minimum: Double(range.lowerBound), maximum: Double(range.upperBound))
     }
 }
 
@@ -121,19 +138,22 @@ extension GenerationGuide where Value == Decimal {
     ///
     /// The bounds are inclusive.
     public static func minimum(_ value: Decimal) -> GenerationGuide<Decimal> {
-        GenerationGuide<Decimal>()
+        GenerationGuide<Decimal>(minimum: NSDecimalNumber(decimal: value).doubleValue, maximum: nil)
     }
 
     /// Enforces a maximum value.
     ///
     /// The bounds are inclusive.
     public static func maximum(_ value: Decimal) -> GenerationGuide<Decimal> {
-        GenerationGuide<Decimal>()
+        GenerationGuide<Decimal>(minimum: nil, maximum: NSDecimalNumber(decimal: value).doubleValue)
     }
 
     /// Enforces values fall within a range.
     public static func range(_ range: ClosedRange<Decimal>) -> GenerationGuide<Decimal> {
-        GenerationGuide<Decimal>()
+        GenerationGuide<Decimal>(
+            minimum: NSDecimalNumber(decimal: range.lowerBound).doubleValue,
+            maximum: NSDecimalNumber(decimal: range.upperBound).doubleValue
+        )
     }
 }
 
@@ -144,18 +164,18 @@ extension GenerationGuide where Value == Double {
     /// Enforces a minimum value.
     /// The bounds are inclusive.
     public static func minimum(_ value: Double) -> GenerationGuide<Double> {
-        GenerationGuide<Double>()
+        GenerationGuide<Double>(minimum: value, maximum: nil)
     }
 
     /// Enforces a maximum value.
     /// The bounds are inclusive.
     public static func maximum(_ value: Double) -> GenerationGuide<Double> {
-        GenerationGuide<Double>()
+        GenerationGuide<Double>(minimum: nil, maximum: value)
     }
 
     /// Enforces values fall within a range.
     public static func range(_ range: ClosedRange<Double>) -> GenerationGuide<Double> {
-        GenerationGuide<Double>()
+        GenerationGuide<Double>(minimum: range.lowerBound, maximum: range.upperBound)
     }
 }
 
@@ -168,7 +188,7 @@ extension GenerationGuide {
     /// The bounds are inclusive.
     public static func minimumCount<Element>(_ count: Int) -> GenerationGuide<[Element]>
     where Value == [Element] {
-        GenerationGuide<[Element]>()
+        GenerationGuide<[Element]>(minimumCount: count, maximumCount: nil)
     }
 
     /// Enforces a maximum number of elements in the array.
@@ -176,25 +196,23 @@ extension GenerationGuide {
     /// The bounds are inclusive.
     public static func maximumCount<Element>(_ count: Int) -> GenerationGuide<[Element]>
     where Value == [Element] {
-        GenerationGuide<[Element]>()
+        GenerationGuide<[Element]>(minimumCount: nil, maximumCount: count)
     }
 
     /// Enforces that the number of elements in the array fall within a closed range.
     public static func count<Element>(_ range: ClosedRange<Int>) -> GenerationGuide<[Element]>
     where Value == [Element] {
-        GenerationGuide<[Element]>()
+        GenerationGuide<[Element]>(minimumCount: range.lowerBound, maximumCount: range.upperBound)
     }
 
     /// Enforces that the array has exactly a certain number elements.
     public static func count<Element>(_ count: Int) -> GenerationGuide<[Element]>
     where Value == [Element] {
-        GenerationGuide<[Element]>()
+        GenerationGuide<[Element]>(minimumCount: count, maximumCount: count)
     }
 
     /// Enforces a guide on the elements within the array.
-    public static func element<Element>(_ guide: GenerationGuide<Element>) -> GenerationGuide<
-        [Element]
-    >
+    public static func element<Element>(_ guide: GenerationGuide<Element>) -> GenerationGuide<[Element]>
     where Value == [Element] {
         GenerationGuide<[Element]>()
     }
@@ -210,7 +228,7 @@ extension GenerationGuide where Value == [Never] {
     ///
     /// - Warning: This overload is only used for macro expansion. Don't call `GenerationGuide<[Never]>.minimumCount(_:)` on your own.
     public static func minimumCount(_ count: Int) -> GenerationGuide<Value> {
-        GenerationGuide<Value>()
+        GenerationGuide<Value>(minimumCount: count, maximumCount: nil)
     }
 
     /// Enforces a maximum number of elements in the array.
@@ -219,20 +237,20 @@ extension GenerationGuide where Value == [Never] {
     ///
     /// - Warning: This overload is only used for macro expansion. Don't call `GenerationGuide<[Never]>.maximumCount(_:)` on your own.
     public static func maximumCount(_ count: Int) -> GenerationGuide<Value> {
-        GenerationGuide<Value>()
+        GenerationGuide<Value>(minimumCount: nil, maximumCount: count)
     }
 
     /// Enforces that the number of elements in the array fall within a closed range.
     ///
     /// - Warning: This overload is only used for macro expansion. Don't call `GenerationGuide<[Never]>.count(_:)` on your own.
     public static func count(_ range: ClosedRange<Int>) -> GenerationGuide<Value> {
-        GenerationGuide<Value>()
+        GenerationGuide<Value>(minimumCount: range.lowerBound, maximumCount: range.upperBound)
     }
 
     /// Enforces that the array has exactly a certain number elements.
     ///
     /// - Warning: This overload is only used for macro expansion. Don't call `GenerationGuide<[Never]>.count(_:)` on your own.
     public static func count(_ count: Int) -> GenerationGuide<Value> {
-        GenerationGuide<Value>()
+        GenerationGuide<Value>(minimumCount: count, maximumCount: count)
     }
 }

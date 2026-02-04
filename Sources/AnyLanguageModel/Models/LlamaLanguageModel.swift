@@ -1,5 +1,6 @@
 import Foundation
 #if Llama
+    import JSONSchema
     import LlamaSwift
 
     /// Global storage for the current log level threshold.
@@ -478,24 +479,18 @@ import Foundation
             includeSchemaInPrompt: Bool,
             options: GenerationOptions
         ) async throws -> LanguageModelSession.Response<Content> where Content: Generable {
-            // For now, only String is supported
-            guard type == String.self else {
-                fatalError("LlamaLanguageModel only supports generating String content")
-            }
-
             // Validate that no image segments are present
             try validateNoImageSegments(in: session)
-
             try await ensureModelLoaded()
 
             let runtimeOptions = resolvedOptions(from: options)
+            let structuredOptions = resolvedStructuredOptions(from: options)
             let contextParams = createContextParams(from: runtimeOptions)
 
             // Try to create context with error handling
             guard let context = llama_init_from_model(model!, contextParams) else {
                 throw LlamaLanguageModelError.contextInitializationFailed
             }
-
             defer { llama_free(context) }
 
             // Check if this is an embedding model (no KV cache).
@@ -510,22 +505,48 @@ import Foundation
             llama_set_warmup(context, false)
             llama_set_n_threads(context, runtimeOptions.threads, runtimeOptions.threads)
 
-            let maxTokens = runtimeOptions.maximumResponseTokens ?? 100
-            let fullPrompt = try formatPrompt(for: session)
+            let fullPrompt: String
+            if includeSchemaInPrompt, type != String.self {
+                fullPrompt = try formatPrompt(
+                    for: session,
+                    extraSystemMessage: schemaPrompt(for: type.generationSchema)
+                )
+            } else {
+                fullPrompt = try formatPrompt(for: session)
+            }
 
-            let text = try await generateText(
-                context: context,
-                model: model!,
-                prompt: fullPrompt,
-                maxTokens: maxTokens,
-                options: runtimeOptions
-            )
+            if type == String.self {
+                let maxTokens = runtimeOptions.maximumResponseTokens ?? 100
+                let text = try await generateText(
+                    context: context,
+                    model: model!,
+                    prompt: fullPrompt,
+                    maxTokens: maxTokens,
+                    options: runtimeOptions
+                )
 
-            return LanguageModelSession.Response(
-                content: text as! Content,
-                rawContent: GeneratedContent(text),
-                transcriptEntries: ArraySlice([])
-            )
+                return LanguageModelSession.Response(
+                    content: text as! Content,
+                    rawContent: GeneratedContent(text),
+                    transcriptEntries: ArraySlice([])
+                )
+            } else {
+                let maxTokens = structuredOptions.maximumResponseTokens ?? 512
+                let jsonString = try generateStructuredJSON(
+                    context: context,
+                    prompt: fullPrompt,
+                    schema: type.generationSchema,
+                    maxTokens: maxTokens,
+                    options: structuredOptions
+                )
+                let generatedContent = try GeneratedContent(json: jsonString)
+                let content = try type.init(generatedContent)
+                return LanguageModelSession.Response(
+                    content: content,
+                    rawContent: generatedContent,
+                    transcriptEntries: ArraySlice([])
+                )
+            }
         }
 
         public func streamResponse<Content>(
@@ -662,6 +683,26 @@ import Foundation
             if let temp = options.temperature {
                 base.temperature = Float(temp)
             }
+
+            return ResolvedGenerationOptions(
+                base: base,
+                overrides: options[custom: LlamaLanguageModel.self],
+                sampling: options.sampling,
+                maximumResponseTokens: options.maximumResponseTokens
+            )
+        }
+
+        /// Builds structured-generation defaults while honoring explicit overrides.
+        private func resolvedStructuredOptions(from options: GenerationOptions) -> ResolvedGenerationOptions {
+            var base = legacyDefaults
+            if let temp = options.temperature {
+                base.temperature = Float(temp)
+            } else {
+                base.temperature = 0.2
+            }
+            base.topP = 0.95
+            base.repeatPenalty = 1.1
+            base.repeatLastN = 64
 
             return ResolvedGenerationOptions(
                 base: base,
@@ -838,6 +879,246 @@ import Foundation
             }
 
             return generatedText
+        }
+
+        /// Builds a JSONSchema-informed prompt for structured output.
+        private func schemaPrompt(for schema: GenerationSchema) -> String {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            guard
+                let data = try? encoder.encode(schema),
+                let jsonSchema = try? JSONDecoder().decode(JSONSchema.self, from: data),
+                let schemaJSON = String(data: data, encoding: .utf8)
+            else {
+                return schema.schemaPrompt()
+            }
+
+            var header = "Respond with valid JSON matching this \(jsonSchema.typeName) schema"
+            if let description = jsonSchema.description, !description.isEmpty {
+                header += " (\(description))"
+            }
+
+            if let constValue = jsonSchema.const,
+                let data = try? encoder.encode(constValue),
+                let constString = String(data: data, encoding: .utf8)
+            {
+                header += ". Expected value: \(constString)"
+            } else if let enumValues = jsonSchema.enum, !enumValues.isEmpty,
+                let data = try? encoder.encode(JSONValue.array(enumValues)),
+                let enumString = String(data: data, encoding: .utf8)
+            {
+                header += ". Allowed values: \(enumString)"
+            }
+
+            return "\(header):\n\(schemaJSON)"
+        }
+
+        // MARK: - Structured JSON Generation
+
+        private func generateStructuredJSON(
+            context: OpaquePointer,
+            prompt: String,
+            schema: GenerationSchema,
+            maxTokens: Int,
+            options: ResolvedGenerationOptions
+        ) throws -> String {
+            guard let vocab = llama_model_get_vocab(model!) else {
+                throw LlamaLanguageModelError.contextInitializationFailed
+            }
+
+            let promptTokens = try tokenizeText(vocab: vocab, text: prompt)
+            guard !promptTokens.isEmpty else {
+                throw LlamaLanguageModelError.tokenizationFailed
+            }
+
+            var batch = llama_batch_init(Int32(options.batchSize), 0, 1)
+            defer { llama_batch_free(batch) }
+
+            let hasEncoder = try prepareInitialBatch(
+                batch: &batch,
+                promptTokens: promptTokens,
+                model: model!,
+                vocab: vocab,
+                context: context,
+                batchSize: options.batchSize
+            )
+
+            guard let sampler = llama_sampler_chain_init(llama_sampler_chain_default_params()) else {
+                throw LlamaLanguageModelError.decodingFailed
+            }
+            defer { llama_sampler_free(sampler) }
+            let samplerPointer = UnsafeMutablePointer<llama_sampler>(sampler)
+
+            if options.repeatPenalty != 1.0 || options.frequencyPenalty != 0.0 || options.presencePenalty != 0.0 {
+                llama_sampler_chain_add(
+                    samplerPointer,
+                    llama_sampler_init_penalties(
+                        options.repeatLastN,
+                        options.repeatPenalty,
+                        options.frequencyPenalty,
+                        options.presencePenalty
+                    )
+                )
+            }
+            applySampling(sampler: samplerPointer, effectiveTemperature: options.temperature, options: options)
+
+            let vocabSize = Int(llama_vocab_n_tokens(vocab))
+            let initialPosition: Int32 = hasEncoder ? 1 : batch.n_tokens
+
+            return try withUnsafeMutablePointer(to: &batch) { batchPointer in
+                let backend = LlamaTokenBackend(
+                    context: context,
+                    vocab: vocab,
+                    vocabSize: vocabSize,
+                    sampler: samplerPointer,
+                    batch: batchPointer,
+                    position: initialPosition,
+                    maximumTokens: maxTokens,
+                    endTokens: [],
+                    tokenToTextFn: { [self] token in self.tokenToText(vocab: vocab, token: llama_token(token)) }
+                )
+                var generator = try ConstrainedJSONGenerator(backend: backend, schema: schema)
+                return try generator.generate()
+            }
+        }
+
+        private struct LlamaTokenBackend: TokenBackend {
+            let context: OpaquePointer
+            let vocab: OpaquePointer
+            let vocabSize: Int
+            let sampler: UnsafeMutablePointer<llama_sampler>
+            let batch: UnsafeMutablePointer<llama_batch>
+            let tokenToTextFn: (Int) -> String?
+            let tokensExcludedFromRepetitionPenalty: Set<Int>
+            let endTokens: Set<Int>
+
+            var position: Int32
+            var remainingTokens: Int
+            let totalTokenBudget: Int
+            let eosToken: Int
+
+            init(
+                context: OpaquePointer,
+                vocab: OpaquePointer,
+                vocabSize: Int,
+                sampler: UnsafeMutablePointer<llama_sampler>,
+                batch: UnsafeMutablePointer<llama_batch>,
+                position: Int32,
+                maximumTokens: Int,
+                endTokens: Set<Int>? = nil,
+                tokenToTextFn: @escaping (Int) -> String?
+            ) {
+                self.context = context
+                self.vocab = vocab
+                self.vocabSize = vocabSize
+                self.sampler = sampler
+                self.batch = batch
+                self.position = position
+                self.remainingTokens = maximumTokens
+                self.totalTokenBudget = maximumTokens
+                self.eosToken = Int(llama_vocab_eos(vocab))
+
+                if let endTokens {
+                    self.endTokens = endTokens
+                } else {
+                    let eotTokenValue = llama_vocab_eot(vocab)
+                    let endOfTurnToken = eotTokenValue != LLAMA_TOKEN_NULL ? Int(eotTokenValue) : eosToken
+                    self.endTokens = [self.eosToken, endOfTurnToken]
+                }
+
+                self.tokenToTextFn = tokenToTextFn
+                self.tokensExcludedFromRepetitionPenalty = Self.buildTokensExcludedFromRepetitionPenalty(
+                    vocabSize: vocabSize,
+                    tokenToText: tokenToTextFn
+                )
+            }
+
+            func isSpecialToken(_ token: Int) -> Bool {
+                let attributes = llama_vocab_get_attr(vocab, llama_token(token))
+                return (attributes.rawValue & LLAMA_TOKEN_ATTR_CONTROL.rawValue) != 0
+            }
+
+            private static func buildTokensExcludedFromRepetitionPenalty(
+                vocabSize: Int,
+                tokenToText: (Int) -> String?
+            ) -> Set<Int> {
+                let excludedTexts: Set<String> = ["{", "}", "[", "]", ",", ":", "\""]
+                var excluded = Set<Int>()
+                excluded.reserveCapacity(excludedTexts.count * 4)
+
+                for token in 0 ..< vocabSize {
+                    guard let text = tokenToText(token) else { continue }
+                    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if excludedTexts.contains(trimmed) {
+                        excluded.insert(token)
+                    }
+                }
+
+                return excluded
+            }
+
+            func tokenize(_ text: String) throws -> [Int] {
+                let utf8Count = text.utf8.count
+                let capacity = Int32(max(utf8Count * 2, 8))
+                let tokens = UnsafeMutablePointer<llama_token>.allocate(capacity: Int(capacity))
+                defer { tokens.deallocate() }
+
+                let tokenCount = llama_tokenize(
+                    vocab,
+                    text,
+                    Int32(utf8Count),
+                    tokens,
+                    capacity,
+                    false,
+                    false
+                )
+                guard tokenCount > 0 else { return [] }
+                return Array(UnsafeBufferPointer(start: tokens, count: Int(tokenCount))).map { Int($0) }
+            }
+
+            func tokenText(_ token: Int) -> String? {
+                tokenToTextFn(token)
+            }
+
+            mutating func decode(_ token: Int) throws {
+                let llamaToken = llama_token(token)
+
+                batch.pointee.n_tokens = 1
+                batch.pointee.token[0] = llamaToken
+                batch.pointee.pos[0] = position
+                batch.pointee.n_seq_id[0] = 1
+                if let seqIds = batch.pointee.seq_id, let seqId = seqIds[0] {
+                    seqId[0] = 0
+                }
+                batch.pointee.logits[0] = 1
+
+                position += 1
+                remainingTokens -= 1
+
+                let decodeResult = llama_decode(context, batch.pointee)
+                guard decodeResult == 0 else {
+                    throw LlamaLanguageModelError.decodingFailed
+                }
+
+                if !tokensExcludedFromRepetitionPenalty.contains(Int(llamaToken)) {
+                    llama_sampler_accept(sampler, llamaToken)
+                }
+            }
+
+            mutating func sample(from allowedTokens: Set<Int>) throws -> Int {
+                guard let logits = llama_get_logits(context) else {
+                    return eosToken
+                }
+
+                for tokenIndex in 0 ..< vocabSize {
+                    if !allowedTokens.contains(tokenIndex) {
+                        logits[tokenIndex] = -Float.infinity
+                    }
+                }
+
+                let tokenIndex = batch.pointee.n_tokens - 1
+                return Int(llama_sampler_sample(sampler, context, tokenIndex))
+            }
         }
 
         private func generateTextStream(
@@ -1082,7 +1363,10 @@ import Foundation
             return hasEncoder
         }
 
-        private func formatPrompt(for session: LanguageModelSession) throws -> String {
+        private func formatPrompt(
+            for session: LanguageModelSession,
+            extraSystemMessage: String? = nil
+        ) throws -> String {
             guard let model = self.model else {
                 throw LlamaLanguageModelError.modelLoadFailed
             }
@@ -1112,6 +1396,10 @@ import Foundation
                 default:
                     break
                 }
+            }
+
+            if let extraSystemMessage, !extraSystemMessage.isEmpty {
+                messages.append(("system", extraSystemMessage))
             }
 
             // Keep C strings alive while using them

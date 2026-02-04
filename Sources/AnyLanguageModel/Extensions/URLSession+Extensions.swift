@@ -6,15 +6,15 @@ import JSONSchema
     import FoundationNetworking
 #endif
 
-package enum HTTP {
-    package enum Method: String {
+enum HTTP {
+    enum Method: String {
         case get = "GET"
         case post = "POST"
     }
 }
 
 extension URLSession {
-    package func fetch<T: Decodable>(
+    func fetch<T: Decodable>(
         _ method: HTTP.Method,
         url: URL,
         headers: [String: String] = [:],
@@ -57,7 +57,7 @@ extension URLSession {
         }
     }
 
-    package func fetchStream<T: Decodable & Sendable>(
+    func fetchStream<T: Decodable & Sendable>(
         _ method: HTTP.Method,
         url: URL,
         headers: [String: String] = [:],
@@ -120,7 +120,7 @@ extension URLSession {
         }
     }
 
-    package func fetchEventStream<T: Decodable & Sendable>(
+    func fetchEventStream<T: Decodable & Sendable>(
         _ method: HTTP.Method,
         url: URL,
         headers: [String: String] = [:],
