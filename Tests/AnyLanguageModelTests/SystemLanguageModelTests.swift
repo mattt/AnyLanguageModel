@@ -1,5 +1,5 @@
 import Testing
-import AnyLanguageModel
+@testable import AnyLanguageModel
 
 #if canImport(FoundationModels)
     private let isSystemLanguageModelAvailable = {
@@ -82,6 +82,14 @@ import AnyLanguageModel
     }
 
     // MARK: - Test Suite
+
+    @Test("GenerationSchema merges duplicate defs for the same type")
+    func generationSchemaMergesDuplicateDefsForSameType() {
+        let schema = ContainerWithDuplicateNestedType.generationSchema
+
+        let nestedTypeName = String(reflecting: ReusedNestedStruct.self)
+        #expect(schema.defs[nestedTypeName] != nil)
+    }
 
     @Suite(
         "SystemLanguageModel",

@@ -6,10 +6,10 @@ import struct Foundation.Decimal
 /// A type that describes the properties of an object and any guides
 /// on their values.
 ///
-/// Generation  schemas guide the output of a ``SystemLanguageModel`` to deterministically
+/// Generation schemas guide the output of a ``SystemLanguageModel`` to deterministically
 /// ensure the output is in the desired format.
-public struct GenerationSchema: Sendable, Codable, CustomDebugStringConvertible {
-    indirect enum Node: Sendable, Codable {
+public struct GenerationSchema: Equatable, Codable, CustomDebugStringConvertible, Sendable {
+    indirect enum Node: Equatable, Codable, Sendable {
         case object(ObjectNode)
         case array(ArrayNode)
         case string(StringNode)
@@ -17,6 +17,45 @@ public struct GenerationSchema: Sendable, Codable, CustomDebugStringConvertible 
         case boolean
         case anyOf([Node])
         case ref(String)
+
+        // MARK: - Equatable
+
+        static func == (lhs: GenerationSchema.Node, rhs: GenerationSchema.Node) -> Bool {
+            switch (lhs, rhs) {
+            case (.boolean, .boolean):
+                return true
+            case (.ref(let lhsName), .ref(let rhsName)):
+                return lhsName == rhsName
+            case (.string(let lhsString), .string(let rhsString)):
+                return lhsString.description == rhsString.description
+                    && lhsString.pattern == rhsString.pattern
+                    && lhsString.enumChoices == rhsString.enumChoices
+            case (.number(let lhsNumber), .number(let rhsNumber)):
+                return lhsNumber.description == rhsNumber.description
+                    && lhsNumber.integerOnly == rhsNumber.integerOnly
+                    && lhsNumber.minimum == rhsNumber.minimum
+                    && lhsNumber.maximum == rhsNumber.maximum
+            case (.array(let lhsArray), .array(let rhsArray)):
+                return lhsArray.description == rhsArray.description
+                    && lhsArray.minItems == rhsArray.minItems
+                    && lhsArray.maxItems == rhsArray.maxItems
+                    && lhsArray.items == rhsArray.items
+            case (.object(let lhsObject), .object(let rhsObject)):
+                return lhsObject.description == rhsObject.description
+                    && lhsObject.required == rhsObject.required
+                    && lhsObject.properties.keys == rhsObject.properties.keys
+                    && lhsObject.properties.allSatisfy { key, lhsNode in
+                        guard let rhsNode = rhsObject.properties[key] else { return false }
+                        return lhsNode == rhsNode
+                    }
+            case (.anyOf(let lhsNodes), .anyOf(let rhsNodes)):
+                return lhsNodes.count == rhsNodes.count && zip(lhsNodes, rhsNodes).allSatisfy(==)
+            default:
+                return false
+            }
+        }
+
+        // MARK: - Codable
 
         private enum CodingKeys: String, CodingKey {
             case type, properties, required, additionalProperties
@@ -36,9 +75,12 @@ public struct GenerationSchema: Sendable, Codable, CustomDebugStringConvertible 
                 if let desc = obj.description {
                     try container.encode(desc, forKey: .description)
                 }
-                var propsContainer = container.nestedContainer(keyedBy: DynamicCodingKey.self, forKey: .properties)
+                var propsContainer = container.nestedContainer(
+                    keyedBy: GenerationSchema.DynamicCodingKey.self,
+                    forKey: .properties
+                )
                 for (name, node) in obj.properties {
-                    try propsContainer.encode(node, forKey: DynamicCodingKey(stringValue: name)!)
+                    try propsContainer.encode(node, forKey: GenerationSchema.DynamicCodingKey(stringValue: name)!)
                 }
                 try container.encode(Array(obj.required), forKey: .required)
 
@@ -107,7 +149,7 @@ public struct GenerationSchema: Sendable, Codable, CustomDebugStringConvertible 
             }
 
             if container.contains(.anyOf) {
-                let nodes = try container.decode([Node].self, forKey: .anyOf)
+                let nodes = try container.decode([GenerationSchema.Node].self, forKey: .anyOf)
                 self = .anyOf(nodes)
                 return
             }
@@ -117,31 +159,45 @@ public struct GenerationSchema: Sendable, Codable, CustomDebugStringConvertible 
 
             switch type {
             case "object":
-                let propsContainer = try container.nestedContainer(keyedBy: DynamicCodingKey.self, forKey: .properties)
-                var properties: [String: Node] = [:]
+                let propsContainer = try container.nestedContainer(
+                    keyedBy: GenerationSchema.DynamicCodingKey.self,
+                    forKey: .properties
+                )
+                var properties: [String: GenerationSchema.Node] = [:]
                 for key in propsContainer.allKeys {
-                    properties[key.stringValue] = try propsContainer.decode(Node.self, forKey: key)
+                    properties[key.stringValue] = try propsContainer.decode(GenerationSchema.Node.self, forKey: key)
                 }
                 let requiredArray = try container.decodeIfPresent([String].self, forKey: .required) ?? []
                 let required = Set(requiredArray)
-                self = .object(ObjectNode(description: description, properties: properties, required: required))
+                self = .object(
+                    GenerationSchema.ObjectNode(description: description, properties: properties, required: required)
+                )
 
             case "array":
-                let items = try container.decode(Node.self, forKey: .items)
+                let items = try container.decode(GenerationSchema.Node.self, forKey: .items)
                 let minItems = try container.decodeIfPresent(Int.self, forKey: .minItems)
                 let maxItems = try container.decodeIfPresent(Int.self, forKey: .maxItems)
-                self = .array(ArrayNode(description: description, items: items, minItems: minItems, maxItems: maxItems))
+                self = .array(
+                    GenerationSchema.ArrayNode(
+                        description: description,
+                        items: items,
+                        minItems: minItems,
+                        maxItems: maxItems
+                    )
+                )
 
             case "string":
                 let pattern = try container.decodeIfPresent(String.self, forKey: .pattern)
                 let enumChoices = try container.decodeIfPresent([String].self, forKey: .enum)
-                self = .string(StringNode(description: description, pattern: pattern, enumChoices: enumChoices))
+                self = .string(
+                    GenerationSchema.StringNode(description: description, pattern: pattern, enumChoices: enumChoices)
+                )
 
             case "number", "integer":
                 let minimum = try container.decodeIfPresent(Double.self, forKey: .minimum)
                 let maximum = try container.decodeIfPresent(Double.self, forKey: .maximum)
                 self = .number(
-                    NumberNode(
+                    GenerationSchema.NumberNode(
                         description: description,
                         minimum: minimum,
                         maximum: maximum,
@@ -186,21 +242,6 @@ public struct GenerationSchema: Sendable, Codable, CustomDebugStringConvertible 
         var minimum: Double?
         var maximum: Double?
         var integerOnly: Bool
-    }
-
-    private struct DynamicCodingKey: CodingKey {
-        var stringValue: String
-        var intValue: Int?
-
-        init?(stringValue: String) {
-            self.stringValue = stringValue
-            self.intValue = nil
-        }
-
-        init?(intValue: Int) {
-            self.stringValue = String(intValue)
-            self.intValue = intValue
-        }
     }
 
     let root: Node
@@ -268,7 +309,7 @@ public struct GenerationSchema: Sendable, Codable, CustomDebugStringConvertible 
                 required.insert(property.name)
             }
             for (defName, defNode) in property.deps {
-                if let existing = allDefs[defName], !Self.nodesEqual(existing, defNode) {
+                if let existing = allDefs[defName], existing != defNode {
                     fatalError("Duplicate type '\(defName)' with different structure")
                 }
                 allDefs[defName] = defNode
@@ -325,7 +366,7 @@ public struct GenerationSchema: Sendable, Codable, CustomDebugStringConvertible 
 
             let tSchema = t.generationSchema
             for (defName, defNode) in tSchema.defs {
-                if let existing = allDefs[defName], !Self.nodesEqual(existing, defNode) {
+                if let existing = allDefs[defName], existing != defNode {
                     fatalError("Duplicate type '\(defName)' with different structure")
                 }
                 allDefs[defName] = defNode
@@ -403,6 +444,24 @@ public struct GenerationSchema: Sendable, Codable, CustomDebugStringConvertible 
 
         self.root = rootNode
         self.defs = allDefs
+    }
+
+    private init(root: Node, defs: [String: Node]) {
+        self.root = root
+        self.defs = defs
+    }
+
+    static func primitive<T: Generable>(_: T.Type, node: Node) -> GenerationSchema {
+        GenerationSchema(root: node, defs: [:])
+    }
+
+    func withResolvedRoot() -> GenerationSchema? {
+        if case .ref(let refName) = root,
+            let defNode = defs[refName]
+        {
+            return GenerationSchema(root: defNode, defs: defs)
+        }
+        return nil
     }
 
     private static func convertDynamic(
@@ -503,15 +562,25 @@ public struct GenerationSchema: Sendable, Codable, CustomDebugStringConvertible 
         }
     }
 
-    private static func nodesEqual(_ a: Node, _ b: Node) -> Bool {
-        // Simple structural equality - could be enhanced
-        switch (a, b) {
-        case (.boolean, .boolean):
-            return true
-        case (.ref(let aName), .ref(let bName)):
-            return aName == bName
-        default:
-            return false
+    // MARK: - Codable
+
+    private enum CodingKeys: String, CodingKey {
+        case defs = "$defs"
+        case ref = "$ref"
+    }
+
+    private struct DynamicCodingKey: CodingKey {
+        var stringValue: String
+        var intValue: Int?
+
+        init?(stringValue: String) {
+            self.stringValue = stringValue
+            self.intValue = nil
+        }
+
+        init?(intValue: Int) {
+            self.stringValue = String(intValue)
+            self.intValue = intValue
         }
     }
 
@@ -557,37 +626,11 @@ public struct GenerationSchema: Sendable, Codable, CustomDebugStringConvertible 
             try root.encode(to: encoder)
         }
     }
-
-    private enum CodingKeys: String, CodingKey {
-        case defs = "$defs"
-        case ref = "$ref"
-    }
-
-    // MARK: - Helpers
-
-    static func primitive<T: Generable>(_: T.Type, node: Node) -> GenerationSchema {
-        GenerationSchema(root: node, defs: [:])
-    }
-
-    private init(root: Node, defs: [String: Node]) {
-        self.root = root
-        self.defs = defs
-    }
-
-    func withResolvedRoot() -> GenerationSchema? {
-        if case .ref(let refName) = root,
-            let defNode = defs[refName]
-        {
-            return GenerationSchema(root: defNode, defs: defs)
-        }
-        return nil
-    }
 }
 
 // MARK: - GenerationSchema.Property
 
 extension GenerationSchema {
-
     /// A property that belongs to a generation schema.
     ///
     /// Fields are named members of object types. Fields are strongly
@@ -693,16 +736,44 @@ extension GenerationSchema {
             } else if type == String.self {
                 return (.string(StringNode(description: description, pattern: nil, enumChoices: nil)), [:])
             } else if type == Int.self {
+                var minimum: Double?
+                var maximum: Double?
+                for guide in guides {
+                    if let min = guide.minimum { minimum = min }
+                    if let max = guide.maximum { maximum = max }
+                }
                 return (
-                    .number(NumberNode(description: description, minimum: nil, maximum: nil, integerOnly: true)), [:]
+                    .number(
+                        NumberNode(description: description, minimum: minimum, maximum: maximum, integerOnly: true)
+                    ), [:]
                 )
             } else if type == Float.self || type == Double.self || type == Decimal.self {
+                var minimum: Double?
+                var maximum: Double?
+                for guide in guides {
+                    if let min = guide.minimum { minimum = min }
+                    if let max = guide.maximum { maximum = max }
+                }
                 return (
-                    .number(NumberNode(description: description, minimum: nil, maximum: nil, integerOnly: false)), [:]
+                    .number(
+                        NumberNode(description: description, minimum: minimum, maximum: maximum, integerOnly: false)
+                    ), [:]
                 )
             } else {
                 // Complex type - use its schema
                 let schema = Value.generationSchema
+
+                // Arrays should be inlined, not referenced
+                if case .array(let arrayNode) = schema.root {
+                    var updatedArrayNode = arrayNode
+                    updatedArrayNode.description = description
+                    for guide in guides {
+                        if let min = guide.minimumCount { updatedArrayNode.minItems = min }
+                        if let max = guide.maximumCount { updatedArrayNode.maxItems = max }
+                    }
+                    return (.array(updatedArrayNode), schema.defs)
+                }
+
                 let typeName = String(reflecting: Value.self)
 
                 var deps = schema.defs
@@ -721,7 +792,6 @@ extension GenerationSchema {
 // MARK: - GenerationSchema.SchemaError
 
 extension GenerationSchema {
-
     /// A error that occurs when there is a problem creating a generation schema.
     public enum SchemaError: Error, LocalizedError {
 
@@ -800,4 +870,15 @@ extension GenerationSchema {
     /// let data = try encoder.encode(schema)
     /// ```
     static let omitAdditionalPropertiesKey = CodingUserInfoKey(rawValue: "GenerationSchema.omitAdditionalProperties")!
+
+    func schemaPrompt() -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        guard let data = try? encoder.encode(self),
+            let schemaJSON = String(data: data, encoding: .utf8)
+        else {
+            return "Respond with valid JSON only."
+        }
+        return "Respond with valid JSON matching this schema:\n\(schemaJSON)"
+    }
 }
