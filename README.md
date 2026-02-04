@@ -661,14 +661,14 @@ swift test
 
 Tests for different language model backends have varying requirements:
 
-| Backend | Traits | Environment Variables |
-|---------|--------|----------------------|
-| CoreML | `CoreML` | `HF_TOKEN` |
-| MLX | `MLX` | `HF_TOKEN` |
-| Llama | `Llama` | `LLAMA_MODEL_PATH` |
-| Anthropic | — | `ANTHROPIC_API_KEY` |
-| OpenAI | — | `OPENAI_API_KEY` |
-| Ollama | — | — |
+| Backend   | Traits   | Environment Variables |
+| --------- | -------- | --------------------- |
+| CoreML    | `CoreML` | `HF_TOKEN`            |
+| MLX       | `MLX`    | `HF_TOKEN`            |
+| Llama     | `Llama`  | `LLAMA_MODEL_PATH`    |
+| Anthropic | —        | `ANTHROPIC_API_KEY`   |
+| OpenAI    | —        | `OPENAI_API_KEY`      |
+| Ollama    | —        | —                     |
 
 Example setup for running multiple tests at once:
 
