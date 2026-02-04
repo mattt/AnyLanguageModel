@@ -76,7 +76,7 @@ struct ConstrainedJSONGenerator<Backend: TokenBackend> {
 
     /// Heuristics for default array sizes when no bounds are specified.
     private static var arrayDefaultCountDivisor: Int { 32 }
-    private static var arrayDefaultCountMax: Int { 4 }
+    private static var arrayDefaultCountMax: Int { 16 }
 
     private var backend: Backend
     private let schema: GenerationSchema

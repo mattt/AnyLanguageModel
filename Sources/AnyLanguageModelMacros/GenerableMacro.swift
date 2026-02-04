@@ -128,17 +128,30 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
             if let attr = attribute.as(AttributeSyntax.self),
                 attr.attributeName.description == "Guide"
             {
-                if let arguments = attr.arguments?.as(LabeledExprListSyntax.self),
-                    let descArg = arguments.first,
-                    let stringLiteral = descArg.expression.as(StringLiteralExprSyntax.self)
-                {
-                    let description = stringLiteral.segments.description.trimmingCharacters(
-                        in: .init(charactersIn: "\"")
-                    )
-
+                if let arguments = attr.arguments?.as(LabeledExprListSyntax.self) {
+                    var description: String?
                     var constraints = Constraints()
 
-                    for arg in Array(arguments.dropFirst()) {
+                    for arg in arguments {
+                        if arg.label?.text == "description",
+                            let stringLiteral = arg.expression.as(StringLiteralExprSyntax.self)
+                        {
+                            description = stringLiteral.segments.description.trimmingCharacters(
+                                in: .init(charactersIn: "\"")
+                            )
+                            continue
+                        }
+
+                        if description == nil,
+                            arg.label == nil,
+                            let stringLiteral = arg.expression.as(StringLiteralExprSyntax.self)
+                        {
+                            description = stringLiteral.segments.description.trimmingCharacters(
+                                in: .init(charactersIn: "\"")
+                            )
+                            continue
+                        }
+
                         let guideExpression = arg.expression
                         if let parsedPattern = parsePatternFromExpression(guideExpression) {
                             constraints.pattern = parsedPattern
