@@ -576,7 +576,7 @@ import Foundation
             return try convertToSendableJSONObject(dictionaryValue)
         }
 
-        throw StructuredGenerationError.unsupportedJSONValueType
+        throw MLXLanguageModelError.unsupportedJSONValueType
     }
 
     // MARK: - Tool Invocation Handling
@@ -696,9 +696,19 @@ import Foundation
 
     // MARK: - Structured JSON Generation
 
-    private enum StructuredGenerationError: Error {
+    /// Errors that can occur when using MLXLanguageModel.
+    public enum MLXLanguageModelError: Error, LocalizedError {
         case invalidVocabSize
         case unsupportedJSONValueType
+
+        public var errorDescription: String? {
+            switch self {
+            case .invalidVocabSize:
+                return "Invalid vocabulary size for model output"
+            case .unsupportedJSONValueType:
+                return "Unsupported JSON value type for schema conversion"
+            }
+        }
     }
 
     private func generateStructuredJSON(
@@ -732,11 +742,14 @@ import Foundation
 
         var generator = try ConstrainedJSONGenerator(backend: backend, schema: schema)
         let json = try generator.generate()
+        // Ensure pending MLX operations complete before returning JSON.
+        // This synchronization can be a performance cost if called frequently.
         Stream().synchronize()
         return json
     }
 
     /// Merges system prompts and schema instructions into a user message.
+    /// Consecutive messages with the same role are merged to reduce prompt tokens.
     private func normalizeChatForStructuredGeneration(
         _ chat: [MLXLMCommon.Chat.Message],
         schemaPrompt: String?
@@ -818,7 +831,7 @@ import Foundation
             self.remainingTokens = maximumTokens
             self.totalTokenBudget = maximumTokens
             guard let eosTokenId = context.tokenizer.eosTokenId else {
-                throw StructuredGenerationError.invalidVocabSize
+                throw MLXLanguageModelError.invalidVocabSize
             }
             self.eosToken = eosTokenId
             if let endTokens {
@@ -859,11 +872,11 @@ import Foundation
             self.currentLogits = output.logits
 
             guard output.logits.shape.count >= 1 else {
-                throw StructuredGenerationError.invalidVocabSize
+                throw MLXLanguageModelError.invalidVocabSize
             }
             self.vocabSize = output.logits.shape.last ?? 0
             guard self.vocabSize > 0 else {
-                throw StructuredGenerationError.invalidVocabSize
+                throw MLXLanguageModelError.invalidVocabSize
             }
         }
 

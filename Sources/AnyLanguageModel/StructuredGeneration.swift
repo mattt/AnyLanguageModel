@@ -20,14 +20,67 @@ protocol TokenBackend {
     var totalTokenBudget: Int { get }
 }
 
+/// Heuristics for deciding when to include optional properties in generated output.
+private enum OptionalPropertyBudget {
+    /// Minimum absolute number of tokens that should remain before we consider
+    /// adding optional properties.
+    static let minimumRemainingTokens = 8
+
+    /// Require at least this fraction of the total budget (divisor form).
+    static let minimumBudgetDivisor = 10
+
+    static func minimumBudget(totalTokenBudget: Int) -> Int {
+        let proportionalBudget = totalTokenBudget / minimumBudgetDivisor
+        return max(minimumRemainingTokens, proportionalBudget)
+    }
+}
+
+private final class StringTokenCache: @unchecked Sendable {
+    static let shared = StringTokenCache()
+
+    struct Key: Hashable {
+        let vocabSize: Int
+        let eosToken: Int
+        let endTokens: Set<Int>
+        let sampleTexts: [String]
+    }
+
+    private var cache: [Key: Set<Int>] = [:]
+    private let lock = NSLock()
+
+    func tokens(for key: Key) -> Set<Int>? {
+        lock.lock()
+        defer { lock.unlock() }
+        return cache[key]
+    }
+
+    func store(_ tokens: Set<Int>, for key: Key) {
+        lock.lock()
+        cache[key] = tokens
+        lock.unlock()
+    }
+}
+
 // MARK: - JSON Generator
 
 /// Generates JSON that conforms to a schema using constrained token sampling.
 struct ConstrainedJSONGenerator<Backend: TokenBackend> {
+    /// Minimum per-string token allocation to ensure small budgets still yield content.
+    private static var freeStringMinTokenLimit: Int { 16 }
+    /// Divisor used to compute the per-string share of the total token budget.
+    private static var freeStringTokenBudgetDivisor: Int { 16 }
+
+    /// Upper bounds for numeric token generation heuristics.
+    private static var maxIntegerTokenLimit: Int { 20 }
+    private static var maxDecimalTokenLimit: Int { 32 }
+
+    /// Heuristics for default array sizes when no bounds are specified.
+    private static var arrayDefaultCountDivisor: Int { 32 }
+    private static var arrayDefaultCountMax: Int { 4 }
+
     private var backend: Backend
     private let schema: GenerationSchema
     private var emittedText = ""
-
     private let quoteToken: Int
 
     private let stringTerminators: Set<Int>
@@ -69,7 +122,8 @@ struct ConstrainedJSONGenerator<Backend: TokenBackend> {
 
     /// Generates a JSON string that conforms to the schema.
     ///
-    /// - Returns: A JSON string that satisfies the schema.
+    /// - Returns: A JSON string that satisfies the schema. If the backend emits
+    ///   an end token early, the partial output is returned.
     /// - Throws: ``ConstrainedGenerationError`` if generation fails.
     mutating func generate() throws -> String {
         do {
@@ -91,6 +145,11 @@ struct ConstrainedJSONGenerator<Backend: TokenBackend> {
     }
 
     private static func buildValidStringTokens(backend: Backend) -> Set<Int> {
+        let cacheKey = stringTokenCacheKey(for: backend)
+        if let cached = StringTokenCache.shared.tokens(for: cacheKey) {
+            return cached
+        }
+
         let allowedWhitespace: Set<Character> = [" ", "\t", "\n"]
         var allowed = Set<Int>()
         allowed.reserveCapacity(backend.vocabSize / 4)
@@ -109,7 +168,34 @@ struct ConstrainedJSONGenerator<Backend: TokenBackend> {
                 allowed.insert(token)
             }
         }
+
+        StringTokenCache.shared.store(allowed, for: cacheKey)
         return allowed
+    }
+
+    private static func stringTokenCacheKey(for backend: Backend) -> StringTokenCache.Key {
+        let sampleTokenIds = sampleTokenIds(for: backend)
+        let sampleTexts = sampleTokenIds.map { backend.tokenText($0) ?? "" }
+        return StringTokenCache.Key(
+            vocabSize: backend.vocabSize,
+            eosToken: backend.eosToken,
+            endTokens: backend.endTokens,
+            sampleTexts: sampleTexts
+        )
+    }
+
+    private static func sampleTokenIds(for backend: Backend) -> [Int] {
+        let vocabSize = max(0, backend.vocabSize)
+        var samples: Set<Int> = [
+            0,
+            1,
+            2,
+            max(0, vocabSize / 2),
+            max(0, vocabSize - 1),
+            backend.eosToken,
+        ]
+        samples.formUnion(backend.endTokens)
+        return samples.filter { $0 >= 0 && $0 < vocabSize }.sorted()
     }
 
     private static func buildValidIntegerTokens(backend: Backend) -> Set<Int> {
@@ -150,7 +236,10 @@ struct ConstrainedJSONGenerator<Backend: TokenBackend> {
     }
 
     private func maxFreeStringTokens() -> Int {
-        let perStringLimit = max(16, backend.totalTokenBudget / 16)
+        let perStringLimit = max(
+            Self.freeStringMinTokenLimit,
+            backend.totalTokenBudget / Self.freeStringTokenBudgetDivisor
+        )
         let remainingAfterClosingQuote = max(0, backend.remainingTokens - 1)
         return min(remainingAfterClosingQuote, perStringLimit)
     }
@@ -231,10 +320,27 @@ struct ConstrainedJSONGenerator<Backend: TokenBackend> {
         return emitted
     }
 
+    private func maxNumberTokens(for node: GenerationSchema.NumberNode) -> Int {
+        var limit =
+            node.integerOnly
+            ? Self.maxIntegerTokenLimit
+            : Self.maxDecimalTokenLimit
+
+        if node.integerOnly, let minimum = node.minimum, let maximum = node.maximum {
+            let maxAbs = max(abs(minimum), abs(maximum))
+            if maxAbs.isFinite, maxAbs <= Double(Int64.max) {
+                let digits = max(1, String(Int64(maxAbs.rounded(.down))).count)
+                limit = max(limit, digits + 1)
+            }
+        }
+
+        return min(backend.remainingTokens, limit)
+    }
+
     private mutating func generateNumber(_ node: GenerationSchema.NumberNode) throws -> String {
         let allowedTokens = node.integerOnly ? integerTerminators : doubleTerminators
         var result = ""
-        let maxTokens = 16
+        let maxTokens = maxNumberTokens(for: node)
         var generatedTokens = 0
 
         while backend.remainingTokens > 0, generatedTokens < maxTokens {
@@ -311,8 +417,8 @@ struct ConstrainedJSONGenerator<Backend: TokenBackend> {
             if variants.count == 1 {
                 return try generateNode(variants[0])
             }
-            let chosenIndex = backend.remainingTokens % variants.count
-            return try generateNode(variants[chosenIndex])
+            // Choose the first variant to keep selection deterministic.
+            return try generateNode(variants[0])
         }
     }
 
@@ -335,7 +441,11 @@ struct ConstrainedJSONGenerator<Backend: TokenBackend> {
     }
 
     private mutating func generateArray(_ node: GenerationSchema.ArrayNode) throws -> String {
-        let defaultCount = 4
+        // Derive a default item count from the total token budget when the schema
+        // does not specify explicit minItems/maxItems. We use a small fraction of the
+        // budget and clamp it to a reasonable range to avoid overlong arrays.
+        let budgetBasedCount = backend.totalTokenBudget / Self.arrayDefaultCountDivisor
+        let defaultCount = max(1, min(Self.arrayDefaultCountMax, budgetBasedCount))
         let count: Int
 
         if let minItems = node.minItems, let maxItems = node.maxItems {
@@ -345,7 +455,7 @@ struct ConstrainedJSONGenerator<Backend: TokenBackend> {
                 )
             }
             let rangeSize = maxItems - minItems + 1
-            let offset = rangeSize > 0 ? backend.remainingTokens % rangeSize : 0
+            let offset = rangeSize > 0 ? backend.totalTokenBudget % rangeSize : 0
             count = minItems + offset
         } else if let minItems = node.minItems {
             count = minItems
@@ -370,15 +480,29 @@ struct ConstrainedJSONGenerator<Backend: TokenBackend> {
     private mutating func generateString(_ node: GenerationSchema.StringNode) throws -> String {
         var output = try emit("\"")
         let content: String
+        let pattern = node.pattern
+        let regex = try pattern.map { try compilePattern($0) }
 
         if let choices = node.enumChoices, !choices.isEmpty {
-            content = try generateChoice(choices)
+            let applicableChoices: [String]
+            if let pattern, let regex {
+                let filtered = choices.filter { matchesPattern($0, regex: regex) }
+                guard !filtered.isEmpty else {
+                    throw ConstrainedGenerationError.patternMismatch(
+                        "No enum choices match pattern '\(pattern)'"
+                    )
+                }
+                applicableChoices = filtered
+            } else {
+                applicableChoices = choices
+            }
+            content = try generateChoice(applicableChoices)
         } else {
             content = try generateFreeString(maxTokens: maxFreeStringTokens())
         }
 
-        if let pattern = node.pattern {
-            if !matchesPattern(content, pattern: pattern) {
+        if let pattern, let regex {
+            if !matchesPattern(content, regex: regex) {
                 throw ConstrainedGenerationError.patternMismatch(
                     "Value '\(content)' does not match pattern '\(pattern)'"
                 )
@@ -392,38 +516,77 @@ struct ConstrainedJSONGenerator<Backend: TokenBackend> {
 
     private func shouldIncludeOptionalProperty(_ key: String, required: Set<String>) -> Bool {
         if required.contains(key) { return true }
-        let minimumBudget = max(8, backend.totalTokenBudget / 10)
+        let minimumBudget = OptionalPropertyBudget.minimumBudget(totalTokenBudget: backend.totalTokenBudget)
         guard backend.remainingTokens > minimumBudget else { return false }
         let hash = key.utf8.reduce(0) { ($0 &* 31) &+ Int($1) }
-        return (hash ^ backend.remainingTokens) % 2 == 0
+        let combined = hash ^ backend.totalTokenBudget
+        return combined % 2 == 0
     }
 
     private func deterministicChoice(from candidates: [String]) -> String {
         guard !candidates.isEmpty else { return "" }
-        let index = abs(backend.remainingTokens) % candidates.count
-        return candidates[index]
+        if candidates.contains("") { return "" }
+        return candidates.max(by: { $0.count < $1.count }) ?? ""
+    }
+
+    /// A simple trie node used to detect prefix collisions between token sequences.
+    private final class PrefixTrieNode {
+        var children: [Int: PrefixTrieNode] = [:]
+        var isTerminal: Bool = false
+
+        func insertAndCheckCollision(_ sequence: [Int]) -> Bool {
+            var current = self
+
+            if sequence.isEmpty {
+                if current.isTerminal { return false }
+                if !current.children.isEmpty { return true }
+                current.isTerminal = true
+                return false
+            }
+
+            for (index, token) in sequence.enumerated() {
+                if current.isTerminal { return true }
+
+                if let child = current.children[token] {
+                    current = child
+                } else {
+                    let child = PrefixTrieNode()
+                    current.children[token] = child
+                    current = child
+                }
+
+                if index == sequence.count - 1 {
+                    if current.isTerminal { return false }
+                    if !current.children.isEmpty { return true }
+                    current.isTerminal = true
+                }
+            }
+
+            return false
+        }
     }
 
     private static func hasPrefixCollision(tokenized: [[Int]]) -> Bool {
-        for (index, candidate) in tokenized.enumerated() {
-            for (otherIndex, other) in tokenized.enumerated() where otherIndex != index {
-                guard candidate.count < other.count else { continue }
-                if Array(other.prefix(candidate.count)) == candidate {
-                    return true
-                }
+        let root = PrefixTrieNode()
+        for sequence in tokenized {
+            if root.insertAndCheckCollision(sequence) {
+                return true
             }
         }
         return false
     }
 
-    private func matchesPattern(_ value: String, pattern: String) -> Bool {
+    private func compilePattern(_ pattern: String) throws -> NSRegularExpression {
         do {
-            let regex = try NSRegularExpression(pattern: pattern)
-            let range = NSRange(value.startIndex..., in: value)
-            return regex.firstMatch(in: value, range: range) != nil
+            return try NSRegularExpression(pattern: pattern)
         } catch {
-            return false
+            throw ConstrainedGenerationError.patternMismatch("Invalid pattern '\(pattern)'")
         }
+    }
+
+    private func matchesPattern(_ value: String, regex: NSRegularExpression) -> Bool {
+        let range = NSRange(value.startIndex..., in: value)
+        return regex.firstMatch(in: value, range: range) != nil
     }
 }
 
