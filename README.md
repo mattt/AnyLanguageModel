@@ -367,6 +367,9 @@ Enable the trait in Package.swift:
 )
 ```
 
+> [!NOTE]
+> MLX supports guided generation (structured output via `@Generable`).
+
 ### llama.cpp (GGUF)
 
 Run GGUF quantized models via [llama.cpp](https://github.com/ggml-org/llama.cpp)
@@ -419,6 +422,7 @@ let response = try await session.respond(
 
 > [!NOTE]
 > Image inputs are not currently supported with `LlamaLanguageModel`.
+> Guided generation (structured output via `@Generable`) is supported.
 
 ### OpenAI
 
@@ -657,14 +661,14 @@ swift test
 
 Tests for different language model backends have varying requirements:
 
-| Backend | Traits | Environment Variables |
-|---------|--------|----------------------|
-| CoreML | `CoreML` | `HF_TOKEN` |
-| MLX | `MLX` | `HF_TOKEN` |
-| Llama | `Llama` | `LLAMA_MODEL_PATH` |
-| Anthropic | — | `ANTHROPIC_API_KEY` |
-| OpenAI | — | `OPENAI_API_KEY` |
-| Ollama | — | — |
+| Backend   | Traits   | Environment Variables |
+| --------- | -------- | --------------------- |
+| CoreML    | `CoreML` | `HF_TOKEN`            |
+| MLX       | `MLX`    | `HF_TOKEN`            |
+| Llama     | `Llama`  | `LLAMA_MODEL_PATH`    |
+| Anthropic | —        | `ANTHROPIC_API_KEY`   |
+| OpenAI    | —        | `OPENAI_API_KEY`      |
+| Ollama    | —        | —                     |
 
 Example setup for running multiple tests at once:
 
