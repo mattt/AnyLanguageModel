@@ -146,6 +146,9 @@ public struct OpenAILanguageModel: LanguageModel {
         public var parallelToolCalls: Bool?
 
         /// Whether to stop generation immediately after tool calls are generated.
+        ///
+        /// When enabled, the response returns the tool call transcript entries
+        /// without executing tools, and the content is empty.
         public var stopAfterToolCalls: Bool?
 
         /// The maximum number of total calls to built-in tools that can be processed
@@ -326,6 +329,7 @@ public struct OpenAILanguageModel: LanguageModel {
         ///   - reasoningEffort: Reasoning effort for reasoning models.
         ///   - reasoning: Reasoning configuration (Responses API).
         ///   - parallelToolCalls: Whether to allow parallel tool calls.
+        ///   - stopAfterToolCalls: Whether to return tool calls without executing them.
         ///   - maxToolCalls: Maximum number of tool calls (Responses API).
         ///   - serviceTier: Service tier for request processing.
         ///   - store: Whether to store the response.
