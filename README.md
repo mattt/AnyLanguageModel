@@ -471,6 +471,7 @@ options[custom: OpenAILanguageModel.self] = .init(
     frequencyPenalty: 0.5,
     presencePenalty: 0.3,
     stopSequences: ["END"],
+    stopAfterToolCalls: true,
     reasoningEffort: .high,        // For reasoning models (o3, o4-mini)
     serviceTier: .priority,
     extraBody: [                   // Vendor-specific parameters
@@ -478,6 +479,9 @@ options[custom: OpenAILanguageModel.self] = .init(
     ]
 )
 ```
+`stopAfterToolCalls` lets you return tool calls immediately without executing
+tools, which is useful when you want to delegate tool execution to your own
+orchestrator.
 
 ### Anthropic
 

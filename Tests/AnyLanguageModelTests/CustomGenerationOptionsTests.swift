@@ -334,6 +334,7 @@ struct OpenAICustomOptionsTests {
             reasoningEffort: .high,
             reasoning: .init(effort: .medium, summary: "concise"),
             parallelToolCalls: false,
+            stopAfterToolCalls: true,
             maxToolCalls: 10,
             serviceTier: .priority,
             store: true,
@@ -359,6 +360,7 @@ struct OpenAICustomOptionsTests {
         #expect(options.reasoning?.effort == .medium)
         #expect(options.reasoning?.summary == "concise")
         #expect(options.parallelToolCalls == false)
+        #expect(options.stopAfterToolCalls == true)
         #expect(options.maxToolCalls == 10)
         #expect(options.serviceTier == .priority)
         #expect(options.store == true)
@@ -416,7 +418,8 @@ struct OpenAICustomOptionsTests {
             frequencyPenalty: 0.5,
             topLogprobs: 5,
             reasoningEffort: .medium,
-            parallelToolCalls: true
+            parallelToolCalls: true,
+            stopAfterToolCalls: true
         )
 
         let encoder = JSONEncoder()
@@ -429,6 +432,7 @@ struct OpenAICustomOptionsTests {
         #expect(json.contains("\"top_logprobs\""))
         #expect(json.contains("\"reasoning_effort\""))
         #expect(json.contains("\"parallel_tool_calls\""))
+        #expect(!json.contains("stop_after_tool_calls"))
     }
 
     @Test func nilProperties() {
@@ -446,6 +450,7 @@ struct OpenAICustomOptionsTests {
         #expect(options.reasoningEffort == nil)
         #expect(options.reasoning == nil)
         #expect(options.parallelToolCalls == nil)
+        #expect(options.stopAfterToolCalls == nil)
         #expect(options.maxToolCalls == nil)
         #expect(options.serviceTier == nil)
         #expect(options.store == nil)
