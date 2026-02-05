@@ -1197,18 +1197,6 @@ extension Transcript {
                     )
                 )
             case .toolOutput(let toolOutput):
-                // Convert tool output segments to plain text for DeepSeek API compatibility
-                let toolContent = toolOutput.segments.map { segment -> String in
-                    switch segment {
-                    case .text(let textSegment): return textSegment.content
-                    case .structure(let structuredSegment):
-                        switch structuredSegment.content.kind {
-                        case .string(let text): return text
-                        default: return structuredSegment.content.jsonString
-                        }
-                    case .image: return "<image>"
-                    }
-                }.joined()
                 messages.append(
                     .init(
                         role: .tool(id: toolOutput.id),
