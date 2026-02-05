@@ -1,4 +1,8 @@
 /// A decision about how to handle a tool call.
+///
+/// - Note: This API is exclusive to AnyLanguageModel
+///   and using it means your code is no longer drop-in compatible
+///   with the Foundation Models framework.
 public enum ToolExecutionDecision: Sendable {
     /// Execute the tool call using the associated tool.
     case execute
@@ -13,6 +17,10 @@ public enum ToolExecutionDecision: Sendable {
 }
 
 /// A delegate that observes and controls tool execution for a session.
+///
+/// - Note: This API is exclusive to AnyLanguageModel
+///   and using it means your code is no longer drop-in compatible
+///   with the Foundation Models framework.
 public protocol ToolExecutionDelegate: Sendable {
     /// Notifies the delegate when the model generates tool calls.
     ///
