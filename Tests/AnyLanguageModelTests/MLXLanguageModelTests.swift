@@ -82,7 +82,8 @@ import Testing
 
             var foundToolOutput = false
             for case let .toolOutput(toolOutput) in response.transcriptEntries {
-                #expect(toolOutput.id == weatherTool.name)
+                #expect(!toolOutput.id.isEmpty)
+                #expect(toolOutput.toolName == weatherTool.name)
                 foundToolOutput = true
             }
             #expect(foundToolOutput)

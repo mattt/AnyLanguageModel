@@ -292,7 +292,7 @@ private func resolveToolCalls(
             return .stop(calls: transcriptCalls)
         case .provideOutput(let segments):
             let output = Transcript.ToolOutput(
-                id: call.toolName,
+                id: call.id,
                 toolName: call.toolName,
                 segments: segments
             )
@@ -318,7 +318,7 @@ private func resolveToolCalls(
             do {
                 let segments = try await tool.makeOutputSegments(from: call.arguments)
                 let output = Transcript.ToolOutput(
-                    id: tool.name,
+                    id: call.id,
                     toolName: tool.name,
                     segments: segments
                 )
