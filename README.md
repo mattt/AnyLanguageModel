@@ -35,6 +35,36 @@ let response = try await session.respond {
 print(response.content)
 ```
 
+To observe or control tool execution, assign a delegate on the session:
+
+```swift
+actor ToolExecutionObserver: ToolExecutionDelegate {
+    func didGenerateToolCalls(_ toolCalls: [Transcript.ToolCall], in session: LanguageModelSession) async {
+        print("Generated tool calls: \(toolCalls)")
+    }
+
+    func toolCallDecision(
+        for toolCall: Transcript.ToolCall,
+        in session: LanguageModelSession
+    ) async -> ToolExecutionDecision {
+        // Return .stop to halt after tool calls, or .provideOutput(...) to bypass execution.
+        // This is a good place to ask the user for confirmation (for example, in a modal dialog).
+        .execute
+    }
+
+    func didExecuteToolCall(
+        _ toolCall: Transcript.ToolCall,
+        output: Transcript.ToolOutput,
+        in session: LanguageModelSession
+    ) async {
+        print("Executed tool call: \(toolCall)")
+    }
+}
+
+let session = LanguageModelSession(model: model, tools: [WeatherTool()])
+session.toolExecutionDelegate = ToolExecutionObserver()
+```
+
 ## Features
 
 ### Supported Providers

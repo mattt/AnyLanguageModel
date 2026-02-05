@@ -10,6 +10,16 @@ public final class LanguageModelSession: @unchecked Sendable {
     public let tools: [any Tool]
     public let instructions: Instructions?
 
+    /// A delegate that observes and controls tool execution.
+    ///
+    /// Set this property to intercept tool calls, provide custom output,
+    /// or stop after tool calls are generated.
+    ///
+    /// - Note: This property is exclusive to AnyLanguageModel
+    ///   and using it means your code is no longer drop-in compatible
+    ///   with the Foundation Models framework.
+    @ObservationIgnored public var toolExecutionDelegate: (any ToolExecutionDelegate)?
+
     @ObservationIgnored private let respondingState = RespondingState()
 
     public convenience init(

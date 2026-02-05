@@ -356,11 +356,23 @@ public struct AnthropicLanguageModel: LanguageModel {
         }
 
         if !toolUses.isEmpty {
-            let invocations = try await resolveToolUses(toolUses, session: session)
-            if !invocations.isEmpty {
-                entries.append(.toolCalls(Transcript.ToolCalls(invocations.map(\.call))))
-                for invocation in invocations {
-                    entries.append(.toolOutput(invocation.output))
+            let resolution = try await resolveToolUses(toolUses, session: session)
+            switch resolution {
+            case .stop(let calls):
+                if !calls.isEmpty {
+                    entries.append(.toolCalls(Transcript.ToolCalls(calls)))
+                }
+                return LanguageModelSession.Response(
+                    content: "" as! Content,
+                    rawContent: GeneratedContent(""),
+                    transcriptEntries: ArraySlice(entries)
+                )
+            case .invocations(let invocations):
+                if !invocations.isEmpty {
+                    entries.append(.toolCalls(Transcript.ToolCalls(invocations.map(\.call))))
+                    for invocation in invocations {
+                        entries.append(.toolOutput(invocation.output))
+                    }
                 }
             }
         }
@@ -560,11 +572,16 @@ private struct ToolInvocationResult {
     let output: Transcript.ToolOutput
 }
 
+private enum ToolResolutionOutcome {
+    case stop(calls: [Transcript.ToolCall])
+    case invocations([ToolInvocationResult])
+}
+
 private func resolveToolUses(
     _ toolUses: [AnthropicToolUse],
     session: LanguageModelSession
-) async throws -> [ToolInvocationResult] {
-    if toolUses.isEmpty { return [] }
+) async throws -> ToolResolutionOutcome {
+    if toolUses.isEmpty { return .invocations([]) }
 
     var toolsByName: [String: any Tool] = [:]
     for tool in session.tools {
@@ -573,43 +590,98 @@ private func resolveToolUses(
         }
     }
 
-    var results: [ToolInvocationResult] = []
-    results.reserveCapacity(toolUses.count)
-
+    var transcriptCalls: [Transcript.ToolCall] = []
+    transcriptCalls.reserveCapacity(toolUses.count)
     for use in toolUses {
         let args = try toGeneratedContent(use.input)
         let callID = use.id
-        let transcriptCall = Transcript.ToolCall(
-            id: callID,
-            toolName: use.name,
-            arguments: args
-        )
-
-        guard let tool = toolsByName[use.name] else {
-            let message = Transcript.Segment.text(.init(content: "Tool not found: \(use.name)"))
-            let output = Transcript.ToolOutput(
+        transcriptCalls.append(
+            Transcript.ToolCall(
                 id: callID,
                 toolName: use.name,
-                segments: [message]
+                arguments: args
             )
-            results.append(ToolInvocationResult(call: transcriptCall, output: output))
-            continue
-        }
+        )
+    }
 
-        do {
-            let segments = try await tool.makeOutputSegments(from: args)
+    if let delegate = session.toolExecutionDelegate {
+        await delegate.didGenerateToolCalls(transcriptCalls, in: session)
+    }
+
+    guard !transcriptCalls.isEmpty else { return .invocations([]) }
+
+    var decisions: [ToolExecutionDecision] = []
+    decisions.reserveCapacity(transcriptCalls.count)
+
+    if let delegate = session.toolExecutionDelegate {
+        for call in transcriptCalls {
+            let decision = await delegate.toolCallDecision(for: call, in: session)
+            if case .stop = decision {
+                return .stop(calls: transcriptCalls)
+            }
+            decisions.append(decision)
+        }
+    } else {
+        decisions = Array(repeating: .execute, count: transcriptCalls.count)
+    }
+
+    var results: [ToolInvocationResult] = []
+    results.reserveCapacity(transcriptCalls.count)
+
+    for (index, call) in transcriptCalls.enumerated() {
+        switch decisions[index] {
+        case .stop:
+            // This branch should be unreachable,
+            // because `.stop` returns during decision collection.
+            // Keep it as a defensive guard,
+            // in case that logic changes.
+            return .stop(calls: transcriptCalls)
+        case .provideOutput(let segments):
             let output = Transcript.ToolOutput(
-                id: tool.name,
-                toolName: tool.name,
+                id: call.id,
+                toolName: call.toolName,
                 segments: segments
             )
-            results.append(ToolInvocationResult(call: transcriptCall, output: output))
-        } catch {
-            throw LanguageModelSession.ToolCallError(tool: tool, underlyingError: error)
+            if let delegate = session.toolExecutionDelegate {
+                await delegate.didExecuteToolCall(call, output: output, in: session)
+            }
+            results.append(ToolInvocationResult(call: call, output: output))
+        case .execute:
+            guard let tool = toolsByName[call.toolName] else {
+                let message = Transcript.Segment.text(.init(content: "Tool not found: \(call.toolName)"))
+                let output = Transcript.ToolOutput(
+                    id: call.id,
+                    toolName: call.toolName,
+                    segments: [message]
+                )
+                if let delegate = session.toolExecutionDelegate {
+                    await delegate.didExecuteToolCall(call, output: output, in: session)
+                }
+                results.append(ToolInvocationResult(call: call, output: output))
+                continue
+            }
+
+            do {
+                let segments = try await tool.makeOutputSegments(from: call.arguments)
+                let output = Transcript.ToolOutput(
+                    id: call.id,
+                    toolName: tool.name,
+                    segments: segments
+                )
+                if let delegate = session.toolExecutionDelegate {
+                    await delegate.didExecuteToolCall(call, output: output, in: session)
+                }
+                results.append(ToolInvocationResult(call: call, output: output))
+            } catch {
+                if let delegate = session.toolExecutionDelegate {
+                    await delegate.didFailToolCall(call, error: error, in: session)
+                }
+                throw LanguageModelSession.ToolCallError(tool: tool, underlyingError: error)
+            }
         }
     }
 
-    return results
+    return .invocations(results)
 }
 
 // Convert our GenerationSchema into Anthropic's expected JSON Schema payload
