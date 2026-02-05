@@ -1,6 +1,53 @@
 import Foundation
 import Observation
 
+/// A decision about how a tool call should be handled.
+public enum ToolExecutionDecision: Sendable {
+    case execute
+    case stop
+    case provideOutput([Transcript.Segment])
+}
+
+/// A delegate that observes and controls tool execution for a session.
+public protocol ToolExecutionDelegate: Sendable {
+    func didGenerateToolCalls(_ toolCalls: [Transcript.ToolCall], in session: LanguageModelSession) async
+    func toolCallDecision(for toolCall: Transcript.ToolCall, in session: LanguageModelSession) async
+        -> ToolExecutionDecision
+    func didExecuteToolCall(
+        _ toolCall: Transcript.ToolCall,
+        output: Transcript.ToolOutput,
+        in session: LanguageModelSession
+    ) async
+    func didFailToolCall(
+        _ toolCall: Transcript.ToolCall,
+        error: any Error,
+        in session: LanguageModelSession
+    ) async
+}
+
+extension ToolExecutionDelegate {
+    public func didGenerateToolCalls(_ toolCalls: [Transcript.ToolCall], in session: LanguageModelSession) async {}
+
+    public func toolCallDecision(
+        for toolCall: Transcript.ToolCall,
+        in session: LanguageModelSession
+    ) async -> ToolExecutionDecision {
+        .execute
+    }
+
+    public func didExecuteToolCall(
+        _ toolCall: Transcript.ToolCall,
+        output: Transcript.ToolOutput,
+        in session: LanguageModelSession
+    ) async {}
+
+    public func didFailToolCall(
+        _ toolCall: Transcript.ToolCall,
+        error: any Error,
+        in session: LanguageModelSession
+    ) async {}
+}
+
 @Observable
 public final class LanguageModelSession: @unchecked Sendable {
     public private(set) var isResponding: Bool = false
@@ -9,6 +56,8 @@ public final class LanguageModelSession: @unchecked Sendable {
     private let model: any LanguageModel
     public let tools: [any Tool]
     public let instructions: Instructions?
+    /// An optional delegate that observes and controls tool execution.
+    @ObservationIgnored public var toolExecutionDelegate: (any ToolExecutionDelegate)?
 
     @ObservationIgnored private let respondingState = RespondingState()
 
