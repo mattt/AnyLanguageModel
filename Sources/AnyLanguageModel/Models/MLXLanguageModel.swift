@@ -675,6 +675,8 @@ import Foundation
         for (index, call) in transcriptCalls.enumerated() {
             switch decisions[index] {
             case .stop:
+                // This branch should be unreachable because `.stop` returns during decision collection.
+                // Keep it as a defensive guard in case that logic changes.
                 return .stop(calls: transcriptCalls)
             case .provideOutput(let segments):
                 let output = Transcript.ToolOutput(

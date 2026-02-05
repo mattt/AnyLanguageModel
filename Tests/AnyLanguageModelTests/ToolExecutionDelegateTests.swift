@@ -104,6 +104,8 @@ private struct ToolCallingTestModel: LanguageModel {
             for (index, call) in toolCalls.enumerated() {
                 switch decisions[index] {
                 case .stop:
+                    // This branch should be unreachable because `.stop` returns during decision collection.
+                    // Keep it as a defensive guard in case that logic changes.
                     entries = [.toolCalls(Transcript.ToolCalls(toolCalls))]
                     return LanguageModelSession.Response(
                         content: "" as! Content,
