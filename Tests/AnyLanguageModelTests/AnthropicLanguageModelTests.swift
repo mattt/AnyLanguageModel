@@ -5,6 +5,12 @@ import Testing
 
 private let anthropicAPIKey: String? = ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"]
 
+@Generable
+private struct AnthropicStructuredForecast {
+    var summary: String
+    var temperatureCelsius: Int
+}
+
 @Suite("AnthropicLanguageModel", .enabled(if: anthropicAPIKey?.isEmpty == false))
 struct AnthropicLanguageModelTests {
     let model = AnthropicLanguageModel(
@@ -61,6 +67,24 @@ struct AnthropicLanguageModelTests {
         #expect(!snapshots.last!.rawContent.jsonString.isEmpty)
     }
 
+    @Test func streamingStructured() async throws {
+        let session = LanguageModelSession(model: model)
+
+        let stream = session.streamResponse(
+            to: "Provide a short weather forecast summary and a celsius temperature.",
+            generating: AnthropicStructuredForecast.self
+        )
+
+        var snapshots: [LanguageModelSession.ResponseStream<AnthropicStructuredForecast>.Snapshot] = []
+        for try await snapshot in stream {
+            snapshots.append(snapshot)
+        }
+
+        #expect(!snapshots.isEmpty)
+        #expect(!snapshots.last!.rawContent.jsonString.isEmpty)
+        #expect(!(snapshots.last!.content.summary ?? "").isEmpty)
+    }
+
     @Test func withGenerationOptions() async throws {
         let session = LanguageModelSession(model: model)
 
@@ -74,6 +98,18 @@ struct AnthropicLanguageModelTests {
             options: options
         )
         #expect(!response.content.isEmpty)
+    }
+
+    @Test func structuredResponse() async throws {
+        let session = LanguageModelSession(model: model)
+
+        let response = try await session.respond(
+            to: "Summarize the weather with a short summary and a celsius temperature.",
+            generating: AnthropicStructuredForecast.self
+        )
+
+        #expect(!response.content.summary.isEmpty)
+        #expect(response.rawContent.jsonString.contains("summary"))
     }
 
     @Test func conversationContext() async throws {
