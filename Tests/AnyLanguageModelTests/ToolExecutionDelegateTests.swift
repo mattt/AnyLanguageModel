@@ -15,7 +15,7 @@ private actor ToolExecutionDelegateSpy: ToolExecutionDelegate {
     }
 
     func didGenerateToolCalls(_ toolCalls: [Transcript.ToolCall], in session: LanguageModelSession) async {
-        generatedToolCalls = toolCalls
+        generatedToolCalls.append(contentsOf: toolCalls)
     }
 
     func toolCallDecision(
@@ -42,6 +42,21 @@ private actor ToolExecutionDelegateSpy: ToolExecutionDelegate {
         failures.append(error)
     }
 }
+
+private struct ThrowingTool: Tool {
+    let name = "throwingTool"
+    let description = "A tool that throws"
+    @Generable
+    struct Arguments {
+        @Guide(description: "Ignored")
+        var message: String
+    }
+    func call(arguments: Arguments) async throws -> String {
+        throw ThrowingToolError.testError
+    }
+}
+
+private enum ThrowingToolError: Error, Equatable { case testError }
 
 private struct ToolCallingTestModel: LanguageModel {
     typealias UnavailableReason = Never
@@ -266,5 +281,22 @@ struct ToolExecutionDelegateTests {
 
         let executedCalls = await delegate.executedToolCalls
         #expect(executedCalls.count == 1)
+    }
+
+    @Test func didFailToolCallNotifiesDelegateWhenToolThrows() async throws {
+        let arguments = try GeneratedContent(json: #"{"message":"fail"}"#)
+        let toolCall = Transcript.ToolCall(id: "call-fail", toolName: ThrowingTool().name, arguments: arguments)
+        let delegate = ToolExecutionDelegateSpy { _ in .execute }
+        let session = LanguageModelSession(
+            model: ToolCallingTestModel(toolCalls: [toolCall]),
+            tools: [ThrowingTool()]
+        )
+        session.toolExecutionDelegate = delegate
+
+        _ = try? await session.respond(to: "Hi")
+
+        let failures = await delegate.failures
+        #expect(failures.count == 1)
+        #expect((failures.first as? ThrowingToolError) == .testError)
     }
 }
