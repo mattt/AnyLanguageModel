@@ -429,11 +429,6 @@ public struct OpenAILanguageModel: LanguageModel {
         includeSchemaInPrompt: Bool,
         options: GenerationOptions
     ) async throws -> LanguageModelSession.Response<Content> where Content: Generable {
-        // For now, only String is supported
-        guard type == String.self else {
-            fatalError("OpenAILanguageModel only supports generating String content")
-        }
-
         // Convert tools if any are available in the session
         let openAITools: [OpenAITool]? = {
             guard !session.tools.isEmpty else { return nil }
@@ -450,6 +445,7 @@ public struct OpenAILanguageModel: LanguageModel {
             return try await respondWithChatCompletions(
                 messages: session.transcript.toOpenAIMessages(),
                 tools: openAITools,
+                generating: type,
                 options: options,
                 session: session
             )
@@ -457,6 +453,7 @@ public struct OpenAILanguageModel: LanguageModel {
             return try await respondWithResponses(
                 messages: session.transcript.toOpenAIMessages(),
                 tools: openAITools,
+                generating: type,
                 options: options,
                 session: session
             )
@@ -466,6 +463,7 @@ public struct OpenAILanguageModel: LanguageModel {
     private func respondWithChatCompletions<Content>(
         messages: [OpenAIMessage],
         tools: [OpenAITool]?,
+        generating type: Content.Type,
         options: GenerationOptions,
         session: LanguageModelSession
     ) async throws -> LanguageModelSession.Response<Content> where Content: Generable {
@@ -476,10 +474,11 @@ public struct OpenAILanguageModel: LanguageModel {
 
         // Loop until no more tool calls
         while true {
-            let params = ChatCompletions.createRequestBody(
+            let params = try ChatCompletions.createRequestBody(
                 model: model,
                 messages: messages,
                 tools: tools,
+                generating: type,
                 options: options,
                 stream: false
             )
@@ -496,10 +495,25 @@ public struct OpenAILanguageModel: LanguageModel {
             )
 
             guard let choice = resp.choices.first else {
-                return LanguageModelSession.Response(
-                    content: "" as! Content,
-                    rawContent: GeneratedContent(""),
-                    transcriptEntries: ArraySlice(entries)
+                if type == String.self {
+                    return LanguageModelSession.Response(
+                        content: "" as! Content,
+                        rawContent: GeneratedContent(""),
+                        transcriptEntries: ArraySlice(entries)
+                    )
+                }
+                throw OpenAILanguageModelError.noResponseGenerated
+            }
+
+            if let refusalMessage = choice.message.refusal {
+                let refusalEntry = Transcript.Entry.response(
+                    Transcript.Response(assetIDs: [], segments: [.text(.init(content: refusalMessage))])
+                )
+                throw LanguageModelSession.GenerationError.refusal(
+                    LanguageModelSession.GenerationError.Refusal(transcriptEntries: [refusalEntry]),
+                    LanguageModelSession.GenerationError.Context(
+                        debugDescription: "OpenAI model refused to generate response: \(refusalMessage)"
+                    )
                 )
             }
 
@@ -514,9 +528,10 @@ public struct OpenAILanguageModel: LanguageModel {
                     if !calls.isEmpty {
                         entries.append(.toolCalls(Transcript.ToolCalls(calls)))
                     }
+                    let empty = try emptyResponseContent(for: type)
                     return LanguageModelSession.Response(
-                        content: "" as! Content,
-                        rawContent: GeneratedContent(""),
+                        content: empty.content,
+                        rawContent: empty.rawContent,
                         transcriptEntries: ArraySlice(entries)
                     )
                 case .invocations(let invocations):
@@ -540,9 +555,20 @@ public struct OpenAILanguageModel: LanguageModel {
             text = choice.message.content ?? ""
             break
         }
+
+        if type == String.self {
+            return LanguageModelSession.Response(
+                content: text as! Content,
+                rawContent: GeneratedContent(text),
+                transcriptEntries: ArraySlice(entries)
+            )
+        }
+
+        let generatedContent = try GeneratedContent(json: text)
+        let content = try type.init(generatedContent)
         return LanguageModelSession.Response(
-            content: text as! Content,
-            rawContent: GeneratedContent(text),
+            content: content,
+            rawContent: generatedContent,
             transcriptEntries: ArraySlice(entries)
         )
     }
@@ -550,21 +576,24 @@ public struct OpenAILanguageModel: LanguageModel {
     private func respondWithResponses<Content>(
         messages: [OpenAIMessage],
         tools: [OpenAITool]?,
+        generating type: Content.Type,
         options: GenerationOptions,
         session: LanguageModelSession
     ) async throws -> LanguageModelSession.Response<Content> where Content: Generable {
         var entries: [Transcript.Entry] = []
         var text = ""
+        var lastOutput: [JSONValue]?
         var messages = messages
 
         let url = baseURL.appendingPathComponent("responses")
 
         // Loop until no more tool calls
         while true {
-            let params = Responses.createRequestBody(
+            let params = try Responses.createRequestBody(
                 model: model,
                 messages: messages,
                 tools: tools,
+                generating: type,
                 options: options,
                 stream: false
             )
@@ -581,6 +610,7 @@ public struct OpenAILanguageModel: LanguageModel {
             )
 
             let toolCalls = extractToolCallsFromOutput(resp.output)
+            lastOutput = resp.output
             if !toolCalls.isEmpty {
                 if let output = resp.output {
                     for msg in output {
@@ -593,9 +623,10 @@ public struct OpenAILanguageModel: LanguageModel {
                     if !calls.isEmpty {
                         entries.append(.toolCalls(Transcript.ToolCalls(calls)))
                     }
+                    let empty = try emptyResponseContent(for: type)
                     return LanguageModelSession.Response(
-                        content: "" as! Content,
-                        rawContent: GeneratedContent(""),
+                        content: empty.content,
+                        rawContent: empty.rawContent,
                         transcriptEntries: ArraySlice(entries)
                     )
                 case .invocations(let invocations):
@@ -621,11 +652,25 @@ public struct OpenAILanguageModel: LanguageModel {
 
             break
         }
-        return LanguageModelSession.Response(
-            content: text as! Content,
-            rawContent: GeneratedContent(text),
-            transcriptEntries: ArraySlice(entries)
-        )
+
+        if type == String.self {
+            return LanguageModelSession.Response(
+                content: text as! Content,
+                rawContent: GeneratedContent(text),
+                transcriptEntries: ArraySlice(entries)
+            )
+        }
+
+        if let jsonString = extractJSONFromOutput(lastOutput) {
+            let generatedContent = try GeneratedContent(json: jsonString)
+            let content = try type.init(generatedContent)
+            return LanguageModelSession.Response(
+                content: content,
+                rawContent: generatedContent,
+                transcriptEntries: ArraySlice(entries)
+            )
+        }
+        throw OpenAILanguageModelError.noResponseGenerated
     }
 
     public func streamResponse<Content>(
@@ -635,11 +680,6 @@ public struct OpenAILanguageModel: LanguageModel {
         includeSchemaInPrompt: Bool,
         options: GenerationOptions
     ) -> sending LanguageModelSession.ResponseStream<Content> where Content: Generable {
-        // For now, only String is supported
-        guard type == String.self else {
-            fatalError("OpenAILanguageModel only supports generating String content")
-        }
-
         // Convert tools if any are available in the session
         let openAITools: [OpenAITool]? = {
             guard !session.tools.isEmpty else { return nil }
@@ -653,120 +693,160 @@ public struct OpenAILanguageModel: LanguageModel {
 
         switch apiVariant {
         case .responses:
-            let params = Responses.createRequestBody(
-                model: model,
-                messages: session.transcript.toOpenAIMessages(),
-                tools: openAITools,
-                options: options,
-                stream: true
-            )
-
             let url = baseURL.appendingPathComponent("responses")
 
             let stream: AsyncThrowingStream<LanguageModelSession.ResponseStream<Content>.Snapshot, any Error> = .init {
                 continuation in
-                let task = Task { @Sendable in
-                    do {
-                        let body = try JSONEncoder().encode(params)
+                do {
+                    let params = try Responses.createRequestBody(
+                        model: model,
+                        messages: session.transcript.toOpenAIMessages(),
+                        tools: openAITools,
+                        generating: type,
+                        options: options,
+                        stream: true
+                    )
+                    let task = Task { @Sendable in
+                        do {
+                            let body = try JSONEncoder().encode(params)
 
-                        let events: AsyncThrowingStream<OpenAIResponsesServerEvent, any Error> =
-                            urlSession.fetchEventStream(
-                                .post,
-                                url: url,
-                                headers: [
-                                    "Authorization": "Bearer \(tokenProvider())"
-                                ],
-                                body: body
-                            )
+                            let events: AsyncThrowingStream<OpenAIResponsesServerEvent, any Error> =
+                                urlSession.fetchEventStream(
+                                    .post,
+                                    url: url,
+                                    headers: [
+                                        "Authorization": "Bearer \(tokenProvider())"
+                                    ],
+                                    body: body
+                                )
 
-                        var accumulatedText = ""
+                            var accumulatedText = ""
 
-                        for try await event in events {
-                            switch event {
-                            case .outputTextDelta(let delta):
-                                accumulatedText += delta
+                            for try await event in events {
+                                switch event {
+                                case .outputTextDelta(let delta):
+                                    accumulatedText += delta
 
-                                // Yield snapshot with partially generated content
-                                let raw = GeneratedContent(accumulatedText)
-                                let content: Content.PartiallyGenerated = (accumulatedText as! Content)
-                                    .asPartiallyGenerated()
-                                continuation.yield(.init(content: content, rawContent: raw))
+                                    var raw: GeneratedContent
+                                    let content: Content.PartiallyGenerated?
 
-                            case .toolCallCreated(_):
-                                // Minimal streaming implementation ignores tool call events
-                                break
-                            case .toolCallDelta(_):
-                                // Minimal streaming implementation ignores tool call deltas
-                                break
-                            case .completed(_):
-                                continuation.finish()
-                            case .ignored:
-                                break
+                                    if type == String.self {
+                                        raw = GeneratedContent(accumulatedText)
+                                        content = (accumulatedText as! Content).asPartiallyGenerated()
+                                    } else {
+                                        raw =
+                                            (try? GeneratedContent(json: accumulatedText))
+                                            ?? GeneratedContent(accumulatedText)
+                                        if let parsed = try? type.init(raw) {
+                                            content = parsed.asPartiallyGenerated()
+                                        } else {
+                                            content = nil
+                                        }
+                                    }
+
+                                    if let content {
+                                        continuation.yield(.init(content: content, rawContent: raw))
+                                    }
+
+                                case .toolCallCreated(_):
+                                    // Minimal streaming implementation ignores tool call events
+                                    break
+                                case .toolCallDelta(_):
+                                    // Minimal streaming implementation ignores tool call deltas
+                                    break
+                                case .completed(_):
+                                    continuation.finish()
+                                case .ignored:
+                                    break
+                                }
                             }
-                        }
 
-                        continuation.finish()
-                    } catch {
-                        continuation.finish(throwing: error)
+                            continuation.finish()
+                        } catch {
+                            continuation.finish(throwing: error)
+                        }
                     }
+                    continuation.onTermination = { _ in task.cancel() }
+                } catch {
+                    continuation.finish(throwing: error)
                 }
-                continuation.onTermination = { _ in task.cancel() }
             }
 
             return LanguageModelSession.ResponseStream(stream: stream)
 
         case .chatCompletions:
-            let params = ChatCompletions.createRequestBody(
-                model: model,
-                messages: session.transcript.toOpenAIMessages(),
-                tools: openAITools,
-                options: options,
-                stream: true
-            )
-
             let url = baseURL.appendingPathComponent("chat/completions")
 
             let stream: AsyncThrowingStream<LanguageModelSession.ResponseStream<Content>.Snapshot, any Error> = .init {
                 continuation in
-                let task = Task { @Sendable in
-                    do {
-                        let body = try JSONEncoder().encode(params)
+                do {
+                    let params = try ChatCompletions.createRequestBody(
+                        model: model,
+                        messages: session.transcript.toOpenAIMessages(),
+                        tools: openAITools,
+                        generating: type,
+                        options: options,
+                        stream: true
+                    )
 
-                        let events: AsyncThrowingStream<OpenAIChatCompletionsChunk, any Error> =
-                            urlSession.fetchEventStream(
-                                .post,
-                                url: url,
-                                headers: [
-                                    "Authorization": "Bearer \(tokenProvider())"
-                                ],
-                                body: body
-                            )
+                    let task = Task { @Sendable in
+                        do {
+                            let body = try JSONEncoder().encode(params)
 
-                        var accumulatedText = ""
+                            let events: AsyncThrowingStream<OpenAIChatCompletionsChunk, any Error> =
+                                urlSession.fetchEventStream(
+                                    .post,
+                                    url: url,
+                                    headers: [
+                                        "Authorization": "Bearer \(tokenProvider())"
+                                    ],
+                                    body: body
+                                )
 
-                        for try await chunk in events {
-                            if let choice = chunk.choices.first {
-                                if let piece = choice.delta.content, !piece.isEmpty {
-                                    accumulatedText += piece
+                            var accumulatedText = ""
 
-                                    let raw = GeneratedContent(accumulatedText)
-                                    let content: Content.PartiallyGenerated = (accumulatedText as! Content)
-                                        .asPartiallyGenerated()
-                                    continuation.yield(.init(content: content, rawContent: raw))
-                                }
+                            for try await chunk in events {
+                                if let choice = chunk.choices.first {
+                                    if let piece = choice.delta.content, !piece.isEmpty {
+                                        accumulatedText += piece
 
-                                if choice.finishReason != nil {
-                                    continuation.finish()
+                                        var raw: GeneratedContent
+                                        let content: Content.PartiallyGenerated?
+
+                                        if type == String.self {
+                                            raw = GeneratedContent(accumulatedText)
+                                            content = (accumulatedText as! Content).asPartiallyGenerated()
+                                        } else {
+                                            raw =
+                                                (try? GeneratedContent(json: accumulatedText))
+                                                ?? GeneratedContent(accumulatedText)
+                                            if let parsed = try? type.init(raw) {
+                                                content = parsed.asPartiallyGenerated()
+                                            } else {
+                                                content = nil
+                                            }
+                                        }
+
+                                        if let content {
+                                            continuation.yield(.init(content: content, rawContent: raw))
+                                        }
+                                    }
+
+                                    if choice.finishReason != nil {
+                                        continuation.finish()
+                                    }
                                 }
                             }
-                        }
 
-                        continuation.finish()
-                    } catch {
-                        continuation.finish(throwing: error)
+                            continuation.finish()
+                        } catch {
+                            continuation.finish(throwing: error)
+                        }
                     }
+                    continuation.onTermination = { _ in task.cancel() }
+                } catch {
+                    continuation.finish(throwing: error)
                 }
-                continuation.onTermination = { _ in task.cancel() }
             }
 
             return LanguageModelSession.ResponseStream(stream: stream)
@@ -777,13 +857,14 @@ public struct OpenAILanguageModel: LanguageModel {
 // MARK: - API Variants
 
 private enum ChatCompletions {
-    static func createRequestBody(
+    static func createRequestBody<Content: Generable>(
         model: String,
         messages: [OpenAIMessage],
         tools: [OpenAITool]?,
+        generating type: Content.Type,
         options: GenerationOptions,
         stream: Bool
-    ) -> JSONValue {
+    ) throws -> JSONValue {
         var body: [String: JSONValue] = [
             "model": .string(model),
             "messages": .array(messages.map { $0.jsonValue(for: .chatCompletions) }),
@@ -792,6 +873,18 @@ private enum ChatCompletions {
 
         if let tools {
             body["tools"] = .array(tools.map { $0.jsonValue(for: .chatCompletions) })
+        }
+
+        if type != String.self {
+            let jsonSchemaValue = try type.generationSchema.toJSONValueForOpenAIStrictMode()
+            body["response_format"] = .object([
+                "type": .string("json_schema"),
+                "json_schema": .object([
+                    "name": .string("response_schema"),
+                    "strict": .bool(true),
+                    "schema": jsonSchemaValue,
+                ]),
+            ])
         }
 
         if let temperature = options.temperature {
@@ -899,11 +992,13 @@ private enum ChatCompletions {
         struct Message: Codable, Sendable {
             let role: String
             let content: String?
+            let refusal: String?
             let toolCalls: [OpenAIToolCall]?
 
             private enum CodingKeys: String, CodingKey {
                 case role
                 case content
+                case refusal
                 case toolCalls = "tool_calls"
             }
         }
@@ -911,13 +1006,14 @@ private enum ChatCompletions {
 }
 
 private enum Responses {
-    static func createRequestBody(
+    static func createRequestBody<Content: Generable>(
         model: String,
         messages: [OpenAIMessage],
         tools: [OpenAITool]?,
+        generating type: Content.Type,
         options: GenerationOptions,
         stream: Bool
-    ) -> JSONValue {
+    ) throws -> JSONValue {
         // Build input blocks from the user message content
 
         var body: [String: JSONValue] = [
@@ -1034,6 +1130,18 @@ private enum Responses {
 
         if let tools {
             body["tools"] = .array(tools.map { $0.jsonValue(for: .responses) })
+        }
+
+        if type != String.self {
+            let jsonSchemaValue = try type.generationSchema.toJSONValueForOpenAIStrictMode()
+            body["text"] = .object([
+                "format": .object([
+                    "type": .string("json_schema"),
+                    "name": .string("response_schema"),
+                    "strict": .bool(true),
+                    "schema": jsonSchemaValue,
+                ])
+            ])
         }
 
         if let temperature = options.temperature {
@@ -1636,6 +1744,19 @@ private func convertToolToOpenAIFormat(_ tool: any Tool) -> OpenAITool {
     return OpenAITool(type: "function", function: fn)
 }
 
+private func emptyResponseContent<Content: Generable>(
+    for type: Content.Type
+) throws -> (content: Content, rawContent: GeneratedContent) {
+    if type == String.self {
+        let raw = GeneratedContent("")
+        return ("" as! Content, raw)
+    }
+
+    let raw = GeneratedContent(properties: [:])
+    let content = try type.init(raw)
+    return (content, raw)
+}
+
 private func toGeneratedContent(_ jsonString: String?) throws -> GeneratedContent {
     guard let jsonString, !jsonString.isEmpty else { return GeneratedContent(properties: [:]) }
     return try GeneratedContent(json: jsonString)
@@ -1664,6 +1785,30 @@ private func extractTextFromOutput(_ output: [JSONValue]?) -> String? {
     }
 
     return textParts.isEmpty ? nil : textParts.joined()
+}
+
+private func extractJSONFromOutput(_ output: [JSONValue]?) -> String? {
+    guard let output else { return nil }
+
+    for block in output {
+        if case let .object(obj) = block,
+            case let .string(type)? = obj["type"],
+            type == "message",
+            case let .array(contentBlocks)? = obj["content"]
+        {
+            for contentBlock in contentBlocks {
+                if case let .object(contentObj) = contentBlock,
+                    case let .string(contentType)? = contentObj["type"],
+                    contentType == "output_text",
+                    case let .string(jsonString)? = contentObj["text"]
+                {
+                    return jsonString
+                }
+            }
+        }
+    }
+
+    return nil
 }
 
 private func extractToolCallsFromOutput(_ output: [JSONValue]?) -> [OpenAIToolCall] {
@@ -1757,4 +1902,51 @@ private func extractToolCallsFromOutput(_ output: [JSONValue]?) -> [OpenAIToolCa
     }
 
     return toolCalls
+}
+
+// MARK: - Errors
+
+enum OpenAILanguageModelError: LocalizedError {
+    case noResponseGenerated
+
+    var errorDescription: String? {
+        switch self {
+        case .noResponseGenerated:
+            return "No response was generated by the model"
+        }
+    }
+}
+
+// MARK: - OpenAI Schema Helpers
+
+private extension GenerationSchema {
+    /// Converts this schema to a JSONValue with OpenAI strict mode requirements applied.
+    ///
+    /// OpenAI strict mode requires:
+    /// 1. `additionalProperties: false` at the root
+    /// 2. All properties (including optional ones) listed in `required`
+    func toJSONValueForOpenAIStrictMode() throws -> JSONValue {
+        let resolvedSchema = self.withResolvedRoot() ?? self
+
+        let encoder = JSONEncoder()
+        encoder.userInfo[GenerationSchema.omitAdditionalPropertiesKey] = false
+        let schemaData = try encoder.encode(resolvedSchema)
+        let jsonSchema = try JSONDecoder().decode(JSONSchema.self, from: schemaData)
+        var jsonSchemaValue = try JSONValue(jsonSchema)
+
+        if case .object(var schemaObj) = jsonSchemaValue {
+            schemaObj["additionalProperties"] = .bool(false)
+
+            if case .object(let properties)? = schemaObj["properties"],
+                !properties.isEmpty
+            {
+                let allPropertyNames = Array(properties.keys).sorted()
+                schemaObj["required"] = .array(allPropertyNames.map { .string($0) })
+            }
+
+            jsonSchemaValue = .object(schemaObj)
+        }
+
+        return jsonSchemaValue
+    }
 }
