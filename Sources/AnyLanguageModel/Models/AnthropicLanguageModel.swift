@@ -533,7 +533,7 @@ private func createMessageParams(
                             "type": .string("json_schema"),
                             "schema": schemaValue,
                         ]
-                    ),
+                    )
                 ]
             )
         }
