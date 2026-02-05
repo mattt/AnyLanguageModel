@@ -523,7 +523,8 @@ public struct OpenAILanguageModel: LanguageModel {
                         Transcript.ToolCall(
                             id: tc.id ?? UUID().uuidString,
                             toolName: tc.function?.name ?? "",
-                            arguments: (try? GeneratedContent(json: tc.function?.arguments ?? "{}")) ?? GeneratedContent(tc.function?.arguments ?? "")
+                            arguments: (try? GeneratedContent(json: tc.function?.arguments ?? "{}"))
+                                ?? GeneratedContent(tc.function?.arguments ?? "")
                         )
                     }
                     entries.append(.toolCalls(Transcript.ToolCalls(calls)))
