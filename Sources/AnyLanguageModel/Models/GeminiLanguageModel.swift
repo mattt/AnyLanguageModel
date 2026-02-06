@@ -704,9 +704,15 @@ private func emptyResponseContent<Content: Generable>(
         return ("" as! Content, raw)
     }
 
-    let raw = GeneratedContent(properties: [:])
-    let content = try type.init(raw)
-    return (content, raw)
+    let rawEmpty = GeneratedContent(properties: [:])
+    do {
+        let content = try type.init(rawEmpty)
+        return (content, rawEmpty)
+    } catch {
+        let rawNull = try GeneratedContent(json: "null")
+        let content = try type.init(rawNull)
+        return (content, rawNull)
+    }
 }
 
 private func toGeneratedContent(_ value: [String: JSONValue]?) throws -> GeneratedContent {
