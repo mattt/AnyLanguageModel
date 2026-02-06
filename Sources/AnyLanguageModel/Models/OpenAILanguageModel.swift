@@ -733,6 +733,7 @@ public struct OpenAILanguageModel: LanguageModel {
                                         if let parsed = try? type.init(raw) {
                                             content = parsed.asPartiallyGenerated()
                                         } else {
+                                            // Skip snapshots until the accumulated JSON parses.
                                             content = nil
                                         }
                                     }
@@ -816,6 +817,7 @@ public struct OpenAILanguageModel: LanguageModel {
                                             if let parsed = try? type.init(raw) {
                                                 content = parsed.asPartiallyGenerated()
                                             } else {
+                                                // Skip snapshots until the accumulated JSON parses.
                                                 content = nil
                                             }
                                         }
@@ -1933,6 +1935,8 @@ private extension GenerationSchema {
             if case .object(let properties)? = schemaObj["properties"],
                 !properties.isEmpty
             {
+                // OpenAI strict mode requires all properties to be listed as required,
+                // even if the underlying schema marks them optional.
                 let allPropertyNames = Array(properties.keys).sorted()
                 schemaObj["required"] = .array(allPropertyNames.map { .string($0) })
             }
