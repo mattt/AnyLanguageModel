@@ -113,6 +113,10 @@ public struct GeminiLanguageModel: LanguageModel {
         /// When set to `.enabled`, the model will output valid JSON.
         /// When set to `.schema(_:)`, the model will output JSON
         /// conforming to the provided schema.
+        ///
+        /// - Note: When generating a non-`String` ``Generable`` type, the model
+        ///   always uses the generated schema for structured output and ignores
+        ///   this setting.
         public var jsonMode: JSONMode?
 
         /// Creates custom generation options for Gemini models.
@@ -262,10 +266,6 @@ public struct GeminiLanguageModel: LanguageModel {
         includeSchemaInPrompt: Bool,
         options: GenerationOptions
     ) async throws -> LanguageModelSession.Response<Content> where Content: Generable {
-        guard type == String.self else {
-            fatalError("GeminiLanguageModel only supports generating String content")
-        }
-
         // Extract effective configuration from custom options or fall back to model defaults
         let customOptions = options[custom: GeminiLanguageModel.self]
         let effectiveThinking = customOptions?.thinking ?? _thinking
@@ -287,6 +287,7 @@ public struct GeminiLanguageModel: LanguageModel {
             let params = try createGenerateContentParams(
                 contents: transcript.toGeminiContent(),
                 tools: geminiTools,
+                generating: type,
                 options: options,
                 thinking: effectiveThinking,
                 jsonMode: effectiveJsonMode
@@ -319,9 +320,10 @@ public struct GeminiLanguageModel: LanguageModel {
                     if !calls.isEmpty {
                         transcript.append(.toolCalls(Transcript.ToolCalls(calls)))
                     }
+                    let empty = try emptyResponseContent(for: type)
                     return LanguageModelSession.Response(
-                        content: "" as! Content,
-                        rawContent: GeneratedContent(""),
+                        content: empty.content,
+                        rawContent: empty.rawContent,
                         transcriptEntries: ArraySlice(transcript)
                     )
                 case .invocations(let invocations):
@@ -346,9 +348,19 @@ public struct GeminiLanguageModel: LanguageModel {
                         }
                     }.joined() ?? ""
 
+                if type == String.self {
+                    return LanguageModelSession.Response(
+                        content: text as! Content,
+                        rawContent: GeneratedContent(text),
+                        transcriptEntries: ArraySlice(transcript)
+                    )
+                }
+
+                let generatedContent = try GeneratedContent(json: text)
+                let content = try type.init(generatedContent)
                 return LanguageModelSession.Response(
-                    content: text as! Content,
-                    rawContent: GeneratedContent(text),
+                    content: content,
+                    rawContent: generatedContent,
                     transcriptEntries: ArraySlice(transcript)
                 )
             }
@@ -362,10 +374,6 @@ public struct GeminiLanguageModel: LanguageModel {
         includeSchemaInPrompt: Bool,
         options: GenerationOptions
     ) -> sending LanguageModelSession.ResponseStream<Content> where Content: Generable {
-        guard type == String.self else {
-            fatalError("GeminiLanguageModel only supports generating String content")
-        }
-
         // Extract effective configuration from custom options or fall back to model defaults
         let customOptions = options[custom: GeminiLanguageModel.self]
         let effectiveThinking = customOptions?.thinking ?? _thinking
@@ -390,6 +398,7 @@ public struct GeminiLanguageModel: LanguageModel {
                     let params = try createGenerateContentParams(
                         contents: session.transcript.toGeminiContent(),
                         tools: geminiTools,
+                        generating: type,
                         options: options,
                         thinking: effectiveThinking,
                         jsonMode: effectiveJsonMode
@@ -416,10 +425,26 @@ public struct GeminiLanguageModel: LanguageModel {
                                 if case .text(let textPart) = part {
                                     accumulatedText += textPart.text
 
-                                    let raw = GeneratedContent(accumulatedText)
-                                    let content: Content.PartiallyGenerated = (accumulatedText as! Content)
-                                        .asPartiallyGenerated()
-                                    continuation.yield(.init(content: content, rawContent: raw))
+                                    var raw: GeneratedContent
+                                    let content: Content.PartiallyGenerated?
+
+                                    if type == String.self {
+                                        raw = GeneratedContent(accumulatedText)
+                                        content = (accumulatedText as! Content).asPartiallyGenerated()
+                                    } else {
+                                        raw =
+                                            (try? GeneratedContent(json: accumulatedText))
+                                            ?? GeneratedContent(accumulatedText)
+                                        if let parsed = try? type.init(raw) {
+                                            content = parsed.asPartiallyGenerated()
+                                        } else {
+                                            content = nil
+                                        }
+                                    }
+
+                                    if let content {
+                                        continuation.yield(.init(content: content, rawContent: raw))
+                                    }
                                 }
                             }
                         }
@@ -473,9 +498,18 @@ public struct GeminiLanguageModel: LanguageModel {
     }
 }
 
-private func createGenerateContentParams(
+private func convertSchemaToGeminiFormat(_ schema: GenerationSchema) throws -> JSONSchema {
+    let resolvedSchema = schema.withResolvedRoot() ?? schema
+    let encoder = JSONEncoder()
+    encoder.userInfo[GenerationSchema.omitAdditionalPropertiesKey] = true
+    let data = try encoder.encode(resolvedSchema)
+    return try JSONDecoder().decode(JSONSchema.self, from: data)
+}
+
+private func createGenerateContentParams<Content: Generable>(
     contents: [GeminiContent],
     tools: [GeminiTool]?,
+    generating type: Content.Type,
     options: GenerationOptions,
     thinking: GeminiLanguageModel.CustomGenerationOptions.Thinking,
     jsonMode: GeminiLanguageModel.CustomGenerationOptions.JSONMode?
@@ -518,7 +552,11 @@ private func createGenerateContentParams(
     }
     generationConfig["thinkingConfig"] = .object(thinkingConfig)
 
-    if let jsonMode {
+    if type != String.self {
+        let schema = try convertSchemaToGeminiFormat(type.generationSchema)
+        generationConfig["responseMimeType"] = .string("application/json")
+        generationConfig["responseSchema"] = try JSONValue(schema)
+    } else if let jsonMode {
         switch jsonMode {
         case .disabled:
             break
@@ -665,6 +703,19 @@ private func convertToolToGeminiFormat(_ tool: any Tool) throws -> GeminiFunctio
         description: tool.description,
         parameters: schema
     )
+}
+
+private func emptyResponseContent<Content: Generable>(
+    for type: Content.Type
+) throws -> (content: Content, rawContent: GeneratedContent) {
+    if type == String.self {
+        let raw = GeneratedContent("")
+        return ("" as! Content, raw)
+    }
+
+    let raw = GeneratedContent(properties: [:])
+    let content = try type.init(raw)
+    return (content, raw)
 }
 
 private func toGeneratedContent(_ value: [String: JSONValue]?) throws -> GeneratedContent {
