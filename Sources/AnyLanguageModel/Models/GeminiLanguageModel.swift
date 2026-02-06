@@ -477,7 +477,12 @@ public struct GeminiLanguageModel: LanguageModel {
 
         if !tools.isEmpty {
             let functionDeclarations: [GeminiFunctionDeclaration] = try tools.map { tool in
-                try convertToolToGeminiFormat(tool)
+                let schema = try convertSchemaToGeminiFormat(tool.parameters)
+                return GeminiFunctionDeclaration(
+                    name: tool.name,
+                    description: tool.description,
+                    parameters: schema
+                )
             }
             geminiTools.append(.functionDeclarations(functionDeclarations))
         }
@@ -689,21 +694,6 @@ private func resolveFunctionCalls(
     }
 
     return .invocations(results)
-}
-
-private func convertToolToGeminiFormat(_ tool: any Tool) throws -> GeminiFunctionDeclaration {
-    let resolvedSchema = tool.parameters.withResolvedRoot() ?? tool.parameters
-
-    let encoder = JSONEncoder()
-    encoder.userInfo[GenerationSchema.omitAdditionalPropertiesKey] = true
-    let data = try encoder.encode(resolvedSchema)
-    let schema = try JSONDecoder().decode(JSONSchema.self, from: data)
-
-    return GeminiFunctionDeclaration(
-        name: tool.name,
-        description: tool.description,
-        parameters: schema
-    )
 }
 
 private func emptyResponseContent<Content: Generable>(
