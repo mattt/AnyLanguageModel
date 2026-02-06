@@ -438,6 +438,7 @@ public struct GeminiLanguageModel: LanguageModel {
                                         if let parsed = try? type.init(raw) {
                                             content = parsed.asPartiallyGenerated()
                                         } else {
+                                            // Skip invalid partial JSON until it parses cleanly.
                                             content = nil
                                         }
                                     }
