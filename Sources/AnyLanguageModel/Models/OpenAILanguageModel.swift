@@ -495,13 +495,6 @@ public struct OpenAILanguageModel: LanguageModel {
             )
 
             guard let choice = resp.choices.first else {
-                if type == String.self {
-                    return LanguageModelSession.Response(
-                        content: "" as! Content,
-                        rawContent: GeneratedContent(""),
-                        transcriptEntries: ArraySlice(entries)
-                    )
-                }
                 throw OpenAILanguageModelError.noResponseGenerated
             }
 
