@@ -178,4 +178,93 @@ struct GeminiLanguageModelTests {
         #expect(response.content.contains("Alice"))
         #expect(response.content.contains("30"))
     }
+
+    @Suite("Structured Output")
+    struct StructuredOutputTests {
+        @Generable
+        struct Person {
+            @Guide(description: "The person's full name")
+            var name: String
+
+            @Guide(description: "The person's age in years")
+            var age: Int
+
+            @Guide(description: "The person's email address")
+            var email: String?
+        }
+
+        @Generable
+        struct Book {
+            @Guide(description: "The book's title")
+            var title: String
+
+            @Guide(description: "The book's author")
+            var author: String
+
+            @Guide(description: "The publication year")
+            var year: Int
+        }
+
+        private var model: GeminiLanguageModel {
+            GeminiLanguageModel(apiKey: geminiAPIKey!, model: "gemini-2.5-flash")
+        }
+
+        @Test func basicStructuredOutput() async throws {
+            let session = LanguageModelSession(model: model)
+            let response = try await session.respond(
+                to: "Generate a person named John Doe, age 30, email john@example.com",
+                generating: Person.self
+            )
+
+            #expect(!response.content.name.isEmpty)
+            #expect(response.content.name.contains("John") || response.content.name.contains("Doe"))
+            #expect(response.content.age > 0)
+            #expect(response.content.age <= 100)
+            #expect(response.content.email != nil)
+        }
+
+        @Test func structuredOutputWithOptionalField() async throws {
+            let session = LanguageModelSession(model: model)
+            let response = try await session.respond(
+                to: "Generate a person named Jane Smith, age 25, with no email",
+                generating: Person.self
+            )
+
+            #expect(!response.content.name.isEmpty)
+            #expect(response.content.name.contains("Jane") || response.content.name.contains("Smith"))
+            #expect(response.content.age > 0)
+            #expect(response.content.age <= 100)
+            #expect(response.content.email == nil || response.content.email?.isEmpty == true)
+        }
+
+        @Test func structuredOutputWithNestedTypes() async throws {
+            let session = LanguageModelSession(model: model)
+            let response = try await session.respond(
+                to: "Generate a book titled 'The Swift Programming Language' by 'Apple Inc.' published in 2024",
+                generating: Book.self
+            )
+
+            #expect(!response.content.title.isEmpty)
+            #expect(!response.content.author.isEmpty)
+            #expect(response.content.year >= 2020)
+        }
+
+        @Test func streamingStructuredOutput() async throws {
+            let session = LanguageModelSession(model: model)
+            let stream = session.streamResponse(
+                to: "Generate a person named Alice, age 28, email alice@example.com",
+                generating: Person.self
+            )
+
+            var snapshots: [LanguageModelSession.ResponseStream<Person>.Snapshot] = []
+            for try await snapshot in stream {
+                snapshots.append(snapshot)
+            }
+
+            #expect(!snapshots.isEmpty)
+            let finalSnapshot = snapshots.last!
+            #expect((finalSnapshot.content.name?.isEmpty ?? true) == false)
+            #expect((finalSnapshot.content.age ?? 0) > 0)
+        }
+    }
 }
