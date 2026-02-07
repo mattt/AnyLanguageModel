@@ -27,17 +27,17 @@ import Testing
         let modelPackageName = "StatefulMistral7BInstructInt4.mlpackage"
 
         @available(macOS 15.0, iOS 18.0, tvOS 18.0, visionOS 2.0, watchOS 11.0, *)
-        func getModel() async throws -> CoreMLLanguageModel {
+        private static let modelTask = Task {
             let hasToken = ProcessInfo.processInfo.environment["HF_TOKEN"] != nil
             let hubApi = HubApi(useOfflineMode: !hasToken)
             let repoURL = try await hubApi.snapshot(
-                from: Hub.Repo(id: modelId, type: .models),
+                from: Hub.Repo(id: "apple/mistral-coreml", type: .models),
                 matching: "*Int4.mlpackage/**"
             ) { progress in
                 print("Download progress: \(Int(progress.fractionCompleted * 100))%")
             }
 
-            let modelURL = repoURL.appending(component: modelPackageName)
+            let modelURL = repoURL.appending(component: "StatefulMistral7BInstructInt4.mlpackage")
             let compiledURL: URL
             if modelURL.pathExtension == "mlmodelc" {
                 compiledURL = modelURL
@@ -45,6 +45,11 @@ import Testing
                 compiledURL = try await MLModel.compileModel(at: modelURL)
             }
             return try await CoreMLLanguageModel(url: compiledURL)
+        }
+
+        @available(macOS 15.0, iOS 18.0, tvOS 18.0, visionOS 2.0, watchOS 11.0, *)
+        func getModel() async throws -> CoreMLLanguageModel {
+            try await Self.modelTask.value
         }
 
         @Test @available(macOS 15.0, iOS 18.0, tvOS 18.0, visionOS 2.0, watchOS 11.0, *)
