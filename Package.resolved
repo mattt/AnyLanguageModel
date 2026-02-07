@@ -20,6 +20,33 @@
       }
     },
     {
+      "identity" : "llama.swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/mattt/llama.swift",
+      "state" : {
+        "revision" : "4d57cff84ba85914baa39850157e7c27684db9c8",
+        "version" : "2.7966.0"
+      }
+    },
+    {
+      "identity" : "mlx-swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/ml-explore/mlx-swift",
+      "state" : {
+        "revision" : "4dccaeda1d83cf8697f235d2786c2d72ad4bb925",
+        "version" : "0.30.3"
+      }
+    },
+    {
+      "identity" : "mlx-swift-lm",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/ml-explore/mlx-swift-lm",
+      "state" : {
+        "revision" : "360c5052b81cc154b04ee0933597a4ad6db4b8ae",
+        "version" : "2.30.3"
+      }
+    },
+    {
       "identity" : "partialjsondecoder",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/mattt/PartialJSONDecoder.git",
@@ -44,6 +71,15 @@
       "state" : {
         "revision" : "d81197f35f41445bc10e94600795e68c6f5e94b0",
         "version" : "2.3.1"
+      }
+    },
+    {
+      "identity" : "swift-numerics",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-numerics",
+      "state" : {
+        "revision" : "0c0290ff6b24942dadb83a929ffaaa1481df04a2",
+        "version" : "1.1.1"
       }
     },
     {
