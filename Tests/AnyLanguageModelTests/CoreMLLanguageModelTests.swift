@@ -21,7 +21,7 @@ import Testing
         return true
     }()
 
-    @Suite("CoreMLLanguageModel", .enabled(if: shouldRunCoreMLTests))
+    @Suite("CoreMLLanguageModel", .enabled(if: shouldRunCoreMLTests), .serialized)
     struct CoreMLLanguageModelTests {
         let modelId = "apple/mistral-coreml"
         let modelPackageName = "StatefulMistral7BInstructInt4.mlpackage"
