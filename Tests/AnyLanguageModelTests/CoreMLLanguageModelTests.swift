@@ -38,7 +38,13 @@ import Testing
             }
 
             let modelURL = repoURL.appending(component: modelPackageName)
-            return try await CoreMLLanguageModel(url: modelURL)
+            let compiledURL: URL
+            if modelURL.pathExtension == "mlmodelc" {
+                compiledURL = modelURL
+            } else {
+                compiledURL = try await MLModel.compileModel(at: modelURL)
+            }
+            return try await CoreMLLanguageModel(url: compiledURL)
         }
 
         @Test @available(macOS 15.0, iOS 18.0, tvOS 18.0, visionOS 2.0, watchOS 11.0, *)
