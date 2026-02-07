@@ -176,5 +176,55 @@ import Testing
                 #expect(Bool(true))
             }
         }
+
+        @Test @available(macOS 15.0, iOS 18.0, tvOS 18.0, visionOS 2.0, watchOS 11.0, *)
+        func structuredGenerationSimpleString() async throws {
+            let model = try await getModel()
+            let session = LanguageModelSession(
+                model: model,
+                instructions: "You are a helpful assistant that generates structured data."
+            )
+            let response = try await session.respond(
+                to: "Generate a greeting message that says hello",
+                generating: SimpleString.self
+            )
+            #expect(!response.content.message.isEmpty)
+        }
+
+        @Test @available(macOS 15.0, iOS 18.0, tvOS 18.0, visionOS 2.0, watchOS 11.0, *)
+        func structuredGenerationSimpleInt() async throws {
+            let model = try await getModel()
+            let session = LanguageModelSession(
+                model: model,
+                instructions: "You are a helpful assistant that generates structured data."
+            )
+            let response = try await session.respond(
+                to: "Generate a count value of 42",
+                generating: SimpleInt.self
+            )
+            #expect(response.content.count >= 0)
+        }
+
+        @Test @available(macOS 15.0, iOS 18.0, tvOS 18.0, visionOS 2.0, watchOS 11.0, *)
+        func structuredGenerationSimpleBool() async throws {
+            let model = try await getModel()
+            let session = LanguageModelSession(
+                model: model,
+                instructions: "You are a helpful assistant that generates structured data."
+            )
+            let response = try await session.respond(
+                to: "Generate a boolean value: true",
+                generating: SimpleBool.self
+            )
+            #expect(response.content.value == true)
+            let jsonData = response.rawContent.jsonString.data(using: .utf8)
+            #expect(jsonData != nil)
+            if let jsonData {
+                let json = try JSONSerialization.jsonObject(with: jsonData)
+                let dictionary = json as? [String: Any]
+                let boolValue = dictionary?["value"] as? Bool
+                #expect(boolValue != nil)
+            }
+        }
     }
 #endif  // CoreML
