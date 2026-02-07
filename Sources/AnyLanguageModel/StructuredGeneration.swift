@@ -201,6 +201,7 @@ struct ConstrainedJSONGenerator<Backend: TokenBackend> {
     private static func buildValidIntegerTokens(backend: Backend) -> Set<Int> {
         var allowed = Set<Int>()
         for token in 0 ..< backend.vocabSize {
+            if backend.isSpecialToken(token) { continue }
             guard let text = backend.tokenText(token), !text.isEmpty else { continue }
             if text.allSatisfy({ $0.isNumber || $0 == "-" }),
                 text.contains(where: { $0.isNumber })
@@ -214,6 +215,7 @@ struct ConstrainedJSONGenerator<Backend: TokenBackend> {
     private static func buildValidDecimalTokens(backend: Backend) -> Set<Int> {
         var allowed = Set<Int>()
         for token in 0 ..< backend.vocabSize {
+            if backend.isSpecialToken(token) { continue }
             guard let text = backend.tokenText(token), !text.isEmpty else { continue }
             if text.allSatisfy({ $0.isNumber || $0 == "-" || $0 == "." }),
                 text.contains(where: { $0.isNumber })
