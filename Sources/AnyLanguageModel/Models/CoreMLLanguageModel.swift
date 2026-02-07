@@ -451,6 +451,11 @@
         }
 
         private struct CoreMLTokenBackend: TokenBackend {
+            struct MaskCacheKey: Hashable, Sendable {
+                let vocabSize: Int
+                let tokens: Set<Int>
+            }
+
             let model: Models.LanguageModel
             let tokenizer: any Tokenizer
             let config: GenerationConfig
@@ -463,6 +468,7 @@
             var currentLogits: MLTensor
             var remainingTokens: Int
             let totalTokenBudget: Int
+            var maskCache: [MaskCacheKey: MLTensor] = [:]
 
             init(
                 model: Models.LanguageModel,
@@ -529,12 +535,20 @@
                     throw ConstrainedGenerationError.tokenizationFailed
                 }
 
-                // Build a mask tensor that keeps only the allowed tokens.
-                var maskValues = Array(repeating: -Float.infinity, count: vocabSize)
-                for token in candidateTokens {
-                    maskValues[token] = 0
+                // Build or reuse a mask tensor that keeps only the allowed tokens.
+                let cacheKey = MaskCacheKey(vocabSize: vocabSize, tokens: Set(candidateTokens))
+                let maskTensor: MLTensor
+                if let cachedMask = maskCache[cacheKey] {
+                    maskTensor = cachedMask
+                } else {
+                    var maskValues = Array(repeating: -Float.infinity, count: vocabSize)
+                    for token in candidateTokens {
+                        maskValues[token] = 0
+                    }
+                    let builtMask = MLTensor(maskValues).reshaped(to: processedScores.shape)
+                    maskCache[cacheKey] = builtMask
+                    maskTensor = builtMask
                 }
-                let maskTensor = MLTensor(maskValues).reshaped(to: processedScores.shape)
                 let maskedScores = processedScores + maskTensor
 
                 let tokenTensor: MLTensor
