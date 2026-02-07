@@ -202,7 +202,18 @@ import Testing
                 to: "Generate a count value of 42",
                 generating: SimpleInt.self
             )
-            #expect(response.content.count >= 0)
+            #expect(response.content.count == 42)
+            let jsonData = response.rawContent.jsonString.data(using: .utf8)
+            #expect(jsonData != nil)
+            if let jsonData {
+                let json = try JSONSerialization.jsonObject(with: jsonData)
+                let dictionary = json as? [String: Any]
+                #expect(dictionary != nil)
+                if let dictionary {
+                    let countValue = dictionary["count"] as? NSNumber
+                    #expect(countValue?.intValue == 42)
+                }
+            }
         }
 
         @Test @available(macOS 15.0, iOS 18.0, tvOS 18.0, visionOS 2.0, watchOS 11.0, *)
@@ -222,8 +233,11 @@ import Testing
             if let jsonData {
                 let json = try JSONSerialization.jsonObject(with: jsonData)
                 let dictionary = json as? [String: Any]
-                let boolValue = dictionary?["value"] as? Bool
-                #expect(boolValue != nil)
+                #expect(dictionary != nil)
+                if let dictionary {
+                    let boolValue = dictionary["value"] as? Bool
+                    #expect(boolValue == true)
+                }
             }
         }
     }
