@@ -21,24 +21,35 @@ import Testing
         return true
     }()
 
-    @Suite("CoreMLLanguageModel", .enabled(if: shouldRunCoreMLTests))
+    @Suite("CoreMLLanguageModel", .enabled(if: shouldRunCoreMLTests), .serialized)
     struct CoreMLLanguageModelTests {
         let modelId = "apple/mistral-coreml"
         let modelPackageName = "StatefulMistral7BInstructInt4.mlpackage"
 
         @available(macOS 15.0, iOS 18.0, tvOS 18.0, visionOS 2.0, watchOS 11.0, *)
-        func getModel() async throws -> CoreMLLanguageModel {
+        private static let modelTask = Task {
             let hasToken = ProcessInfo.processInfo.environment["HF_TOKEN"] != nil
             let hubApi = HubApi(useOfflineMode: !hasToken)
             let repoURL = try await hubApi.snapshot(
-                from: Hub.Repo(id: modelId, type: .models),
+                from: Hub.Repo(id: "apple/mistral-coreml", type: .models),
                 matching: "*Int4.mlpackage/**"
             ) { progress in
                 print("Download progress: \(Int(progress.fractionCompleted * 100))%")
             }
 
-            let modelURL = repoURL.appending(component: modelPackageName)
-            return try await CoreMLLanguageModel(url: modelURL)
+            let modelURL = repoURL.appending(component: "StatefulMistral7BInstructInt4.mlpackage")
+            let compiledURL: URL
+            if modelURL.pathExtension == "mlmodelc" {
+                compiledURL = modelURL
+            } else {
+                compiledURL = try await MLModel.compileModel(at: modelURL)
+            }
+            return try await CoreMLLanguageModel(url: compiledURL)
+        }
+
+        @available(macOS 15.0, iOS 18.0, tvOS 18.0, visionOS 2.0, watchOS 11.0, *)
+        func getModel() async throws -> CoreMLLanguageModel {
+            try await Self.modelTask.value
         }
 
         @Test @available(macOS 15.0, iOS 18.0, tvOS 18.0, visionOS 2.0, watchOS 11.0, *)
@@ -163,6 +174,70 @@ import Testing
             } catch {
                 // CoreMLUnsupportedFeatureError is a private struct, so we just check that an error is thrown
                 #expect(Bool(true))
+            }
+        }
+
+        @Test @available(macOS 15.0, iOS 18.0, tvOS 18.0, visionOS 2.0, watchOS 11.0, *)
+        func structuredGenerationSimpleString() async throws {
+            let model = try await getModel()
+            let session = LanguageModelSession(
+                model: model,
+                instructions: "You are a helpful assistant that generates structured data."
+            )
+            let response = try await session.respond(
+                to: "Generate a greeting message that says hello",
+                generating: SimpleString.self
+            )
+            #expect(!response.content.message.isEmpty)
+        }
+
+        @Test @available(macOS 15.0, iOS 18.0, tvOS 18.0, visionOS 2.0, watchOS 11.0, *)
+        func structuredGenerationSimpleInt() async throws {
+            let model = try await getModel()
+            let session = LanguageModelSession(
+                model: model,
+                instructions: "You are a helpful assistant that generates structured data."
+            )
+            let response = try await session.respond(
+                to: "Generate a count value of 42",
+                generating: SimpleInt.self
+            )
+            #expect(response.content.count == 42)
+            let jsonData = response.rawContent.jsonString.data(using: .utf8)
+            #expect(jsonData != nil)
+            if let jsonData {
+                let json = try JSONSerialization.jsonObject(with: jsonData)
+                let dictionary = json as? [String: Any]
+                #expect(dictionary != nil)
+                if let dictionary {
+                    let countValue = dictionary["count"] as? NSNumber
+                    #expect(countValue?.intValue == 42)
+                }
+            }
+        }
+
+        @Test @available(macOS 15.0, iOS 18.0, tvOS 18.0, visionOS 2.0, watchOS 11.0, *)
+        func structuredGenerationSimpleBool() async throws {
+            let model = try await getModel()
+            let session = LanguageModelSession(
+                model: model,
+                instructions: "You are a helpful assistant that generates structured data."
+            )
+            let response = try await session.respond(
+                to: "Generate a boolean value: true",
+                generating: SimpleBool.self
+            )
+            #expect(response.content.value == true)
+            let jsonData = response.rawContent.jsonString.data(using: .utf8)
+            #expect(jsonData != nil)
+            if let jsonData {
+                let json = try JSONSerialization.jsonObject(with: jsonData)
+                let dictionary = json as? [String: Any]
+                #expect(dictionary != nil)
+                if let dictionary {
+                    let boolValue = dictionary["value"] as? Bool
+                    #expect(boolValue == true)
+                }
             }
         }
     }

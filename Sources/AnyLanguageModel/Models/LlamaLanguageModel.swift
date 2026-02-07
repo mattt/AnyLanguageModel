@@ -532,7 +532,7 @@ import Foundation
                 )
             } else {
                 let maxTokens = structuredOptions.maximumResponseTokens ?? 512
-                let jsonString = try generateStructuredJSON(
+                let jsonString = try await generateStructuredJSON(
                     context: context,
                     prompt: fullPrompt,
                     schema: type.generationSchema,
@@ -921,7 +921,7 @@ import Foundation
             schema: GenerationSchema,
             maxTokens: Int,
             options: ResolvedGenerationOptions
-        ) throws -> String {
+        ) async throws -> String {
             guard let vocab = llama_model_get_vocab(model!) else {
                 throw LlamaLanguageModelError.contextInitializationFailed
             }
@@ -931,11 +931,16 @@ import Foundation
                 throw LlamaLanguageModelError.tokenizationFailed
             }
 
-            var batch = llama_batch_init(Int32(options.batchSize), 0, 1)
-            defer { llama_batch_free(batch) }
+            let batchPointer = UnsafeMutablePointer<llama_batch>.allocate(capacity: 1)
+            batchPointer.initialize(to: llama_batch_init(Int32(options.batchSize), 0, 1))
+            defer {
+                llama_batch_free(batchPointer.pointee)
+                batchPointer.deinitialize(count: 1)
+                batchPointer.deallocate()
+            }
 
             let hasEncoder = try prepareInitialBatch(
-                batch: &batch,
+                batch: &batchPointer.pointee,
                 promptTokens: promptTokens,
                 model: model!,
                 vocab: vocab,
@@ -963,23 +968,21 @@ import Foundation
             applySampling(sampler: samplerPointer, effectiveTemperature: options.temperature, options: options)
 
             let vocabSize = Int(llama_vocab_n_tokens(vocab))
-            let initialPosition: Int32 = hasEncoder ? 1 : batch.n_tokens
+            let initialPosition: Int32 = hasEncoder ? 1 : batchPointer.pointee.n_tokens
 
-            return try withUnsafeMutablePointer(to: &batch) { batchPointer in
-                let backend = LlamaTokenBackend(
-                    context: context,
-                    vocab: vocab,
-                    vocabSize: vocabSize,
-                    sampler: samplerPointer,
-                    batch: batchPointer,
-                    position: initialPosition,
-                    maximumTokens: maxTokens,
-                    endTokens: [],
-                    tokenToTextFn: { [self] token in self.tokenToText(vocab: vocab, token: llama_token(token)) }
-                )
-                var generator = try ConstrainedJSONGenerator(backend: backend, schema: schema)
-                return try generator.generate()
-            }
+            let backend = LlamaTokenBackend(
+                context: context,
+                vocab: vocab,
+                vocabSize: vocabSize,
+                sampler: samplerPointer,
+                batch: batchPointer,
+                position: initialPosition,
+                maximumTokens: maxTokens,
+                endTokens: [],
+                tokenToTextFn: { [self] token in self.tokenToText(vocab: vocab, token: llama_token(token)) }
+            )
+            var generator = try ConstrainedJSONGenerator(backend: backend, schema: schema)
+            return try await generator.generate()
         }
 
         private struct LlamaTokenBackend: TokenBackend {
@@ -1080,7 +1083,7 @@ import Foundation
                 tokenToTextFn(token)
             }
 
-            mutating func decode(_ token: Int) throws {
+            mutating func decode(_ token: Int) async throws {
                 let llamaToken = llama_token(token)
 
                 batch.pointee.n_tokens = 1
@@ -1105,7 +1108,7 @@ import Foundation
                 }
             }
 
-            mutating func sample(from allowedTokens: Set<Int>) throws -> Int {
+            mutating func sample(from allowedTokens: Set<Int>) async throws -> Int {
                 guard let logits = llama_get_logits(context) else {
                     return eosToken
                 }
