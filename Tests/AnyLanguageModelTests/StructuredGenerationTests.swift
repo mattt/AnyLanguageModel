@@ -62,7 +62,7 @@ struct StructuredGenerationTests {
         return (tokenToText, textToTokens)
     }
 
-    @Test func numberOutOfRangeThrows() throws {
+    @Test func numberOutOfRangeThrows() async throws {
         let maps = baseTokenMaps()
         let numberNode = GenerationSchema.NumberNode(
             description: nil,
@@ -85,7 +85,7 @@ struct StructuredGenerationTests {
 
         var generator = try ConstrainedJSONGenerator(backend: backend, schema: schema)
         do {
-            _ = try generator.generate()
+            _ = try await generator.generate()
             Issue.record("Expected number out-of-range error.")
         } catch let error as ConstrainedGenerationError {
             guard case .numberOutOfRange = error else {
@@ -95,7 +95,7 @@ struct StructuredGenerationTests {
         }
     }
 
-    @Test func patternMismatchThrows() throws {
+    @Test func patternMismatchThrows() async throws {
         let maps = baseTokenMaps()
         let stringNode = GenerationSchema.StringNode(
             description: nil,
@@ -119,7 +119,7 @@ struct StructuredGenerationTests {
 
         var generator = try ConstrainedJSONGenerator(backend: backend, schema: schema)
         do {
-            _ = try generator.generate()
+            _ = try await generator.generate()
             Issue.record("Expected pattern mismatch error.")
         } catch let error as ConstrainedGenerationError {
             guard case .patternMismatch = error else {
@@ -129,7 +129,7 @@ struct StructuredGenerationTests {
         }
     }
 
-    @Test func emptyStringEnumProducesEmptyValue() throws {
+    @Test func emptyStringEnumProducesEmptyValue() async throws {
         let maps = baseTokenMaps()
         let stringNode = GenerationSchema.StringNode(
             description: nil,
@@ -147,11 +147,11 @@ struct StructuredGenerationTests {
         )
 
         var generator = try ConstrainedJSONGenerator(backend: backend, schema: schema)
-        let result = try generator.generate()
+        let result = try await generator.generate()
         #expect(result == "\"\"")
     }
 
-    @Test func prefixEnumSelectsLongerCandidateDeterministically() throws {
+    @Test func prefixEnumSelectsLongerCandidateDeterministically() async throws {
         let maps = baseTokenMaps()
         let stringNode = GenerationSchema.StringNode(
             description: nil,
@@ -169,11 +169,11 @@ struct StructuredGenerationTests {
         )
 
         var generator = try ConstrainedJSONGenerator(backend: backend, schema: schema)
-        let result = try generator.generate()
+        let result = try await generator.generate()
         #expect(result == "\"ab\"")
     }
 
-    @Test func eosStopsGenerationAndReturnsPartialOutput() throws {
+    @Test func eosStopsGenerationAndReturnsPartialOutput() async throws {
         let maps = baseTokenMaps()
         let stringNode = GenerationSchema.StringNode(
             description: nil,
@@ -193,7 +193,7 @@ struct StructuredGenerationTests {
         )
 
         var generator = try ConstrainedJSONGenerator(backend: backend, schema: schema)
-        let result = try generator.generate()
+        let result = try await generator.generate()
         #expect(result == "\"a")
     }
 
@@ -228,7 +228,7 @@ struct StructuredGenerationTests {
         }
     }
 
-    @Test func outputMatchesDecodedTokens() throws {
+    @Test func outputMatchesDecodedTokens() async throws {
         let maps = baseTokenMaps()
         let stringNode = GenerationSchema.StringNode(
             description: nil,
@@ -250,11 +250,11 @@ struct StructuredGenerationTests {
         let capture = backend.capture
 
         var generator = try ConstrainedJSONGenerator(backend: backend, schema: schema)
-        let result = try generator.generate()
+        let result = try await generator.generate()
         #expect(result == capture.decodedText)
     }
 
-    @Test func negativeIntegerWithinRange() throws {
+    @Test func negativeIntegerWithinRange() async throws {
         let maps = baseTokenMaps()
         let numberNode = GenerationSchema.NumberNode(
             description: nil,
@@ -276,11 +276,11 @@ struct StructuredGenerationTests {
         )
 
         var generator = try ConstrainedJSONGenerator(backend: backend, schema: schema)
-        let result = try generator.generate()
+        let result = try await generator.generate()
         #expect(result == "-1")
     }
 
-    @Test func decimalOutOfRangeThrows() throws {
+    @Test func decimalOutOfRangeThrows() async throws {
         let maps = baseTokenMaps()
         let numberNode = GenerationSchema.NumberNode(
             description: nil,
@@ -303,7 +303,7 @@ struct StructuredGenerationTests {
 
         var generator = try ConstrainedJSONGenerator(backend: backend, schema: schema)
         do {
-            _ = try generator.generate()
+            _ = try await generator.generate()
             Issue.record("Expected number out-of-range error.")
         } catch let error as ConstrainedGenerationError {
             guard case .numberOutOfRange = error else {
@@ -313,7 +313,7 @@ struct StructuredGenerationTests {
         }
     }
 
-    @Test func tokenBudgetExceededThrows() throws {
+    @Test func tokenBudgetExceededThrows() async throws {
         let maps = baseTokenMaps()
         let stringNode = GenerationSchema.StringNode(
             description: nil,
@@ -332,7 +332,7 @@ struct StructuredGenerationTests {
 
         var generator = try ConstrainedJSONGenerator(backend: backend, schema: schema)
         do {
-            _ = try generator.generate()
+            _ = try await generator.generate()
             Issue.record("Expected token budget exceeded error.")
         } catch let error as ConstrainedGenerationError {
             guard case .tokenBudgetExceeded = error else {
@@ -342,7 +342,7 @@ struct StructuredGenerationTests {
         }
     }
 
-    @Test func anyOfSingleVariantUsesOnlyChoice() throws {
+    @Test func anyOfSingleVariantUsesOnlyChoice() async throws {
         let maps = baseTokenMaps()
         let stringNode = GenerationSchema.StringNode(
             description: nil,
@@ -363,7 +363,7 @@ struct StructuredGenerationTests {
         )
 
         var generator = try ConstrainedJSONGenerator(backend: backend, schema: schema)
-        let result = try generator.generate()
+        let result = try await generator.generate()
         #expect(result == "\"a\"")
     }
 
@@ -398,7 +398,7 @@ struct StructuredGenerationTests {
         }
     }
 
-    @Test func invalidArrayBoundsThrows() throws {
+    @Test func invalidArrayBoundsThrows() async throws {
         let maps = baseTokenMaps()
         let arrayNode = GenerationSchema.ArrayNode(
             description: nil,
@@ -418,7 +418,7 @@ struct StructuredGenerationTests {
 
         var generator = try ConstrainedJSONGenerator(backend: backend, schema: schema)
         do {
-            _ = try generator.generate()
+            _ = try await generator.generate()
             Issue.record("Expected invalid array bounds error.")
         } catch let error as ConstrainedGenerationError {
             guard case .invalidArrayBounds = error else {
@@ -428,7 +428,7 @@ struct StructuredGenerationTests {
         }
     }
 
-    @Test func arrayCountIsDeterministic() throws {
+    @Test func arrayCountIsDeterministic() async throws {
         let maps = baseTokenMaps()
         let arrayNode = GenerationSchema.ArrayNode(
             description: nil,
@@ -447,7 +447,7 @@ struct StructuredGenerationTests {
         )
 
         var generator = try ConstrainedJSONGenerator(backend: backend, schema: schema)
-        let result = try generator.generate()
+        let result = try await generator.generate()
         #expect(result == "[\"a\",\"a\",\"a\"]")
     }
 }

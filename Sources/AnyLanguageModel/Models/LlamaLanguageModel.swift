@@ -532,7 +532,7 @@ import Foundation
                 )
             } else {
                 let maxTokens = structuredOptions.maximumResponseTokens ?? 512
-                let jsonString = try generateStructuredJSON(
+                let jsonString = try await generateStructuredJSON(
                     context: context,
                     prompt: fullPrompt,
                     schema: type.generationSchema,
@@ -921,7 +921,7 @@ import Foundation
             schema: GenerationSchema,
             maxTokens: Int,
             options: ResolvedGenerationOptions
-        ) throws -> String {
+        ) async throws -> String {
             guard let vocab = llama_model_get_vocab(model!) else {
                 throw LlamaLanguageModelError.contextInitializationFailed
             }
@@ -965,7 +965,7 @@ import Foundation
             let vocabSize = Int(llama_vocab_n_tokens(vocab))
             let initialPosition: Int32 = hasEncoder ? 1 : batch.n_tokens
 
-            return try withUnsafeMutablePointer(to: &batch) { batchPointer in
+            return try await withUnsafeMutablePointer(to: &batch) { batchPointer in
                 let backend = LlamaTokenBackend(
                     context: context,
                     vocab: vocab,
@@ -978,7 +978,7 @@ import Foundation
                     tokenToTextFn: { [self] token in self.tokenToText(vocab: vocab, token: llama_token(token)) }
                 )
                 var generator = try ConstrainedJSONGenerator(backend: backend, schema: schema)
-                return try generator.generate()
+                return try await generator.generate()
             }
         }
 
@@ -1080,7 +1080,7 @@ import Foundation
                 tokenToTextFn(token)
             }
 
-            mutating func decode(_ token: Int) throws {
+            mutating func decode(_ token: Int) async throws {
                 let llamaToken = llama_token(token)
 
                 batch.pointee.n_tokens = 1
@@ -1105,7 +1105,7 @@ import Foundation
                 }
             }
 
-            mutating func sample(from allowedTokens: Set<Int>) throws -> Int {
+            mutating func sample(from allowedTokens: Set<Int>) async throws -> Int {
                 guard let logits = llama_get_logits(context) else {
                     return eosToken
                 }

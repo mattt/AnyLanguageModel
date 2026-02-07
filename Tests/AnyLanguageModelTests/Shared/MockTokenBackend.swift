@@ -70,12 +70,12 @@ struct MockTokenBackend: TokenBackend {
         specialTokens.contains(token)
     }
 
-    mutating func decode(_ token: Int) throws {
+    mutating func decode(_ token: Int) async throws {
         capture.record(token: token)
         remainingTokens -= 1
     }
 
-    mutating func sample(from allowedTokens: Set<Int>) throws -> Int {
+    mutating func sample(from allowedTokens: Set<Int>) async throws -> Int {
         guard !allowedTokens.isEmpty else {
             throw ConstrainedGenerationError.tokenizationFailed
         }
