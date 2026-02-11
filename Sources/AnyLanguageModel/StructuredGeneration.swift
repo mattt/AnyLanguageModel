@@ -10,8 +10,8 @@ protocol TokenBackend {
     func tokenize(_ text: String) throws -> [Int]
     func tokenText(_ token: Int) -> String?
     func isSpecialToken(_ token: Int) -> Bool
-    mutating func decode(_ token: Int) throws
-    mutating func sample(from allowedTokens: Set<Int>) throws -> Int
+    mutating func decode(_ token: Int) async throws
+    mutating func sample(from allowedTokens: Set<Int>) async throws -> Int
 
     var eosToken: Int { get }
     var endTokens: Set<Int> { get }
@@ -125,9 +125,9 @@ struct ConstrainedJSONGenerator<Backend: TokenBackend> {
     /// - Returns: A JSON string that satisfies the schema. If the backend emits
     ///   an end token early, the partial output is returned.
     /// - Throws: ``ConstrainedGenerationError`` if generation fails.
-    mutating func generate() throws -> String {
+    mutating func generate() async throws -> String {
         do {
-            return try generateNode(schema.root)
+            return try await generateNode(schema.root)
         } catch let error as ConstrainedGenerationError {
             if case .earlyTermination(let partial) = error {
                 return partial
@@ -201,6 +201,7 @@ struct ConstrainedJSONGenerator<Backend: TokenBackend> {
     private static func buildValidIntegerTokens(backend: Backend) -> Set<Int> {
         var allowed = Set<Int>()
         for token in 0 ..< backend.vocabSize {
+            if backend.isSpecialToken(token) { continue }
             guard let text = backend.tokenText(token), !text.isEmpty else { continue }
             if text.allSatisfy({ $0.isNumber || $0 == "-" }),
                 text.contains(where: { $0.isNumber })
@@ -214,6 +215,7 @@ struct ConstrainedJSONGenerator<Backend: TokenBackend> {
     private static func buildValidDecimalTokens(backend: Backend) -> Set<Int> {
         var allowed = Set<Int>()
         for token in 0 ..< backend.vocabSize {
+            if backend.isSpecialToken(token) { continue }
             guard let text = backend.tokenText(token), !text.isEmpty else { continue }
             if text.allSatisfy({ $0.isNumber || $0 == "-" || $0 == "." }),
                 text.contains(where: { $0.isNumber })
@@ -224,12 +226,12 @@ struct ConstrainedJSONGenerator<Backend: TokenBackend> {
         return allowed
     }
 
-    private mutating func emit(_ text: String) throws -> String {
+    private mutating func emit(_ text: String) async throws -> String {
         for token in try backend.tokenize(text) {
             guard backend.remainingTokens > 0 else {
                 throw ConstrainedGenerationError.tokenBudgetExceeded
             }
-            try backend.decode(token)
+            try await backend.decode(token)
         }
         emittedText += text
         return text
@@ -244,13 +246,13 @@ struct ConstrainedJSONGenerator<Backend: TokenBackend> {
         return min(remainingAfterClosingQuote, perStringLimit)
     }
 
-    private mutating func generateFreeString(maxTokens: Int) throws -> String {
+    private mutating func generateFreeString(maxTokens: Int) async throws -> String {
         var result = ""
         var generated = 0
 
         while backend.remainingTokens > 0, generated < maxTokens {
             let allowed = result.isEmpty ? stringInitialAllowedTokens : stringContinuationAllowedTokens
-            let token = try backend.sample(from: allowed)
+            let token = try await backend.sample(from: allowed)
             if backend.endTokens.contains(token) {
                 throw ConstrainedGenerationError.earlyTermination(emittedText)
             }
@@ -260,13 +262,13 @@ struct ConstrainedJSONGenerator<Backend: TokenBackend> {
             result += text
             emittedText += text
             generated += 1
-            try backend.decode(token)
+            try await backend.decode(token)
         }
 
         return result
     }
 
-    private mutating func generateChoice(_ candidates: [String]) throws -> String {
+    private mutating func generateChoice(_ candidates: [String]) async throws -> String {
         guard !candidates.isEmpty else {
             throw ConstrainedGenerationError.tokenizationFailed
         }
@@ -284,7 +286,7 @@ struct ConstrainedJSONGenerator<Backend: TokenBackend> {
         if hasEmptyCandidate || hasPrefixCollision {
             let chosen = deterministicChoice(from: candidates)
             if !chosen.isEmpty {
-                _ = try emit(chosen)
+                _ = try await emit(chosen)
             }
             return chosen
         }
@@ -303,14 +305,14 @@ struct ConstrainedJSONGenerator<Backend: TokenBackend> {
                 }
             )
 
-            let token = try backend.sample(from: allowed)
+            let token = try await backend.sample(from: allowed)
             if backend.endTokens.contains(token) {
                 throw ConstrainedGenerationError.earlyTermination(emittedText)
             }
             let text = backend.tokenText(token) ?? ""
             emitted += text
             emittedText += text
-            try backend.decode(token)
+            try await backend.decode(token)
 
             prefixes = prefixes.filter { $0.count > position && $0[position] == token }
             position += 1
@@ -337,14 +339,19 @@ struct ConstrainedJSONGenerator<Backend: TokenBackend> {
         return min(backend.remainingTokens, limit)
     }
 
-    private mutating func generateNumber(_ node: GenerationSchema.NumberNode) throws -> String {
+    private mutating func generateNumber(_ node: GenerationSchema.NumberNode) async throws -> String {
         let allowedTokens = node.integerOnly ? integerTerminators : doubleTerminators
+        let numericTokens = allowedTokens.subtracting(basicTerminators)
         var result = ""
         let maxTokens = maxNumberTokens(for: node)
         var generatedTokens = 0
 
         while backend.remainingTokens > 0, generatedTokens < maxTokens {
-            let token = try backend.sample(from: allowedTokens)
+            let candidates = result.isEmpty ? numericTokens : allowedTokens
+            guard !candidates.isEmpty else {
+                throw ConstrainedGenerationError.tokenizationFailed
+            }
+            let token = try await backend.sample(from: candidates)
             if backend.endTokens.contains(token) {
                 throw ConstrainedGenerationError.earlyTermination(emittedText)
             }
@@ -354,7 +361,7 @@ struct ConstrainedJSONGenerator<Backend: TokenBackend> {
             result += text
             emittedText += text
             generatedTokens += 1
-            try backend.decode(token)
+            try await backend.decode(token)
         }
 
         guard !result.isEmpty else {
@@ -389,58 +396,58 @@ struct ConstrainedJSONGenerator<Backend: TokenBackend> {
         }
     }
 
-    private mutating func generateNode(_ node: GenerationSchema.Node) throws -> String {
+    private mutating func generateNode(_ node: GenerationSchema.Node) async throws -> String {
         guard backend.remainingTokens > 0 else {
             throw ConstrainedGenerationError.tokenBudgetExceeded
         }
 
         switch node {
         case .object(let objectNode):
-            return try generateObject(objectNode)
+            return try await generateObject(objectNode)
         case .array(let arrayNode):
-            return try generateArray(arrayNode)
+            return try await generateArray(arrayNode)
         case .string(let stringNode):
-            return try generateString(stringNode)
+            return try await generateString(stringNode)
         case .number(let numberNode):
-            return try generateNumber(numberNode)
+            return try await generateNumber(numberNode)
         case .boolean:
-            return try generateChoice(["true", "false"])
+            return try await generateChoice(["true", "false"])
         case .ref(let typeName):
             guard let referenced = schema.defs[typeName] else {
                 throw ConstrainedGenerationError.missingReference(typeName)
             }
-            return try generateNode(referenced)
+            return try await generateNode(referenced)
         case .anyOf(let variants):
             guard !variants.isEmpty else {
                 throw ConstrainedGenerationError.emptyAnyOf
             }
             if variants.count == 1 {
-                return try generateNode(variants[0])
+                return try await generateNode(variants[0])
             }
             // Choose the first variant to keep selection deterministic.
-            return try generateNode(variants[0])
+            return try await generateNode(variants[0])
         }
     }
 
-    private mutating func generateObject(_ node: GenerationSchema.ObjectNode) throws -> String {
+    private mutating func generateObject(_ node: GenerationSchema.ObjectNode) async throws -> String {
         let keys = node.properties.keys.sorted()
         let includedKeys = keys.filter { shouldIncludeOptionalProperty($0, required: node.required) }
-        var output = try emit("{")
+        var output = try await emit("{")
 
         for (index, key) in includedKeys.enumerated() {
-            output += try emit("\"\(key)\":")
-            output += try generateNode(node.properties[key] ?? .string(.init()))
+            output += try await emit("\"\(key)\":")
+            output += try await generateNode(node.properties[key] ?? .string(.init()))
 
             if index < includedKeys.count - 1 {
-                output += try emit(",")
+                output += try await emit(",")
             }
         }
 
-        output += try emit("}")
+        output += try await emit("}")
         return output
     }
 
-    private mutating func generateArray(_ node: GenerationSchema.ArrayNode) throws -> String {
+    private mutating func generateArray(_ node: GenerationSchema.ArrayNode) async throws -> String {
         // Derive a default item count from the total token budget when the schema
         // does not specify explicit minItems/maxItems. We use a small fraction of the
         // budget and clamp it to a reasonable range to avoid overlong arrays.
@@ -464,21 +471,21 @@ struct ConstrainedJSONGenerator<Backend: TokenBackend> {
         } else {
             count = defaultCount
         }
-        var output = try emit("[")
+        var output = try await emit("[")
 
         for index in 0 ..< count {
-            output += try generateNode(node.items)
+            output += try await generateNode(node.items)
             if index < count - 1 {
-                output += try emit(",")
+                output += try await emit(",")
             }
         }
 
-        output += try emit("]")
+        output += try await emit("]")
         return output
     }
 
-    private mutating func generateString(_ node: GenerationSchema.StringNode) throws -> String {
-        var output = try emit("\"")
+    private mutating func generateString(_ node: GenerationSchema.StringNode) async throws -> String {
+        var output = try await emit("\"")
         let content: String
         let pattern = node.pattern
         let regex = try pattern.map { try compilePattern($0) }
@@ -496,9 +503,9 @@ struct ConstrainedJSONGenerator<Backend: TokenBackend> {
             } else {
                 applicableChoices = choices
             }
-            content = try generateChoice(applicableChoices)
+            content = try await generateChoice(applicableChoices)
         } else {
-            content = try generateFreeString(maxTokens: maxFreeStringTokens())
+            content = try await generateFreeString(maxTokens: maxFreeStringTokens())
         }
 
         if let pattern, let regex {
@@ -510,7 +517,7 @@ struct ConstrainedJSONGenerator<Backend: TokenBackend> {
         }
 
         output += content
-        output += try emit("\"")
+        output += try await emit("\"")
         return output
     }
 

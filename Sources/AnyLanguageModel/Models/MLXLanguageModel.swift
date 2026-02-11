@@ -829,7 +829,7 @@ import Foundation
         )
 
         var generator = try ConstrainedJSONGenerator(backend: backend, schema: schema)
-        let json = try generator.generate()
+        let json = try await generator.generate()
         // Ensure pending MLX operations complete before returning JSON.
         // This synchronization can be a performance cost if called frequently.
         Stream().synchronize()
@@ -1021,7 +1021,7 @@ import Foundation
             return decoded.isEmpty ? nil : decoded
         }
 
-        mutating func decode(_ token: Int) throws {
+        mutating func decode(_ token: Int) async throws {
             let inputText = MLXLMCommon.LMInput.Text(tokens: MLXArray([Int32(token)]))
             let output = model(
                 inputText[text: .newAxis],
@@ -1038,7 +1038,7 @@ import Foundation
             }
         }
 
-        mutating func sample(from allowedTokens: Set<Int>) throws -> Int {
+        mutating func sample(from allowedTokens: Set<Int>) async throws -> Int {
             guard !allowedTokens.isEmpty else {
                 throw ConstrainedGenerationError.tokenizationFailed
             }
