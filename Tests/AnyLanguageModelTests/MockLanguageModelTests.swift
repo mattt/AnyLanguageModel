@@ -2,6 +2,37 @@ import Testing
 
 @testable import AnyLanguageModel
 
+private struct ToolSchemaOptOutTool: Tool {
+    let name = "schemaOptOutTool"
+    let description = "A tool that opts out of schema injection."
+    let includesSchemaInInstructions = false
+
+    @Generable
+    struct Arguments {
+        @Guide(description: "A value to echo")
+        var value: String
+    }
+
+    func call(arguments: Arguments) async throws -> String {
+        arguments.value
+    }
+}
+
+private func waitUntil(
+    timeout: Duration = .milliseconds(500),
+    pollInterval: Duration = .milliseconds(5),
+    _ condition: @autoclosure () -> Bool
+) async throws -> Bool {
+    let deadline = ContinuousClock.now + timeout
+    while !condition() {
+        if ContinuousClock.now >= deadline {
+            return false
+        }
+        try await Task.sleep(for: pollInterval)
+    }
+    return true
+}
+
 @Suite("MockLanguageModel")
 struct MockLanguageModelTests {
     @Test func fixedResponse() async throws {
@@ -69,6 +100,92 @@ struct MockLanguageModelTests {
         }
     }
 
+    @Test func instructionsOnlyIncludeToolsThatOptInToSchemaInjection() {
+        let model = MockLanguageModel.fixed("ok")
+        let tools: [any Tool] = [WeatherTool(), ToolSchemaOptOutTool()]
+        let session = LanguageModelSession(
+            model: model,
+            tools: tools,
+            instructions: "Use tools when appropriate."
+        )
+
+        #expect(session.transcript.count == 1)
+        guard case let .instructions(instructionsEntry) = session.transcript[0] else {
+            Issue.record("First entry should be instructions")
+            return
+        }
+
+        #expect(instructionsEntry.toolDefinitions.count == 1)
+        #expect(instructionsEntry.toolDefinitions.first?.name == "getWeather")
+    }
+
+    @Test func transcriptAndInstructionsInitHaveEquivalentToolDefinitionBehavior() {
+        let model = MockLanguageModel.fixed("ok")
+        let tools: [any Tool] = [WeatherTool(), ToolSchemaOptOutTool()]
+        let expectedToolDefinitions =
+            tools
+            .filter(\.includesSchemaInInstructions)
+            .map { Transcript.ToolDefinition(tool: $0) }
+
+        let instructionsSession = LanguageModelSession(
+            model: model,
+            tools: tools,
+            instructions: "Use tools when appropriate."
+        )
+
+        let explicitTranscript = Transcript(entries: [
+            .instructions(
+                Transcript.Instructions(
+                    segments: [.text(.init(content: "Use tools when appropriate."))],
+                    toolDefinitions: expectedToolDefinitions
+                )
+            )
+        ])
+        let transcriptSession = LanguageModelSession(
+            model: model,
+            tools: tools,
+            transcript: explicitTranscript
+        )
+
+        guard case let .instructions(instructionsEntry) = instructionsSession.transcript[0] else {
+            Issue.record("First instructions-based entry should be instructions")
+            return
+        }
+        guard case let .instructions(transcriptEntry) = transcriptSession.transcript[0] else {
+            Issue.record("First transcript-based entry should be instructions")
+            return
+        }
+
+        #expect(instructionsEntry.toolDefinitions == transcriptEntry.toolDefinitions)
+    }
+
+    @Test func explicitTranscriptInstructionsArePreservedWhenToolsOptOut() {
+        let model = MockLanguageModel.fixed("ok")
+        let tools: [any Tool] = [WeatherTool(), ToolSchemaOptOutTool()]
+        let explicitToolDefinitions = tools.map { Transcript.ToolDefinition(tool: $0) }
+        let transcript = Transcript(entries: [
+            .instructions(
+                Transcript.Instructions(
+                    segments: [.text(.init(content: "Custom instructions."))],
+                    toolDefinitions: explicitToolDefinitions
+                )
+            )
+        ])
+
+        let session = LanguageModelSession(
+            model: model,
+            tools: tools,
+            transcript: transcript
+        )
+
+        guard case let .instructions(entry) = session.transcript[0] else {
+            Issue.record("First entry should be instructions")
+            return
+        }
+
+        #expect(entry.toolDefinitions == explicitToolDefinitions)
+    }
+
     @Test func unavailable() async throws {
         let model = MockLanguageModel.unavailable
 
@@ -91,8 +208,7 @@ struct MockLanguageModelTests {
             try await asyncSession.respond(to: "Async test")
         }
 
-        try await Task.sleep(for: .milliseconds(50))
-        #expect(asyncSession.isResponding == true)
+        #expect(try await waitUntil(asyncSession.isResponding == true))
 
         _ = try await asyncTask.value
         try await Task.sleep(for: .milliseconds(10))
@@ -112,8 +228,7 @@ struct MockLanguageModelTests {
             for try await _ in stream {}
         }
 
-        try await Task.sleep(for: .milliseconds(50))
-        #expect(streamSession.isResponding == true)
+        #expect(try await waitUntil(streamSession.isResponding == true))
 
         _ = try await streamTask.value
         try await Task.sleep(for: .milliseconds(10))
