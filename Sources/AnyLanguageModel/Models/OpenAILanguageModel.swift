@@ -1050,59 +1050,60 @@ private enum Responses {
                 outputs.append(object)
 
             case .tool(let id):
-                let toolMessage = msg
-                // Wrap user content into a single top-level message as required by Responses API
-                var contentBlocks: [JSONValue]
-                switch toolMessage.content {
+                let outputValue: JSONValue
+                switch msg.content {
                 case .text(let text):
-                    contentBlocks = [
-                        .object(["type": .string("input_text"), "text": .string(text)])
-                    ]
+                    outputValue = .string(text)
                 case .blocks(let blocks):
-                    contentBlocks = blocks.map { block in
-                        switch block {
-                        case .text(let text):
-                            return .object(["type": .string("input_text"), "text": .string(text)])
-                        case .imageURL(let url):
-                            return .object([
-                                "type": .string("input_image"),
-                                "image_url": .object(["url": .string(url)]),
-                            ])
+                    outputValue = .array(
+                        blocks.map { block in
+                            switch block {
+                            case .text(let text):
+                                return .object(["type": .string("input_text"), "text": .string(text)])
+                            case .imageURL(let url):
+                                return .object([
+                                    "type": .string("input_image"),
+                                    "image_url": .string(url),
+                                ])
+                            }
                         }
-                    }
-                }
-                let outputString: String
-                if contentBlocks.count > 1 {
-                    let encoder = JSONEncoder()
-                    if let data = try? encoder.encode(JSONValue.array(contentBlocks)),
-                        let str = String(data: data, encoding: .utf8)
-                    {
-                        outputString = str
-                    } else {
-                        outputString = "[]"
-                    }
-                } else if let block = contentBlocks.first {
-                    let encoder = JSONEncoder()
-                    if let data = try? encoder.encode(block),
-                        let str = String(data: data, encoding: .utf8)
-                    {
-                        outputString = str
-                    } else {
-                        outputString = "{}"
-                    }
-                } else {
-                    outputString = "{}"
+                    )
                 }
                 outputs.append(
                     .object([
                         "type": .string("function_call_output"),
                         "call_id": .string(id),
-                        "output": .string(outputString),
+                        "output": outputValue,
                     ])
                 )
 
             case .raw(rawContent: let rawContent):
-                outputs.append(rawContent)
+                // Convert Chat Completions assistant+tool_calls to Responses API function_call items
+                if case .object(let assistantMessageObject) = rawContent,
+                    case .string(let messageRole) = assistantMessageObject["role"],
+                    messageRole == "assistant",
+                    case .array(let assistantToolCalls) = assistantMessageObject["tool_calls"]
+                {
+                    for assistantToolCall in assistantToolCalls {
+                        if case .object(let toolCallObject) = assistantToolCall,
+                            case .string(let toolCallID) = toolCallObject["id"],
+                            case .object(let functionCallObject) = toolCallObject["function"],
+                            case .string(let functionName) = functionCallObject["name"],
+                            case .string(let functionArguments) = functionCallObject["arguments"]
+                        {
+                            outputs.append(
+                                .object([
+                                    "type": .string("function_call"),
+                                    "call_id": .string(toolCallID),
+                                    "name": .string(functionName),
+                                    "arguments": .string(functionArguments),
+                                ])
+                            )
+                        }
+                    }
+                } else {
+                    outputs.append(rawContent)
+                }
 
             case .system:
                 let systemMessage = msg
