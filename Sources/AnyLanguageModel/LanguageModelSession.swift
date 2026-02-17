@@ -3,8 +3,17 @@ import Observation
 
 @Observable
 public final class LanguageModelSession: @unchecked Sendable {
-    public private(set) var isResponding: Bool = false
-    public private(set) var transcript: Transcript
+    public var isResponding: Bool {
+        access(keyPath: \.isResponding)
+        return state.access { $0.isResponding }
+    }
+
+    public var transcript: Transcript {
+        access(keyPath: \.transcript)
+        return state.access { $0.transcript }
+    }
+
+    @ObservationIgnored private let state: Locked<State>
 
     private let model: any LanguageModel
     public let tools: [any Tool]
@@ -19,8 +28,6 @@ public final class LanguageModelSession: @unchecked Sendable {
     ///   and using it means your code is no longer drop-in compatible
     ///   with the Foundation Models framework.
     @ObservationIgnored public var toolExecutionDelegate: (any ToolExecutionDelegate)?
-
-    @ObservationIgnored private let respondingState = RespondingState()
 
     public convenience init(
         model: any LanguageModel,
@@ -87,37 +94,33 @@ public final class LanguageModelSession: @unchecked Sendable {
             }
         }
 
-        self.transcript = finalTranscript
+        self.state = .init(.init(finalTranscript))
     }
 
     public func prewarm(promptPrefix: Prompt? = nil) {
         model.prewarm(for: self, promptPrefix: promptPrefix)
     }
 
-    nonisolated private func beginResponding() async {
-        let count = await respondingState.increment()
-        let active = count > 0
-        await MainActor.run {
-            self.isResponding = active
+    nonisolated private func beginResponding() {
+        withMutation(keyPath: \.isResponding) {
+            state.access { $0.beginResponding() }
         }
     }
 
-    nonisolated private func endResponding() async {
-        let count = await respondingState.decrement()
-        let active = count > 0
-        await MainActor.run {
-            self.isResponding = active
+    nonisolated private func endResponding() {
+        withMutation(keyPath: \.isResponding) {
+            state.access { $0.endResponding() }
         }
     }
 
     nonisolated private func wrapRespond<T>(_ operation: () async throws -> T) async throws -> T {
-        await beginResponding()
+        beginResponding()
         do {
             let result = try await operation()
-            await endResponding()
+            endResponding()
             return result
         } catch {
-            await endResponding()
+            endResponding()
             throw error
         }
     }
@@ -130,7 +133,7 @@ public final class LanguageModelSession: @unchecked Sendable {
         let relay = AsyncThrowingStream<ResponseStream<Content>.Snapshot, any Error> { continuation in
             let stream = upstream
             Task {
-                await session.beginResponding()
+                session.beginResponding()
                 var lastSnapshot: ResponseStream<Content>.Snapshot?
                 do {
                     for try await snapshot in stream {
@@ -155,14 +158,14 @@ public final class LanguageModelSession: @unchecked Sendable {
                                 segments: [.text(.init(content: textContent))]
                             )
                         )
-                        await MainActor.run {
-                            session.transcript.append(responseEntry)
+                        session.withMutation(keyPath: \.transcript) {
+                            session.state.access { $0.transcript.append(responseEntry) }
                         }
                     }
                 } catch {
                     continuation.finish(throwing: error)
                 }
-                await session.endResponding()
+                session.endResponding()
             }
         }
         return ResponseStream(stream: relay)
@@ -205,8 +208,8 @@ public final class LanguageModelSession: @unchecked Sendable {
                     responseFormat: nil
                 )
             )
-            await MainActor.run {
-                self.transcript.append(promptEntry)
+            withMutation(keyPath: \.transcript) {
+                state.access { $0.transcript.append(promptEntry) }
             }
 
             let response = try await model.respond(
@@ -233,9 +236,11 @@ public final class LanguageModelSession: @unchecked Sendable {
             )
 
             // Add tool entries and response to transcript
-            await MainActor.run {
-                self.transcript.append(contentsOf: response.transcriptEntries)
-                self.transcript.append(responseEntry)
+            withMutation(keyPath: \.transcript) {
+                state.access { state in
+                    state.transcript.append(contentsOf: response.transcriptEntries)
+                    state.transcript.append(responseEntry)
+                }
             }
 
             return response
@@ -256,7 +261,9 @@ public final class LanguageModelSession: @unchecked Sendable {
                 responseFormat: nil
             )
         )
-        transcript.append(promptEntry)
+        withMutation(keyPath: \.transcript) {
+            state.access { $0.transcript.append(promptEntry) }
+        }
 
         return wrapStream(
             model.streamResponse(
@@ -550,8 +557,8 @@ extension LanguageModelSession {
                     responseFormat: nil
                 )
             )
-            await MainActor.run {
-                self.transcript.append(promptEntry)
+            withMutation(keyPath: \.transcript) {
+                state.access { $0.transcript.append(promptEntry) }
             }
 
             // Extract text content for the Prompt parameter
@@ -581,9 +588,11 @@ extension LanguageModelSession {
             )
 
             // Add tool entries and response to transcript
-            await MainActor.run {
-                self.transcript.append(contentsOf: response.transcriptEntries)
-                self.transcript.append(responseEntry)
+            withMutation(keyPath: \.transcript) {
+                state.access { state in
+                    state.transcript.append(contentsOf: response.transcriptEntries)
+                    state.transcript.append(responseEntry)
+                }
             }
 
             return response
@@ -654,7 +663,9 @@ extension LanguageModelSession {
                 responseFormat: nil
             )
         )
-        transcript.append(promptEntry)
+        withMutation(keyPath: \.transcript) {
+            state.access { $0.transcript.append(promptEntry) }
+        }
 
         // Extract text content for the Prompt parameter
         let textPrompt = Prompt(prompt)
@@ -905,16 +916,21 @@ private enum ResponseStreamError: Error {
 
 // MARK: -
 
-private actor RespondingState {
+private struct State: Equatable, Sendable {
+    var transcript: Transcript
+
+    var isResponding: Bool { count > 0 }
     private var count = 0
 
-    func increment() -> Int {
-        count += 1
-        return count
+    init(_ transcript: Transcript) {
+        self.transcript = transcript
     }
 
-    func decrement() -> Int {
+    mutating func beginResponding() {
+        count += 1
+    }
+
+    mutating func endResponding() {
         count = max(0, count - 1)
-        return count
     }
 }
