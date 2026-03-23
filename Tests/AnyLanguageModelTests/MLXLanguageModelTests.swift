@@ -69,6 +69,41 @@ import Testing
             #expect(!chunks.isEmpty)
         }
 
+        @Test func multiTurnSameSession() async throws {
+            let session = LanguageModelSession(model: model)
+            let first = try await session.respond(to: "Say hello in one sentence.")
+            #expect(!first.content.isEmpty)
+
+            let second = try await session.respond(to: "Now answer with one more short sentence.")
+            #expect(!second.content.isEmpty)
+        }
+
+        @Test func rejectsConcurrentRequestsForSameSession() async throws {
+            let session = LanguageModelSession(model: model)
+            let stream = session.streamResponse(
+                to: "Count from 1 to 400 with one number per line.",
+                options: .init(maximumResponseTokens: 256)
+            )
+
+            do {
+                _ = try await session.respond(to: "This concurrent request should fail.")
+                Issue.record("Expected concurrent request to throw.")
+            } catch let error as LanguageModelSession.GenerationError {
+                switch error {
+                case .concurrentRequests:
+                    break
+                default:
+                    Issue.record("Expected .concurrentRequests, got \(error)")
+                }
+            } catch {
+                Issue.record("Expected GenerationError.concurrentRequests, got \(error)")
+            }
+
+            for try await _ in stream {
+                break
+            }
+        }
+
         @Test func withGenerationOptions() async throws {
             let session = LanguageModelSession(model: model)
 
@@ -238,6 +273,13 @@ import Testing
                 Issue.record("Expected model availability to report failedToLoad after failed request")
             }
             #expect(model.isAvailable == false)
+        }
+
+        @Test func removeAllFromCacheThenRespond() async throws {
+            await MLXLanguageModel.removeAllFromCache()
+            let session = LanguageModelSession(model: model)
+            let response = try await session.respond(to: "Say hello after cache clear")
+            #expect(!response.content.isEmpty)
         }
     }
 #endif  // MLX
