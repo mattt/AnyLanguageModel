@@ -154,7 +154,11 @@ import Testing
                 )
             ])
             let session = LanguageModelSession(model: visionModel, transcript: transcript)
-            let response = try await session.respond(to: "")
+            var options = GenerationOptions()
+            var mlxOptions = MLXLanguageModel.CustomGenerationOptions.default
+            mlxOptions.userInputProcessing = .resize(to: CGSize(width: 512, height: 512))
+            options[custom: MLXLanguageModel.self] = mlxOptions
+            let response = try await session.respond(to: "", options: options)
             #expect(!response.content.isEmpty)
         }
 
@@ -168,7 +172,11 @@ import Testing
                 )
             ])
             let session = LanguageModelSession(model: visionModel, transcript: transcript)
-            let response = try await session.respond(to: "")
+            var options = GenerationOptions()
+            var mlxOptions = MLXLanguageModel.CustomGenerationOptions.default
+            mlxOptions.userInputProcessing = .resize(to: CGSize(width: 512, height: 512))
+            options[custom: MLXLanguageModel.self] = mlxOptions
+            let response = try await session.respond(to: "", options: options)
             #expect(!response.content.isEmpty)
         }
 
@@ -253,6 +261,28 @@ import Testing
                 generating: Priority.self
             )
             #expect([Priority.low, Priority.medium, Priority.high].contains(response.content))
+        }
+
+        @Test func withAdditionalContext() async throws {
+            let session = LanguageModelSession(model: model)
+
+            var options = GenerationOptions(
+                temperature: 0.7,
+                maximumResponseTokens: 32
+            )
+            var custom = MLXLanguageModel.CustomGenerationOptions.default
+            custom.additionalContext = [
+                "user_name": JSONValue.string("Alice"),
+                "turn_count": JSONValue.int(3),
+                "verbose": JSONValue.bool(true),
+            ]
+            options[custom: MLXLanguageModel.self] = custom
+
+            let response = try await session.respond(
+                to: "Say hello",
+                options: options
+            )
+            #expect(!response.content.isEmpty)
         }
 
         @Test func unavailableForNonexistentModel() async {

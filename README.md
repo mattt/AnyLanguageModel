@@ -488,22 +488,42 @@ let response = try await session.respond {
 }
 ```
 
-You can tune MLX KV-cache behavior per request with model-specific options:
+You can tune MLX request behavior per call with model-specific options,
+including KV-cache settings and optional media preprocessing:
 
 ```swift
 var options = GenerationOptions(temperature: 0.7)
-options[custom: MLXLanguageModel.self] = .init(
-    maxKVSize: 4096,
-    kvBits: 4,
-    kvGroupSize: 64,
-    quantizedKVStart: 128
+var mlxOptions = MLXLanguageModel.CustomGenerationOptions.default
+mlxOptions.kvCache = .init(
+    maxSize: 4096,
+    bits: 4,
+    groupSize: 64,
+    quantizedStart: 128
 )
+// Apply a deterministic preprocessing step for image inputs.
+mlxOptions.userInputProcessing = .resize(to: CGSize(width: 512, height: 512))
+// Inject extra template context consumed by model-specific chat templates.
+mlxOptions.additionalContext = [
+    "user_name": .string("Alice"),
+    "turn_count": .int(3),
+    "verbose": .bool(true),
+]
+options[custom: MLXLanguageModel.self] = mlxOptions
 
 let response = try await session.respond(
     to: "Summarize this transcript",
     options: options
 )
 ```
+
+You can specify `userInputProcessing` to enforce a consistent image
+preprocessing step
+(for example, fixed dimensions for predictable latency, memory usage, and vision behavior).
+By default, images are passed through without an explicit resize override
+(`resize: nil`), so MLX applies its default media processing behavior.
+
+You can also set `additionalContext` to provide extra JSON template variables
+for model-specific chat templates.
 
 GPU cache behavior can be configured when creating the model:
 
