@@ -30,6 +30,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/huggingface/swift-transformers", from: "1.0.0"),
+        .package(url: "https://github.com/huggingface/swift-huggingface", from: "0.9.0"),
         .package(
             url: "https://github.com/mattt/EventSource",
             from: "1.3.0",
@@ -41,8 +42,7 @@ let package = Package(
         .package(url: "https://github.com/mattt/JSONSchema", from: "1.3.0"),
         .package(url: "https://github.com/mattt/llama.swift", .upToNextMajor(from: "2.7484.0")),
         .package(url: "https://github.com/mattt/PartialJSONDecoder", from: "1.0.0"),
-        // mlx-swift-lm must be >= 2.25.5 for ToolSpec/tool calls and UserInput(chat:processing:tools:).
-        .package(url: "https://github.com/ml-explore/mlx-swift-lm", from: "2.25.5"),
+        .package(url: "https://github.com/ml-explore/mlx-swift-lm", from: "3.0.0"),
         .package(url: "https://github.com/swiftlang/swift-syntax", from: "600.0.0"),
         .package(url: "https://github.com/swift-server/async-http-client.git", from: "1.24.0"),
     ],
@@ -67,6 +67,21 @@ let package = Package(
                 .product(
                     name: "MLXLMCommon",
                     package: "mlx-swift-lm",
+                    condition: .when(traits: ["MLX"])
+                ),
+                .product(
+                    name: "MLXHuggingFace",
+                    package: "mlx-swift-lm",
+                    condition: .when(traits: ["MLX"])
+                ),
+                .product(
+                    name: "HuggingFace",
+                    package: "swift-huggingface",
+                    condition: .when(traits: ["MLX"])
+                ),
+                .product(
+                    name: "Tokenizers",
+                    package: "swift-transformers",
                     condition: .when(traits: ["MLX"])
                 ),
                 .product(
