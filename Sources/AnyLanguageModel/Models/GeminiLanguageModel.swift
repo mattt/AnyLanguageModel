@@ -146,7 +146,8 @@ public struct GeminiLanguageModel: LanguageModel {
 
     public let baseURL: URL
 
-    private let tokenProvider: @Sendable () -> String
+    private let tokenProvider: @Sendable () async throws -> String
+    private let headerProvider: @Sendable () async throws -> [String: String]
 
     public let apiVersion: String
 
@@ -188,17 +189,19 @@ public struct GeminiLanguageModel: LanguageModel {
 
     private let httpSession: HTTPSession
 
-    /// Creates a new Gemini language model.
+    /// Creates a new Gemini language model with synchronous token and header providers.
     ///
     /// - Parameters:
     ///   - baseURL: The base URL for the Gemini API.
-    ///   - tokenProvider: A closure that provides the API key.
+    ///   - tokenProvider: A closure or static string providing the API key.
+    ///   - headerProvider: Custom HTTP headers or a closure that returns them.
     ///   - apiVersion: The API version to use.
     ///   - model: The model identifier.
     ///   - session: The HTTP session or client used for network requests.
     public init(
         baseURL: URL = defaultBaseURL,
         apiKey tokenProvider: @escaping @autoclosure @Sendable () -> String,
+        headers headerProvider: @escaping @autoclosure @Sendable () -> [String: String] = [:],
         apiVersion: String = defaultAPIVersion,
         model: String,
         session: HTTPSession = makeDefaultSession(),
@@ -210,6 +213,39 @@ public struct GeminiLanguageModel: LanguageModel {
 
         self.baseURL = baseURL
         self.tokenProvider = tokenProvider
+        self.headerProvider = headerProvider
+        self.apiVersion = apiVersion
+        self.model = model
+        self._thinking = .disabled
+        self._serverTools = []
+        self.httpSession = session
+    }
+
+    /// Creates a new Gemini language model with asynchronous token and header providers.
+    ///
+    /// - Parameters:
+    ///   - baseURL: The base URL for the Gemini API.
+    ///   - tokenProvider: An asynchronous closure that provides the API key.
+    ///   - headerProvider: An asynchronous closure that provides custom HTTP headers.
+    ///   - apiVersion: The API version to use.
+    ///   - model: The model identifier.
+    ///   - session: The HTTP session or client used for network requests.
+    public init(
+        baseURL: URL = defaultBaseURL,
+        apiKey tokenProvider: @escaping @Sendable () async throws -> String,
+        headers headerProvider: @escaping @Sendable () async throws -> [String: String] = { [:] },
+        apiVersion: String = defaultAPIVersion,
+        model: String,
+        session: HTTPSession = makeDefaultSession(),
+    ) {
+        var baseURL = baseURL
+        if !baseURL.path.hasSuffix("/") {
+            baseURL = baseURL.appendingPathComponent("")
+        }
+
+        self.baseURL = baseURL
+        self.tokenProvider = tokenProvider
+        self.headerProvider = headerProvider
         self.apiVersion = apiVersion
         self.model = model
         self._thinking = .disabled
@@ -221,7 +257,8 @@ public struct GeminiLanguageModel: LanguageModel {
     ///
     /// - Parameters:
     ///   - baseURL: The base URL for the Gemini API.
-    ///   - tokenProvider: A closure that provides the API key.
+    ///   - tokenProvider: A closure or static string providing the API key.
+    ///   - headerProvider: Custom HTTP headers or a closure that returns them.
     ///   - apiVersion: The API version to use.
     ///   - model: The model identifier.
     ///   - thinking: The thinking mode configuration.
@@ -239,6 +276,7 @@ public struct GeminiLanguageModel: LanguageModel {
     public init(
         baseURL: URL = defaultBaseURL,
         apiKey tokenProvider: @escaping @autoclosure @Sendable () -> String,
+        headers headerProvider: @escaping @autoclosure @Sendable () -> [String: String] = [:],
         apiVersion: String = defaultAPIVersion,
         model: String,
         thinking: CustomGenerationOptions.Thinking = .disabled,
@@ -252,6 +290,52 @@ public struct GeminiLanguageModel: LanguageModel {
 
         self.baseURL = baseURL
         self.tokenProvider = tokenProvider
+        self.headerProvider = headerProvider
+        self.apiVersion = apiVersion
+        self.model = model
+        self._thinking = thinking
+        self._serverTools = serverTools
+        self.httpSession = session
+    }
+
+    /// Creates a new Gemini language model with thinking and server tools configuration.
+    ///
+    /// - Parameters:
+    ///   - baseURL: The base URL for the Gemini API.
+    ///   - tokenProvider: An asynchronous closure providing the API key.
+    ///   - headerProvider: An asynchronous closure providing custom HTTP headers.
+    ///   - apiVersion: The API version to use.
+    ///   - model: The model identifier.
+    ///   - thinking: The thinking mode configuration.
+    ///   - serverTools: Server-side tools to enable.
+    ///   - session: The HTTP session or client used for network requests.
+    ///
+    /// - Important: This initializer is deprecated. Use the initializer without
+    ///   `thinking` and `serverTools` parameters, and pass these options through
+    ///   ``GenerationOptions`` instead.
+    @available(
+        *,
+        deprecated,
+        message: "Use init without thinking/serverTools and pass them via GenerationOptions custom options"
+    )
+    public init(
+        baseURL: URL = defaultBaseURL,
+        apiKey tokenProvider: @escaping @Sendable () async throws -> String,
+        headers headerProvider: @escaping @Sendable () async throws -> [String: String] = { [:] },
+        apiVersion: String = defaultAPIVersion,
+        model: String,
+        thinking: CustomGenerationOptions.Thinking = .disabled,
+        serverTools: [CustomGenerationOptions.ServerTool] = [],
+        session: HTTPSession = makeDefaultSession(),
+    ) {
+        var baseURL = baseURL
+        if !baseURL.path.hasSuffix("/") {
+            baseURL = baseURL.appendingPathComponent("")
+        }
+
+        self.baseURL = baseURL
+        self.tokenProvider = tokenProvider
+        self.headerProvider = headerProvider
         self.apiVersion = apiVersion
         self.model = model
         self._thinking = thinking
@@ -276,7 +360,7 @@ public struct GeminiLanguageModel: LanguageModel {
             baseURL
             .appendingPathComponent(apiVersion)
             .appendingPathComponent("models/\(model):generateContent")
-        let headers = buildHeaders()
+        let headers = try await buildHeaders()
 
         let geminiTools = try buildTools(from: session.tools, serverTools: effectiveServerTools)
 
@@ -391,7 +475,7 @@ public struct GeminiLanguageModel: LanguageModel {
             continuation in
             let task = Task { @Sendable in
                 do {
-                    let headers = buildHeaders()
+                    let headers = try await buildHeaders()
 
                     let geminiTools = try buildTools(from: session.tools, serverTools: effectiveServerTools)
 
@@ -462,10 +546,12 @@ public struct GeminiLanguageModel: LanguageModel {
         return LanguageModelSession.ResponseStream(stream: stream)
     }
 
-    private func buildHeaders() -> [String: String] {
-        let headers: [String: String] = [
-            "x-goog-api-key": tokenProvider()
+    private func buildHeaders() async throws -> [String: String] {
+        var headers: [String: String] = [
+            "x-goog-api-key": try await tokenProvider()
         ]
+        let customHeaders = try await headerProvider()
+        headers.merge(customHeaders) { _, new in new }
 
         return headers
     }

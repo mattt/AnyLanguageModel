@@ -267,7 +267,10 @@ public struct AnthropicLanguageModel: LanguageModel {
     public let baseURL: URL
 
     /// The closure providing the API key for authentication.
-    private let tokenProvider: @Sendable () -> String
+    private let tokenProvider: @Sendable () async throws -> String
+
+    /// The closure providing custom HTTP headers.
+    private let headerProvider: @Sendable () async throws -> [String: String]
 
     /// The API version to use for requests.
     public let apiVersion: String
@@ -280,11 +283,12 @@ public struct AnthropicLanguageModel: LanguageModel {
 
     private let httpSession: HTTPSession
 
-    /// Creates an Anthropic language model.
+    /// Creates an Anthropic language model with synchronous or static token and header providers.
     ///
     /// - Parameters:
     ///   - baseURL: The base URL for the API endpoint. Defaults to Anthropic's official API.
     ///   - apiKey: Your Anthropic API key or a closure that returns it.
+    ///   - headers: Custom HTTP headers or a closure that returns them.
     ///   - apiVersion: The API version to use for requests. Defaults to `2023-06-01`.
     ///   - betas: Optional beta version(s) of the API to use.
     ///   - model: The model identifier (for example, "claude-3-5-sonnet-20241022").
@@ -292,6 +296,7 @@ public struct AnthropicLanguageModel: LanguageModel {
     public init(
         baseURL: URL = defaultBaseURL,
         apiKey tokenProvider: @escaping @autoclosure @Sendable () -> String,
+        headers headerProvider: @escaping @autoclosure @Sendable () -> [String: String] = [:],
         apiVersion: String = defaultAPIVersion,
         betas: [String]? = nil,
         model: String,
@@ -304,6 +309,40 @@ public struct AnthropicLanguageModel: LanguageModel {
 
         self.baseURL = baseURL
         self.tokenProvider = tokenProvider
+        self.headerProvider = headerProvider
+        self.apiVersion = apiVersion
+        self.betas = betas
+        self.model = model
+        self.httpSession = session
+    }
+
+    /// Creates an Anthropic language model with asynchronous token and header providers.
+    ///
+    /// - Parameters:
+    ///   - baseURL: The base URL for the API endpoint. Defaults to Anthropic's official API.
+    ///   - apiKey: An asynchronous closure that provides the Anthropic API key.
+    ///   - headers: An asynchronous closure that provides custom HTTP headers.
+    ///   - apiVersion: The API version to use for requests. Defaults to `2023-06-01`.
+    ///   - betas: Optional beta version(s) of the API to use.
+    ///   - model: The model identifier (for example, "claude-3-5-sonnet-20241022").
+    ///   - session: The HTTP session or client used for network requests.
+    public init(
+        baseURL: URL = defaultBaseURL,
+        apiKey tokenProvider: @escaping @Sendable () async throws -> String,
+        headers headerProvider: @escaping @Sendable () async throws -> [String: String] = { [:] },
+        apiVersion: String = defaultAPIVersion,
+        betas: [String]? = nil,
+        model: String,
+        session: HTTPSession = makeDefaultSession(),
+    ) {
+        var baseURL = baseURL
+        if !baseURL.path.hasSuffix("/") {
+            baseURL = baseURL.appendingPathComponent("")
+        }
+
+        self.baseURL = baseURL
+        self.tokenProvider = tokenProvider
+        self.headerProvider = headerProvider
         self.apiVersion = apiVersion
         self.betas = betas
         self.model = model
@@ -318,7 +357,7 @@ public struct AnthropicLanguageModel: LanguageModel {
         options: GenerationOptions
     ) async throws -> LanguageModelSession.Response<Content> where Content: Generable {
         let url = baseURL.appendingPathComponent("v1/messages")
-        let headers = buildHeaders()
+        let headers = try await buildHeaders()
 
         // Convert available tools to Anthropic format
         let anthropicTools: [AnthropicTool] = try session.tools.map { tool in
@@ -412,7 +451,7 @@ public struct AnthropicLanguageModel: LanguageModel {
             continuation in
             let task = Task { @Sendable in
                 do {
-                    let headers = buildHeaders()
+                    let headers = try await buildHeaders()
 
                     // Convert available tools to Anthropic format
                     let anthropicTools: [AnthropicTool] = try session.tools.map { tool in
@@ -484,15 +523,18 @@ public struct AnthropicLanguageModel: LanguageModel {
         return LanguageModelSession.ResponseStream(stream: stream)
     }
 
-    private func buildHeaders() -> [String: String] {
+    private func buildHeaders() async throws -> [String: String] {
         var headers: [String: String] = [
-            "x-api-key": tokenProvider(),
+            "x-api-key": try await tokenProvider(),
             "anthropic-version": apiVersion,
         ]
 
         if let betas = betas, !betas.isEmpty {
             headers["anthropic-beta"] = betas.joined(separator: ",")
         }
+
+        let customHeaders = try await headerProvider()
+        headers.merge(customHeaders) { _, new in new }
 
         return headers
     }
