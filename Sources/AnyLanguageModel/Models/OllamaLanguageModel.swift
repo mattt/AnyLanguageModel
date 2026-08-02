@@ -76,11 +76,7 @@ public struct OllamaLanguageModel: LanguageModel {
         includeSchemaInPrompt: Bool,
         options: GenerationOptions
     ) async throws -> LanguageModelSession.Response<Content> where Content: Generable {
-        let userSegments = extractPromptSegments(from: session, fallbackText: prompt.description)
-        let (ollamaText, ollamaImages) = convertSegmentsToOllama(userSegments)
-        let messages = [
-            OllamaMessage(role: .user, content: ollamaText, images: ollamaImages.isEmpty ? nil : ollamaImages)
-        ]
+        let messages = session.transcript.toOllamaMessages()
         let ollamaOptions = convertOptions(options)
         let ollamaTools = try session.tools.map { tool in
             try convertToolToOllamaFormat(tool)
@@ -160,11 +156,7 @@ public struct OllamaLanguageModel: LanguageModel {
         includeSchemaInPrompt: Bool,
         options: GenerationOptions
     ) -> sending LanguageModelSession.ResponseStream<Content> where Content: Generable {
-        let userSegments = extractPromptSegments(from: session, fallbackText: prompt.description)
-        let (ollamaText, ollamaImages) = convertSegmentsToOllama(userSegments)
-        let messages = [
-            OllamaMessage(role: .user, content: ollamaText, images: ollamaImages.isEmpty ? nil : ollamaImages)
-        ]
+        let messages = session.transcript.toOllamaMessages()
         let ollamaOptions = convertOptions(options)
         let url = baseURL.appendingPathComponent("api/chat")
 
@@ -439,6 +431,19 @@ private func convertSchemaToOllamaFormat(_ schema: GenerationSchema) throws -> J
     return try JSONDecoder().decode(JSONSchema.self, from: data)
 }
 
+/// Converts generated content to the plain JSON Ollama expects for tool call arguments.
+///
+/// `GeneratedContent`'s own `Codable` conformance encodes its internal representation
+/// (`kind`, `orderedKeys`, …) rather than the value it wraps, so round-trip through
+/// `jsonString` instead.
+private func fromGeneratedContent(_ content: GeneratedContent) -> JSONValue {
+    let json = content.jsonString
+    guard let value = try? JSONDecoder().decode(JSONValue.self, from: Data(json.utf8)) else {
+        return .object([:])
+    }
+    return value
+}
+
 private func toGeneratedContent(_ value: JSONValue?) throws -> GeneratedContent {
     guard let value else { return GeneratedContent(properties: [:]) }
     let data = try JSONEncoder().encode(value)
@@ -489,12 +494,95 @@ private struct OllamaMessage: Hashable, Codable, Sendable {
     let content: String
     /// Base64-encoded images. `/api/chat` carries these per message rather than at the top level.
     var images: [String]?
+    var toolCalls: [OllamaRequestToolCall]?
+    /// Names the tool a `.tool` message is answering.
+    var toolName: String?
 
     private enum CodingKeys: String, CodingKey {
         case role
         case content
         case images
+        case toolCalls = "tool_calls"
+        case toolName = "tool_name"
     }
+}
+
+/// The request-side shape of a tool call, echoed back to Ollama in the assistant turn.
+private struct OllamaRequestToolCall: Hashable, Codable, Sendable {
+    struct Function: Hashable, Codable, Sendable {
+        let name: String
+        let arguments: JSONValue
+    }
+
+    let function: Function
+}
+
+extension Transcript {
+    fileprivate func toOllamaMessages() -> [OllamaMessage] {
+        var messages: [OllamaMessage] = []
+        for entry in self {
+            switch entry {
+            case .instructions(let instructions):
+                let (text, images) = convertSegmentsToOllama(instructions.segments)
+                messages.append(
+                    OllamaMessage(role: .system, content: text, images: images.isEmpty ? nil : images)
+                )
+            case .prompt(let prompt):
+                let (text, images) = convertSegmentsToOllama(prompt.segments)
+                messages.append(
+                    OllamaMessage(role: .user, content: text, images: images.isEmpty ? nil : images)
+                )
+            case .response(let response):
+                let (text, images) = convertSegmentsToOllama(response.segments)
+                messages.append(
+                    OllamaMessage(role: .assistant, content: text, images: images.isEmpty ? nil : images)
+                )
+            case .toolCalls(let toolCalls):
+                messages.append(
+                    OllamaMessage(
+                        role: .assistant,
+                        content: "",
+                        toolCalls: toolCalls.map { call in
+                            OllamaRequestToolCall(
+                                function: .init(
+                                    name: call.toolName,
+                                    arguments: fromGeneratedContent(call.arguments)
+                                )
+                            )
+                        }
+                    )
+                )
+            case .toolOutput(let toolOutput):
+                messages.append(
+                    OllamaMessage(
+                        role: .tool,
+                        content: convertSegmentsToToolContentString(toolOutput.segments),
+                        toolName: toolOutput.toolName
+                    )
+                )
+            }
+        }
+        return messages
+    }
+}
+
+/// Flattens transcript segments into the string content a `.tool` message carries.
+///
+/// Image segments are dropped because Ollama tool results are text-only.
+private func convertSegmentsToToolContentString(_ segments: [Transcript.Segment]) -> String {
+    segments.compactMap { segment in
+        switch segment {
+        case .text(let textSegment):
+            return textSegment.content
+        case .structure(let structuredSegment):
+            switch structuredSegment.content.kind {
+            case .string(let text): return text
+            default: return structuredSegment.content.jsonString
+            }
+        case .image:
+            return nil
+        }
+    }.joined(separator: "\n")
 }
 
 private func convertSegmentsToOllama(_ segments: [Transcript.Segment]) -> (String, [String]) {
@@ -517,15 +605,6 @@ private func convertSegmentsToOllama(_ segments: [Transcript.Segment]) -> (Strin
         }
     }
     return (textParts.joined(separator: "\n"), images)
-}
-
-private func extractPromptSegments(from session: LanguageModelSession, fallbackText: String) -> [Transcript.Segment] {
-    for entry in session.transcript.reversed() {
-        if case .prompt(let p) = entry {
-            return p.segments
-        }
-    }
-    return [.text(.init(content: fallbackText))]
 }
 
 private struct ChatResponse: Decodable, Sendable {
