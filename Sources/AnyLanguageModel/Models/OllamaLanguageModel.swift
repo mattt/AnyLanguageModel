@@ -76,7 +76,6 @@ public struct OllamaLanguageModel: LanguageModel {
         includeSchemaInPrompt: Bool,
         options: GenerationOptions
     ) async throws -> LanguageModelSession.Response<Content> where Content: Generable {
-        let messages = session.transcript.toOllamaMessages()
         let ollamaOptions = convertOptions(options)
         let ollamaTools = try session.tools.map { tool in
             try convertToolToOllamaFormat(tool)
@@ -89,49 +88,76 @@ public struct OllamaLanguageModel: LanguageModel {
             ollamaFormat = try JSONValue(schema)
         }
 
-        let params = try createChatParams(
-            model: model,
-            messages: messages,
-            tools: ollamaTools.isEmpty ? nil : ollamaTools,
-            options: ollamaOptions,
-            stream: false,
-            format: ollamaFormat
-        )
-
         let url = baseURL.appendingPathComponent("api/chat")
-        let body = try JSONEncoder().encode(params)
-        let chatResponse: ChatResponse = try await httpSession.fetch(
-            .post,
-            url: url,
-            body: body,
-            dateDecodingStrategy: .iso8601WithFractionalSeconds
-        )
 
         var entries: [Transcript.Entry] = []
+        var messages = session.transcript.toOllamaMessages()
+        var text = ""
 
-        if let toolCalls = chatResponse.message.toolCalls, !toolCalls.isEmpty {
-            let resolution = try await resolveToolCalls(toolCalls, session: session)
-            switch resolution {
-            case .stop(let calls):
-                if !calls.isEmpty {
-                    entries.append(.toolCalls(Transcript.ToolCalls(calls)))
-                }
-                return LanguageModelSession.Response(
-                    content: "" as! Content,
-                    rawContent: GeneratedContent(""),
-                    transcriptEntries: ArraySlice(entries)
+        // Loop until the model responds without requesting more tool calls.
+        while true {
+            let params = try createChatParams(
+                model: model,
+                messages: messages,
+                tools: ollamaTools.isEmpty ? nil : ollamaTools,
+                options: ollamaOptions,
+                stream: false,
+                format: ollamaFormat
+            )
+
+            let body = try JSONEncoder().encode(params)
+            let chatResponse: ChatResponse = try await httpSession.fetch(
+                .post,
+                url: url,
+                body: body,
+                dateDecodingStrategy: .iso8601WithFractionalSeconds
+            )
+
+            let message = chatResponse.message
+            if let toolCalls = message.toolCalls, !toolCalls.isEmpty {
+                // Echo the assistant turn back so the model can see what it asked for.
+                messages.append(
+                    OllamaMessage(
+                        role: .assistant,
+                        content: message.content ?? "",
+                        toolCalls: toolCalls.map { $0.asRequestToolCall() }
+                    )
                 )
-            case .invocations(let invocations):
-                if !invocations.isEmpty {
-                    entries.append(.toolCalls(Transcript.ToolCalls(invocations.map(\.call))))
-                    for invocation in invocations {
-                        entries.append(.toolOutput(invocation.output))
+
+                let resolution = try await resolveToolCalls(toolCalls, session: session)
+                switch resolution {
+                case .stop(let calls):
+                    if !calls.isEmpty {
+                        entries.append(.toolCalls(Transcript.ToolCalls(calls)))
+                    }
+                    let empty = try emptyResponseContent(for: type)
+                    return LanguageModelSession.Response(
+                        content: empty.content,
+                        rawContent: empty.rawContent,
+                        transcriptEntries: ArraySlice(entries)
+                    )
+                case .invocations(let invocations):
+                    if !invocations.isEmpty {
+                        entries.append(.toolCalls(Transcript.ToolCalls(invocations.map(\.call))))
+                        for invocation in invocations {
+                            entries.append(.toolOutput(invocation.output))
+                            messages.append(
+                                OllamaMessage(
+                                    role: .tool,
+                                    content: convertSegmentsToToolContentString(invocation.output.segments),
+                                    toolName: invocation.call.toolName
+                                )
+                            )
+                        }
+                        continue
                     }
                 }
             }
+
+            text = message.content ?? ""
+            break
         }
 
-        let text = chatResponse.message.content ?? ""
         if type == String.self {
             return LanguageModelSession.Response(
                 content: text as! Content,
@@ -480,6 +506,19 @@ private func createChatParams(
     return params
 }
 
+private func emptyResponseContent<Content: Generable>(
+    for type: Content.Type
+) throws -> (content: Content, rawContent: GeneratedContent) {
+    if type == String.self {
+        let raw = GeneratedContent("")
+        return ("" as! Content, raw)
+    }
+
+    let raw = GeneratedContent(properties: [:])
+    let content = try type.init(raw)
+    return (content, raw)
+}
+
 // MARK: - Supporting Types
 
 private struct OllamaMessage: Hashable, Codable, Sendable {
@@ -637,6 +676,12 @@ private struct OllamaToolCall: Decodable, Sendable {
     let id: String?
     let type: String?
     let function: OllamaToolFunction
+
+    func asRequestToolCall() -> OllamaRequestToolCall {
+        OllamaRequestToolCall(
+            function: .init(name: function.name, arguments: function.arguments ?? .object([:]))
+        )
+    }
 }
 
 private struct OllamaToolFunction: Decodable, Sendable {
