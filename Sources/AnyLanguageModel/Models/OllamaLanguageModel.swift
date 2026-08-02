@@ -182,38 +182,40 @@ public struct OllamaLanguageModel: LanguageModel {
         includeSchemaInPrompt: Bool,
         options: GenerationOptions
     ) -> sending LanguageModelSession.ResponseStream<Content> where Content: Generable {
-        let messages = session.transcript.toOllamaMessages()
         let ollamaOptions = convertOptions(options)
         let url = baseURL.appendingPathComponent("api/chat")
 
         // Transform the newline-delimited JSON stream from Ollama into ResponseStream snapshots
         let stream: AsyncThrowingStream<LanguageModelSession.ResponseStream<Content>.Snapshot, any Error> =
             AsyncThrowingStream { continuation in
-                do {
-                    let ollamaTools = try session.tools.map { tool in
-                        try convertToolToOllamaFormat(tool)
-                    }
-                    let ollamaFormat: JSONValue?
-                    if type == String.self {
-                        ollamaFormat = nil
-                    } else {
-                        let schema = try convertSchemaToOllamaFormat(type.generationSchema)
-                        ollamaFormat = try JSONValue(schema)
-                    }
+                let task = Task {
+                    do {
+                        let ollamaTools = try session.tools.map { tool in
+                            try convertToolToOllamaFormat(tool)
+                        }
+                        let ollamaFormat: JSONValue?
+                        if type == String.self {
+                            ollamaFormat = nil
+                        } else {
+                            let schema = try convertSchemaToOllamaFormat(type.generationSchema)
+                            ollamaFormat = try JSONValue(schema)
+                        }
 
-                    let params = try createChatParams(
-                        model: model,
-                        messages: messages,
-                        tools: ollamaTools.isEmpty ? nil : ollamaTools,
-                        options: ollamaOptions,
-                        stream: true,
-                        format: ollamaFormat
-                    )
-                    let body = try JSONEncoder().encode(params)
+                        var messages = session.transcript.toOllamaMessages()
 
-                    let task = Task {
-                        // Reuse ChatResponse as each streamed line shares the same shape
-                        do {
+                        // Loop until the model responds without requesting more tool calls.
+                        while true {
+                            let params = try createChatParams(
+                                model: model,
+                                messages: messages,
+                                tools: ollamaTools.isEmpty ? nil : ollamaTools,
+                                options: ollamaOptions,
+                                stream: true,
+                                format: ollamaFormat
+                            )
+                            let body = try JSONEncoder().encode(params)
+
+                            // Reuse ChatResponse as each streamed line shares the same shape
                             let chunks =
                                 httpSession.fetchStream(
                                     .post,
@@ -223,10 +225,19 @@ public struct OllamaLanguageModel: LanguageModel {
                                 ) as AsyncThrowingStream<ChatResponse, any Error>
 
                             var partialText = ""
+                            var streamedToolCalls: [OllamaToolCall] = []
 
                             for try await chunk in chunks {
-                                if let piece = chunk.message.content {
+                                if let calls = chunk.message.toolCalls, !calls.isEmpty {
+                                    streamedToolCalls.append(contentsOf: calls)
+                                }
+
+                                if let piece = chunk.message.content, !piece.isEmpty {
                                     partialText += piece
+
+                                    // Grow the observable transcript so a Transcript-driven UI updates live.
+                                    session.growStreamingTranscript(text: partialText)
+
                                     if type == String.self {
                                         let snapshot = LanguageModelSession.ResponseStream<Content>.Snapshot(
                                             content: (partialText as! Content).asPartiallyGenerated(),
@@ -252,17 +263,58 @@ public struct OllamaLanguageModel: LanguageModel {
                                 }
                             }
 
-                            continuation.finish()
-                        } catch {
-                            continuation.finish(throwing: error)
-                        }
-                    }
+                            guard !streamedToolCalls.isEmpty else { break }
 
-                    continuation.onTermination = { _ in
-                        task.cancel()
+                            // Echo the assistant turn back so the model can see what it asked for.
+                            messages.append(
+                                OllamaMessage(
+                                    role: .assistant,
+                                    content: partialText,
+                                    toolCalls: streamedToolCalls.map { $0.asRequestToolCall() }
+                                )
+                            )
+
+                            let resolution = try await resolveToolCalls(streamedToolCalls, session: session)
+                            switch resolution {
+                            case .stop(let calls):
+                                if !calls.isEmpty {
+                                    session.appendTranscriptEntry(.toolCalls(Transcript.ToolCalls(calls)))
+                                }
+                                continuation.finish()
+                                return
+                            case .invocations(let invocations):
+                                // Nothing resolved means there is nothing to feed back, so the turn is over.
+                                guard !invocations.isEmpty else {
+                                    continuation.finish()
+                                    return
+                                }
+
+                                // Tool calls must land in the transcript before their outputs.
+                                session.appendTranscriptEntry(
+                                    .toolCalls(Transcript.ToolCalls(invocations.map(\.call)))
+                                )
+
+                                for invocation in invocations {
+                                    session.appendTranscriptEntry(.toolOutput(invocation.output))
+                                    messages.append(
+                                        OllamaMessage(
+                                            role: .tool,
+                                            content: convertSegmentsToToolContentString(invocation.output.segments),
+                                            toolName: invocation.call.toolName
+                                        )
+                                    )
+                                }
+                            }
+                        }
+
+                        continuation.finish()
+                    } catch {
+                        continuation.finish(throwing: error)
                     }
-                } catch {
-                    continuation.finish(throwing: error)
+                }
+
+                continuation.onTermination = { _ in
+                    task.cancel()
                 }
             }
 
