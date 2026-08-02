@@ -816,9 +816,9 @@ extension Transcript {
                 )
             case .toolCalls(let toolCalls):
                 let rawCalls: [JSONValue] = toolCalls.map { call in
-                    let argsStr =
-                        (try? JSONEncoder().encode(call.arguments)).flatMap { String(data: $0, encoding: .utf8) }
-                        ?? "{}"
+                    // `GeneratedContent`'s `Codable` conformance encodes its internal representation
+                    // (`kind`, `orderedKeys`, …) rather than the value it wraps, so use `jsonString`.
+                    let argsStr = call.arguments.jsonString
                     return .object([
                         "id": .string(call.id),
                         "type": .string("function_call"),
