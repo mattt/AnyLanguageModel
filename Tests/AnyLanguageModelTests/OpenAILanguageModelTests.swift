@@ -208,6 +208,63 @@ struct OpenAILanguageModelTests {
             #expect(calls.count >= 1)
         }
 
+        @Test func streamWithTools() async throws {
+            let weatherTool = spy(on: WeatherTool())
+            let session = LanguageModelSession(model: model, tools: [weatherTool])
+
+            var options = GenerationOptions()
+            options[custom: OpenAILanguageModel.self] = .init(
+                maxToolCalls: 1
+            )
+
+            let observed = try await withOpenAIRateLimitRetry {
+                () -> (snapshotCount: Int, sawToolCalls: Bool, sawToolOutput: Bool) in
+                let stream = session.streamResponse(
+                    to: "Call getWeather for San Francisco exactly once, then summarize in one sentence.",
+                    options: options
+                )
+
+                var snapshotCount = 0
+                var sawToolCalls = false
+                var sawToolOutput = false
+
+                for try await _ in stream {
+                    snapshotCount += 1
+
+                    for entry in session.transcript {
+                        switch entry {
+                        case .toolCalls:
+                            sawToolCalls = true
+                        case .toolOutput:
+                            sawToolOutput = true
+                        default:
+                            break
+                        }
+                    }
+                }
+
+                return (snapshotCount, sawToolCalls, sawToolOutput)
+            }
+
+            #expect(observed.snapshotCount > 0)
+            #expect(observed.sawToolCalls, "Expected a tool call to appear in the transcript during streaming.")
+            #expect(observed.sawToolOutput, "Expected a tool output to appear in the transcript during streaming.")
+
+            let calls = await weatherTool.calls
+            #expect(!calls.isEmpty)
+            if let firstCall = calls.first {
+                #expect(firstCall.arguments.city.localizedCaseInsensitiveContains("san"))
+            }
+
+            var foundToolOutput = false
+            for case let .toolOutput(toolOutput) in session.transcript {
+                #expect(!toolOutput.id.isEmpty)
+                #expect(toolOutput.toolName == "getWeather")
+                foundToolOutput = true
+            }
+            #expect(foundToolOutput, "Expected the 'getWeather' tool to exist in the final transcript.")
+        }
+
         @Suite("Structured Output")
         struct StructuredOutputTests {
             @Generable
@@ -424,6 +481,48 @@ struct OpenAILanguageModelTests {
                 foundToolOutput = true
             }
             #expect(foundToolOutput)
+        }
+
+        @Test func streamWithTools() async throws {
+            let weatherTool = WeatherTool()
+            let session = LanguageModelSession(model: model, tools: [weatherTool])
+
+            let stream = session.streamResponse(to: "How's the weather in San Francisco?")
+
+            var snapshots: [LanguageModelSession.ResponseStream<String>.Snapshot] = []
+
+            var toolAppearedInTranscript = false
+            var toolResponseAppearedInTranscript = false
+
+            for try await snapshot in stream {
+                snapshots.append(snapshot)
+
+                for entry in session.transcript {
+                    switch entry {
+                    case .toolCalls:
+                        toolAppearedInTranscript = true
+                    case .toolOutput:
+                        toolResponseAppearedInTranscript = true
+                    default:
+                        break
+                    }
+                }
+            }
+
+            #expect(!snapshots.isEmpty)
+            #expect(toolAppearedInTranscript, "Expected a tool call to appear in the transcript during streaming.")
+            #expect(
+                toolResponseAppearedInTranscript,
+                "Expected a tool output to appear in the transcript during streaming."
+            )
+
+            var foundToolOutput = false
+            for case let .toolOutput(toolOutput) in session.transcript {
+                #expect(!toolOutput.id.isEmpty)
+                #expect(toolOutput.toolName == "getWeather")
+                foundToolOutput = true
+            }
+            #expect(foundToolOutput, "Expected the 'getWeather' tool to exist in the final transcript.")
         }
 
         @Suite("Structured Output")
