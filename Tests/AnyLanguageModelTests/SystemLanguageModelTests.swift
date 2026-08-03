@@ -174,14 +174,13 @@ import Testing
 
             let response = try await session.respond(to: "How's the weather in San Francisco?")
 
-            #if false  // Disabled for now because transcript entries are not converted from FoundationModels for now
-                var foundToolOutput = false
-                for case let .toolOutput(toolOutput) in response.transcriptEntries {
-                    #expect(toolOutput.id == "getWeather")
-                    foundToolOutput = true
-                }
-                #expect(foundToolOutput)
-            #endif
+            var foundToolOutput = false
+            for case let .toolOutput(toolOutput) in response.transcriptEntries {
+                #expect(!toolOutput.id.isEmpty)
+                #expect(toolOutput.toolName == "getWeather")
+                foundToolOutput = true
+            }
+            #expect(foundToolOutput)
 
             let content = response.content
             #expect(content.contains("San Francisco"))

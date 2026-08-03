@@ -92,7 +92,9 @@
                 return LanguageModelSession.Response(
                     content: fmResponse.content as! Content,
                     rawContent: generatedContent,
-                    transcriptEntries: []
+                    transcriptEntries: ArraySlice(
+                        fmResponse.transcriptEntries.compactMap { toolTranscriptEntry(from: $0) }
+                    )
                 )
             } else {
                 // For non-String types, use schema-based generation
@@ -102,6 +104,10 @@
                     schema: schema,
                     includeSchemaInPrompt: includeSchemaInPrompt,
                     options: fmOptions
+                )
+
+                let toolEntries = ArraySlice(
+                    fmResponse.transcriptEntries.compactMap { toolTranscriptEntry(from: $0) }
                 )
 
                 func finalize(content: Content) -> LanguageModelSession.Response<Content> {
@@ -114,13 +120,13 @@
                         return LanguageModelSession.Response(
                             content: placeholder.content,
                             rawContent: placeholder.rawContent,
-                            transcriptEntries: []
+                            transcriptEntries: toolEntries
                         )
                     }
                     return LanguageModelSession.Response(
                         content: content,
                         rawContent: normalizedRaw,
-                        transcriptEntries: []
+                        transcriptEntries: toolEntries
                     )
                 }
 
@@ -759,6 +765,61 @@
                     return nil
                 }
             }
+        }
+    }
+
+    // MARK: - FoundationModels to AnyLanguageModel Conversions
+
+    /// Converts the tool-related entries of a FoundationModels transcript into their
+    /// AnyLanguageModel equivalents.
+    ///
+    /// Returns `nil` for every other entry kind. Instructions, prompts, and responses are owned by
+    /// ``LanguageModelSession`` itself, so mirroring them here would duplicate transcript entries.
+    @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
+    private func toolTranscriptEntry(from entry: FoundationModels.Transcript.Entry) -> Transcript.Entry? {
+        if case .toolCalls(let fmToolCalls) = entry {
+            let calls = fmToolCalls.compactMap { call -> Transcript.ToolCall? in
+                guard let arguments = try? AnyLanguageModel.GeneratedContent(call.arguments) else { return nil }
+                return Transcript.ToolCall(id: call.id, toolName: call.toolName, arguments: arguments)
+            }
+            guard !calls.isEmpty else { return nil }
+            return .toolCalls(Transcript.ToolCalls(id: fmToolCalls.id, calls))
+        }
+
+        if case .toolOutput(let fmToolOutput) = entry {
+            return .toolOutput(
+                Transcript.ToolOutput(
+                    id: fmToolOutput.id,
+                    toolName: fmToolOutput.toolName,
+                    segments: transcriptSegments(from: fmToolOutput.segments)
+                )
+            )
+        }
+
+        return nil
+    }
+
+    /// Converts FoundationModels transcript segments into their AnyLanguageModel equivalents.
+    @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
+    private func transcriptSegments(
+        from segments: [FoundationModels.Transcript.Segment]
+    ) -> [Transcript.Segment] {
+        segments.compactMap { segment -> Transcript.Segment? in
+            if case .text(let textSegment) = segment {
+                return .text(.init(id: textSegment.id, content: textSegment.content))
+            }
+            if case .structure(let structuredSegment) = segment,
+                let content = try? AnyLanguageModel.GeneratedContent(structuredSegment.content)
+            {
+                return .structure(
+                    .init(
+                        id: structuredSegment.id,
+                        source: structuredSegment.source,
+                        content: content
+                    )
+                )
+            }
+            return nil
         }
     }
 
