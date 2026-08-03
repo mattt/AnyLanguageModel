@@ -816,9 +816,9 @@ extension Transcript {
                 )
             case .toolCalls(let toolCalls):
                 let rawCalls: [JSONValue] = toolCalls.map { call in
-                    let argsStr =
-                        (try? JSONEncoder().encode(call.arguments)).flatMap { String(data: $0, encoding: .utf8) }
-                        ?? "{}"
+                    // `GeneratedContent`'s `Codable` conformance is a lossless persistence format
+                    // for round-tripping a `Transcript`, not a wire format, so use `jsonString`.
+                    let argsStr = call.arguments.jsonString
                     return .object([
                         "id": .string(call.id),
                         "type": .string("function_call"),

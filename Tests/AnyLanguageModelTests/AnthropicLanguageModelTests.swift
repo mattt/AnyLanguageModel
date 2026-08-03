@@ -84,16 +84,16 @@ struct AnthropicLanguageModelTests {
         #expect(!snapshots.last!.rawContent.jsonString.isEmpty)
         #expect(!(snapshots.last!.content.summary ?? "").isEmpty)
     }
-    
+
     @Test func streamingTranscript() async throws {
         let session = LanguageModelSession(model: model)
-        
+
         let stream = session.streamResponse(to: "Say 'Hello' slowly")
-        
+
         var snapshots: [LanguageModelSession.ResponseStream<String>.Snapshot] = []
         for try await snapshot in stream {
             snapshots.append(snapshot)
-            
+
             // Make sure the snapshot is also in the transcript.
             let hasTranscriptEntry = session.transcript.contains(where: { entry in
                 switch entry {
@@ -110,13 +110,15 @@ struct AnthropicLanguageModelTests {
                     return false
                 }
             })
-            #expect(hasTranscriptEntry, "Expected the string snapshot to also appear in the transcript during streaming.")
+            #expect(
+                hasTranscriptEntry,
+                "Expected the string snapshot to also appear in the transcript during streaming."
+            )
         }
-        
+
         #expect(!snapshots.isEmpty)
         #expect(!snapshots.last!.rawContent.jsonString.isEmpty)
     }
-
 
     @Test func withGenerationOptions() async throws {
         let session = LanguageModelSession(model: model)
@@ -158,9 +160,9 @@ struct AnthropicLanguageModelTests {
     @Test func withTools() async throws {
         let weatherTool = WeatherTool()
         let session = LanguageModelSession(model: model, tools: [weatherTool])
-        
+
         let response = try await session.respond(to: "How's the weather in San Francisco?")
-        
+
         var foundToolOutput = false
         for case let .toolOutput(toolOutput) in response.transcriptEntries {
             #expect(!toolOutput.id.isEmpty)
@@ -170,21 +172,20 @@ struct AnthropicLanguageModelTests {
         #expect(foundToolOutput)
     }
 
-
     @Test func streamWithTools() async throws {
         let weatherTool = WeatherTool()
         let session = LanguageModelSession(model: model, tools: [weatherTool])
-        
+
         let stream = session.streamResponse(to: "How's the weather in San Francisco?")
-        
+
         var snapshots: [LanguageModelSession.ResponseStream<String>.Snapshot] = []
-        
+
         var toolAppearedInTranscript: Bool = false
         var toolResponseAppearedInTranscript: Bool = false
-        
+
         for try await snapshot in stream {
             snapshots.append(snapshot)
-            
+
             for entry in session.transcript {
                 switch entry {
                 case .toolCalls:
@@ -195,10 +196,13 @@ struct AnthropicLanguageModelTests {
                 }
             }
         }
-        
+
         #expect(toolAppearedInTranscript, "Expected a tool call to appear in the transcript during streaming.")
-        #expect(toolResponseAppearedInTranscript, "Expected a tool output to appear in the transcript during streaming.")
-        
+        #expect(
+            toolResponseAppearedInTranscript,
+            "Expected a tool output to appear in the transcript during streaming."
+        )
+
         var foundToolOutput = false
         for case let .toolOutput(toolOutput) in session.transcript {
             #expect(!toolOutput.id.isEmpty)
@@ -207,7 +211,7 @@ struct AnthropicLanguageModelTests {
         }
         #expect(foundToolOutput, "Expected the 'getWeather' tool to exist in the final transcript.")
     }
-    
+
     @Test func multimodalWithImageURL() async throws {
         let session = LanguageModelSession(model: model)
         let response = try await session.respond(

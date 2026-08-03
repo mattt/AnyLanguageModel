@@ -672,9 +672,9 @@ import Foundation
             // Force CPU-only execution to avoid Metal GPU issues
             params.n_gpu_layers = 0
 
-            // Try to reduce memory usage
-            params.use_mmap = true
-            params.use_mlock = false
+            // Try to reduce memory usage by memory-mapping the weights without locking them
+            // in RAM. Replaces the separate `use_mmap` / `use_mlock` flags removed upstream.
+            params.load_mode = LLAMA_LOAD_MODE_MMAP
             return params
         }
 

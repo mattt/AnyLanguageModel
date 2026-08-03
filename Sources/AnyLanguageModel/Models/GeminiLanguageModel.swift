@@ -723,7 +723,9 @@ private func toGeneratedContent(_ value: [String: JSONValue]?) throws -> Generat
 }
 
 private func fromGeneratedContent(_ content: GeneratedContent) throws -> [String: JSONValue] {
-    let data = try JSONEncoder().encode(content)
+    // `GeneratedContent`'s `Codable` conformance is a lossless persistence format for
+    // round-tripping a `Transcript`, not a wire format, so go through `jsonString`.
+    let data = Data(content.jsonString.utf8)
     let jsonValue = try JSONDecoder().decode(JSONValue.self, from: data)
 
     guard case .object(let dict) = jsonValue else {
