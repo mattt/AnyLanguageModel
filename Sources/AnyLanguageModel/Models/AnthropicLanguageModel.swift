@@ -98,7 +98,7 @@ public struct AnthropicLanguageModel: LanguageModel {
         /// These parameters are merged into the top-level request JSON,
         /// allowing you to pass additional options not explicitly modeled.
         public var extraBody: [String: JSONValue]?
-        
+
         public var effort: Effort?
 
         // MARK: - Nested Types
@@ -206,7 +206,7 @@ public struct AnthropicLanguageModel: LanguageModel {
             /// Availability: All Models
             case low
         }
-        
+
         /// Configuration for extended thinking.
         public struct Thinking: Hashable, Codable, Sendable {
             /// The type of thinking to use.
@@ -218,7 +218,7 @@ public struct AnthropicLanguageModel: LanguageModel {
             /// internal reasoning process. Larger budgets can improve response quality
             /// for complex tasks but increase latency and cost.
             public var budgetTokens: Int?
-            
+
             /// How thinking should be displayed.
             public var display: ThinkingDisplay?
 
@@ -229,7 +229,7 @@ public struct AnthropicLanguageModel: LanguageModel {
                 /// Enables adaptive thinking.
                 case adaptive
             }
-            
+
             /// How thinking should be returned during generation.
             public enum ThinkingDisplay: String, Hashable, Codable, Sendable {
                 /// Thinking will be summarized.
@@ -245,7 +245,7 @@ public struct AnthropicLanguageModel: LanguageModel {
             }
 
             /// Creates a thinking configuration.
-            /// 
+            ///
             /// - Parameters:
             ///   - type: The type of thinking to perform.
             ///   - budgetTokens: The maximum number of tokens to use for thinking. Only required when `type` == `.enabled`.
@@ -255,12 +255,12 @@ public struct AnthropicLanguageModel: LanguageModel {
                 self.budgetTokens = budgetTokens
                 self.display = display
             }
-            
+
             /// Convenience function for enabling adaptive thinking on supported models.
             public static func adaptive(display: ThinkingDisplay?) -> Thinking {
                 return Thinking.init(type: .adaptive, budgetTokens: nil, display: display)
             }
-            
+
             /// Convenience function for enabling thinking with a token budget on supported models.
             public static func enabled(budgetTokens: Int, display: ThinkingDisplay?) -> Thinking {
                 return Thinking.init(type: .enabled, budgetTokens: budgetTokens, display: display)
@@ -383,13 +383,13 @@ public struct AnthropicLanguageModel: LanguageModel {
         let anthropicTools: [AnthropicTool] = try session.tools.map { tool in
             try convertToolToAnthropicFormat(tool)
         }
-        
+
         let responseSchema = type == String.self ? nil : try convertSchemaToAnthropicFormat(Content.generationSchema)
-        
+
         var entries: [Transcript.Entry] = []
         var runningText = ""
         var messages: [AnthropicMessage] = session.transcript.toAnthropicMessages()
-        
+
         // Loop until no more tool calls are found.
         while true {
             let params = try createMessageParams(
@@ -400,7 +400,7 @@ public struct AnthropicLanguageModel: LanguageModel {
                 responseSchema: responseSchema,
                 options: options
             )
-            
+
             let body = try JSONEncoder().encode(params)
 
             let message: AnthropicMessageResponse = try await httpSession.fetch(
@@ -412,7 +412,7 @@ public struct AnthropicLanguageModel: LanguageModel {
 
             // Append to messages for future response loops.
             messages.append(AnthropicMessage(role: .assistant, content: message.content))
-            
+
             // Handle tool calls, if present
             let toolUses: [AnthropicToolUse] = message.content.compactMap { content in
                 if case .toolUse(let u) = content { return u }
@@ -447,11 +447,11 @@ public struct AnthropicLanguageModel: LanguageModel {
                                 )
                             )
                         }
-                        
+
                         messages.append(AnthropicMessage(role: .user, content: toolResultBlocks))
                         entries.append(.toolCalls(Transcript.ToolCalls(invocations.map(\.call))))
-                        
-                        continue // Keep going through the loop
+
+                        continue  // Keep going through the loop
                     }
                 }
             }
@@ -463,8 +463,8 @@ public struct AnthropicLanguageModel: LanguageModel {
                 default: return nil
                 }
             }.joined()
-            
-            break // Break the loop
+
+            break  // Break the loop
         }
 
         if type == String.self {
@@ -483,11 +483,10 @@ public struct AnthropicLanguageModel: LanguageModel {
             transcriptEntries: ArraySlice(entries)
         )
     }
-    
-    
+
     struct ContentAccumulationBlocks: Hashable, Codable, Sendable {
         enum Kind: Hashable, Codable, Sendable { case toolUse, thinking, text }
-        
+
         var kind: Kind
         var text: String
         var partialJSON: String?
@@ -518,9 +517,10 @@ public struct AnthropicLanguageModel: LanguageModel {
                         try convertToolToAnthropicFormat(tool)
                     }
 
-                    let responseSchema = type == String.self ? nil : try convertSchemaToAnthropicFormat(Content.generationSchema)
+                    let responseSchema =
+                        type == String.self ? nil : try convertSchemaToAnthropicFormat(Content.generationSchema)
                     let expectsStructuredResponse = type != String.self
-                    
+
                     var messages: [AnthropicMessage] = session.transcript.toAnthropicMessages()
 
                     while true {
@@ -536,22 +536,22 @@ public struct AnthropicLanguageModel: LanguageModel {
                             options: options,
                             stream: true
                         )
-                        
+
                         let body = try JSONEncoder().encode(params)
-                        
+
                         // Stream server-sent events from Anthropic API
                         let events: AsyncThrowingStream<AnthropicStreamEvent, any Error> =
-                        httpSession
+                            httpSession
                             .fetchEventStream(
                                 .post,
                                 url: url,
                                 headers: headers,
                                 body: body
                             )
-                        
+
                         // Accumulating content blocks keyed by their index.
                         var contentBlocks: [Int: ContentAccumulationBlocks] = [:]
-                        
+
                         eventStream: for try await event in events {
                             switch event {
                             case .contentBlockStart(let start):
@@ -563,7 +563,7 @@ public struct AnthropicLanguageModel: LanguageModel {
                                         text: start.contentBlock.text ?? "",
                                         id: start.contentBlock.id,
                                         name: start.contentBlock.name
-                                        )
+                                    )
                                 case "thinking":
                                     contentBlocks[start.index] = ContentAccumulationBlocks(
                                         kind: .thinking,
@@ -580,19 +580,19 @@ public struct AnthropicLanguageModel: LanguageModel {
                                 case .textDelta(let textDelta):
                                     // Accumulate text delta for streaming
                                     // Make sure the block has even been started.
-                                    guard  contentBlocks[delta.index] != nil else { continue }
-                                     
+                                    guard contentBlocks[delta.index] != nil else { continue }
+
                                     // Set default text
                                     if contentBlocks[delta.index]?.text == nil {
                                         contentBlocks[delta.index]?.text = ""
                                     }
-                                    
+
                                     contentBlocks[delta.index]?.text += textDelta.text
                                     accumulatedText += textDelta.text
-                                    
+
                                     // Grow the observable transcript so a Transcript-driven UI updates live.
                                     session.growStreamingTranscript(text: accumulatedText)
-                                    
+
                                     // Send text back normally
                                     if expectsStructuredResponse {
                                         if let snapshot: LanguageModelSession.ResponseStream<Content>.Snapshot =
@@ -610,7 +610,7 @@ public struct AnthropicLanguageModel: LanguageModel {
                                     if contentBlocks[delta.index]?.partialJSON == nil {
                                         contentBlocks[delta.index]?.partialJSON = ""
                                     }
-                                    
+
                                     contentBlocks[delta.index]?.partialJSON? += jsonDelta.partialJson
                                 case .thinkingDelta(let thinkingDelta):
                                     contentBlocks[delta.index]?.text += thinkingDelta.thinking
@@ -632,11 +632,11 @@ public struct AnthropicLanguageModel: LanguageModel {
                                 continue
                             }
                         }
-                        
+
                         // Assemble assistant content from the streamed content blocks
                         var assistantContent: [AnthropicContent] = []
                         var toolUses: [AnthropicToolUse] = []
-                        
+
                         for block in contentBlocks.sorted(by: { $0.key < $1.key }).map(\.value) {
                             switch block.kind {
                             case .text:
@@ -646,22 +646,25 @@ public struct AnthropicLanguageModel: LanguageModel {
                             case .thinking:
                                 // Ensure there is a signature. Needed for claude to reconstruct the thought on the server.
                                 guard let signature = block.signature else { continue }
-                                
+
                                 assistantContent.append(
-                                    AnthropicContent.thinking(AnthropicThinking(thinking: block.text, signature: signature))
+                                    AnthropicContent.thinking(
+                                        AnthropicThinking(thinking: block.text, signature: signature)
+                                    )
                                 )
                             case .toolUse:
-                                guard let id = block.id, let name = block.name, let jsonString = block.partialJSON else { continue }
+                                guard let id = block.id, let name = block.name, let jsonString = block.partialJSON
+                                else { continue }
                                 guard let json = fromPartialJSON(jsonString) else { continue }
-                                
+
                                 let toolUse = AnthropicToolUse(id: id, name: name, input: json)
                                 assistantContent.append(AnthropicContent.toolUse(toolUse))
                                 toolUses.append(toolUse)
                             }
                         }
-                                
+
                         messages.append(AnthropicMessage(role: .assistant, content: assistantContent))
-                        
+
                         // Process the tool calls
                         var appendedToolResults = false
                         if !toolUses.isEmpty {
@@ -676,32 +679,34 @@ public struct AnthropicLanguageModel: LanguageModel {
                             case .invocations(let invocations):
                                 if !invocations.isEmpty {
                                     var toolResultBlocks: [AnthropicContent] = []
-                                    
+
                                     // Need to append tool calls before tool results
                                     session.appendTranscriptEntry(
                                         .toolCalls(Transcript.ToolCalls(invocations.map(\.call)))
                                     )
-                                    
+
                                     for invocation in invocations {
                                         // Save the tool outputs into the transcript.
                                         session.appendTranscriptEntry(.toolOutput(invocation.output))
-                                        
+
                                         toolResultBlocks.append(
                                             .toolResult(
                                                 AnthropicToolResult(
                                                     toolUseId: invocation.call.id,
-                                                    content: convertSegmentsToAnthropicContent(invocation.output.segments)
+                                                    content: convertSegmentsToAnthropicContent(
+                                                        invocation.output.segments
+                                                    )
                                                 )
                                             )
                                         )
                                     }
-                                    
+
                                     messages.append(AnthropicMessage(role: .user, content: toolResultBlocks))
                                     appendedToolResults = true
                                 }
                             }
                         }
-                        
+
                         // Continue only if we responded with tool call results, if we didn't the turn is complete.
                         if stopReason == "tool_use" && appendedToolResults {
                             continue
@@ -709,7 +714,7 @@ public struct AnthropicLanguageModel: LanguageModel {
                             break
                         }
                     }
-                    
+
                     continuation.finish()
                 } catch {
                     continuation.finish(throwing: error)
@@ -838,7 +843,7 @@ private func createMessageParams(
             if let display = thinking.display {
                 thinkingObject["display"] = .string(display.rawValue)
             }
-            
+
             params["thinking"] = .object(thinkingObject)
         }
         if let serviceTier = customOptions.serviceTier {
@@ -1049,7 +1054,6 @@ private func fromPartialJSON(_ json: String) -> [String: JSONValue]? {
     return dict
 }
 
-
 // MARK: - Supporting Types
 
 extension Transcript {
@@ -1090,7 +1094,7 @@ extension Transcript {
                         )
                     )
                 }
-                
+
                 print("Tool use block \(toolUseBlocks)")
                 messages.append(
                     .init(
@@ -1389,7 +1393,7 @@ private enum AnthropicStreamEvent: Codable, Sendable {
         struct ContentBlock: Codable, Sendable {
             let type: String
             let text: String?
-            
+
             // Used by tool use content blocks.
             let id: String?
             let name: String?
@@ -1455,14 +1459,14 @@ private enum AnthropicStreamEvent: Codable, Sendable {
                     case partialJson = "partial_json"
                 }
             }
-            
+
             struct ThinkingDelta: Codable, SendableMetatype {
                 let type: String
                 let thinking: String
             }
-            
+
             /// Cryptographic signature for a completed thinking block.
-            /// 
+            ///
             /// Emitted at the end of a thinking block, even when ``CustomGenerationOptions/Thinking/display`` is set to `omitted`.
             /// The signature must be preserved verbatim for thought to be recovered in the transcript. Otherwise the Claude API will throw out any text provided in thinking blocks.
             struct SignatureDelta: Codable, Sendable {

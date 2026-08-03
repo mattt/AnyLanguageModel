@@ -294,7 +294,11 @@ struct AnthropicCustomOptionsTests {
     }
 
     @Test func thinkingCodable() throws {
-        let thinking = AnthropicLanguageModel.CustomGenerationOptions.Thinking(type: .enabled, budgetTokens: 8192, display: .omitted)
+        let thinking = AnthropicLanguageModel.CustomGenerationOptions.Thinking(
+            type: .enabled,
+            budgetTokens: 8192,
+            display: .omitted
+        )
 
         let encoder = JSONEncoder()
         let data = try encoder.encode(thinking)
