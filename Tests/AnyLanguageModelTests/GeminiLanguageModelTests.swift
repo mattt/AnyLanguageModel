@@ -104,6 +104,43 @@ struct GeminiLanguageModelTests {
         #expect(foundToolOutput)
     }
 
+    @Test func streamWithTools() async throws {
+        let weatherTool = WeatherTool()
+        let session = LanguageModelSession(model: model, tools: [weatherTool])
+
+        let stream = session.streamResponse(to: "How's the weather in San Francisco?")
+
+        var snapshots: [LanguageModelSession.ResponseStream<String>.Snapshot] = []
+
+        var toolAppearedInTranscript: Bool = false
+        var toolResponseAppearedInTranscript: Bool = false
+
+        for try await snapshot in stream {
+            snapshots.append(snapshot)
+
+            for entry in session.transcript {
+                switch entry {
+                case .toolCalls:
+                    toolAppearedInTranscript = true
+                case .toolOutput:
+                    toolResponseAppearedInTranscript = true
+                default: break
+                }
+            }
+        }
+
+        #expect(toolAppearedInTranscript, "Expected a tool call to appear in the transcript during streaming.")
+        #expect(toolResponseAppearedInTranscript, "Expected a tool output to appear in the transcript during streaming.")
+
+        var foundToolOutput = false
+        for case let .toolOutput(toolOutput) in session.transcript {
+            #expect(!toolOutput.id.isEmpty)
+            #expect(toolOutput.toolName == "getWeather")
+            foundToolOutput = true
+        }
+        #expect(foundToolOutput, "Expected the 'getWeather' tool to exist in the final transcript.")
+    }
+
     @Test func withServerTools() async throws {
         let session = LanguageModelSession(model: model)
 
