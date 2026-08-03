@@ -8,6 +8,14 @@ private let openResponsesBaseURL: URL? = ProcessInfo.processInfo.environment["OP
     URL(string: $0)
 }
 
+/// The model to exercise the Responses API with.
+///
+/// The endpoint is configurable, so the model has to be too — any server implementing the
+/// Responses API serves its own model names. Ollama, for example, runs this suite with
+/// `OPEN_RESPONSES_BASE_URL=http://localhost:11434/v1` and one of its local models.
+private let openResponsesModel: String =
+    ProcessInfo.processInfo.environment["OPEN_RESPONSES_MODEL"] ?? "gpt-4o-mini"
+
 @Suite("OpenResponsesLanguageModel")
 struct OpenResponsesLanguageModelTests {
     @Test func customHost() throws {
@@ -34,7 +42,7 @@ struct OpenResponsesLanguageModelTests {
             OpenResponsesLanguageModel(
                 baseURL: baseURL,
                 apiKey: apiKey,
-                model: "gpt-4o-mini"
+                model: openResponsesModel
             )
         }
 
@@ -211,7 +219,7 @@ struct OpenResponsesLanguageModelTests {
                 OpenResponsesLanguageModel(
                     baseURL: openResponsesBaseURL!,
                     apiKey: openResponsesAPIKey!,
-                    model: "gpt-4o-mini"
+                    model: openResponsesModel
                 )
             }
 
