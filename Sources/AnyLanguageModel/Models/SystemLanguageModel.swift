@@ -173,8 +173,37 @@
                 )
             )
 
+            // Entries the session was seeded with. Anything FoundationModels records beyond this
+            // point belongs to the turn we are about to stream.
+            let seededEntryCount = fmSession.transcript.count
+
             let stream: AsyncThrowingStream<LanguageModelSession.ResponseStream<Content>.Snapshot, Error> =
                 AsyncThrowingStream { continuation in
+
+                    /// Copies newly recorded FoundationModels tool entries into `session.transcript`.
+                    ///
+                    /// FoundationModels runs the tool-calling loop itself, and its
+                    /// `ResponseStream.Snapshot` carries only `content` and `rawContent` — it has no
+                    /// tool channel at all. The session's own transcript is therefore the only place
+                    /// tool activity is observable, so we replay new entries from it as the turn
+                    /// progresses. Replaying in FoundationModels' recorded order is what keeps a
+                    /// `.toolCalls` entry ahead of its matching `.toolOutput`.
+                    ///
+                    /// - Note: This runs on snapshot boundaries rather than the instant
+                    ///   FoundationModels records a call, because polling the session concurrently
+                    ///   would mean sharing a non-`Sendable` `FoundationModels.LanguageModelSession`
+                    ///   across tasks. Tool entries therefore land with the first snapshot generated
+                    ///   after the tool ran, which is still while the stream is in progress.
+                    func mirrorToolEntries(mirroredEntryCount: inout Int) {
+                        let fmEntries = Array(fmSession.transcript)
+                        guard fmEntries.count > mirroredEntryCount else { return }
+                        for entry in fmEntries[mirroredEntryCount...] {
+                            if let toolEntry = toolTranscriptEntry(from: entry) {
+                                session.appendTranscriptEntry(toolEntry)
+                            }
+                        }
+                        mirroredEntryCount = fmEntries.count
+                    }
 
                     func accumulateText(
                         _ chunkText: String,
@@ -203,6 +232,7 @@
                             fmSession.streamResponse(to: fmPrompt, options: fmOptions)
 
                         var accumulatedText = ""
+                        var mirroredEntryCount = seededEntryCount
                         do {
                             var lastLength = 0
                             for try await snapshot in fmStream {
@@ -219,10 +249,18 @@
                                     lastLength: &lastLength
                                 )
 
+                                // Surface tool activity before any response text so the transcript
+                                // keeps `.toolCalls` -> `.toolOutput` -> `.response` ordering.
+                                mirrorToolEntries(mirroredEntryCount: &mirroredEntryCount)
+                                if !accumulatedText.isEmpty {
+                                    session.growStreamingTranscript(text: accumulatedText)
+                                }
+
                                 let raw = GeneratedContent(accumulatedText)
                                 let snapshotContent = (accumulatedText as! Content).asPartiallyGenerated()
                                 continuation.yield(.init(content: snapshotContent, rawContent: raw))
                             }
+                            mirrorToolEntries(mirroredEntryCount: &mirroredEntryCount)
                             continuation.finish()
                         } catch {
                             continuation.finish(throwing: error)
@@ -238,6 +276,8 @@
                             includeSchemaInPrompt: includeSchemaInPrompt,
                             options: fmOptions
                         )
+
+                        var mirroredEntryCount = seededEntryCount
 
                         func processTextFallback() async {
                             let fmTextStream: FoundationModels.LanguageModelSession.ResponseStream<String> =
@@ -259,6 +299,11 @@
                                         lastLength: &lastLength
                                     )
 
+                                    mirrorToolEntries(mirroredEntryCount: &mirroredEntryCount)
+                                    if !accumulatedText.isEmpty {
+                                        session.growStreamingTranscript(text: accumulatedText)
+                                    }
+
                                     let jsonString = accumulatedText
                                     if let partialContent = try? partialDecoder.decode(
                                         GeneratedContent.self,
@@ -277,6 +322,7 @@
                                         .init(content: placeholder.content, rawContent: placeholder.rawContent)
                                     )
                                 }
+                                mirrorToolEntries(mirroredEntryCount: &mirroredEntryCount)
                                 continuation.finish()
                             } catch {
                                 if !didYield, let placeholder = placeholderPartialContent(for: type) {
@@ -292,6 +338,12 @@
                         do {
                             for try await snapshot in fmStream {
                                 let jsonString = snapshot.content.jsonString
+
+                                mirrorToolEntries(mirroredEntryCount: &mirroredEntryCount)
+                                if !jsonString.isEmpty, jsonString != "null" {
+                                    session.growStreamingTranscript(text: jsonString)
+                                }
+
                                 let raw =
                                     (try? GeneratedContent(snapshot.content))
                                     ?? (try? GeneratedContent(json: jsonString))
@@ -323,6 +375,7 @@
                                     .init(content: placeholder.content, rawContent: placeholder.rawContent)
                                 )
                             }
+                            mirrorToolEntries(mirroredEntryCount: &mirroredEntryCount)
                             continuation.finish()
                         } catch {
                             if didYield {
@@ -448,6 +501,27 @@
     }
 
     /// A type-erased wrapper that bridges any `Tool` to `FoundationModels.Tool`.
+    ///
+    /// - Note: Unlike every other provider, this bridge does not consult
+    ///   `session.toolExecutionDelegate`, and that is a deliberate gap rather than an oversight.
+    ///   FoundationModels owns the tool-calling loop and invokes a tool through
+    ///   `FoundationModels.Tool.call(arguments:)`, which receives the decoded arguments and nothing
+    ///   else — no call identifier, no session, no view of the sibling calls in the same batch.
+    ///   That makes the delegate contract unrepresentable here:
+    ///
+    ///   - `didGenerateToolCalls` is defined over the whole batch of calls the model produced,
+    ///     before any of them run. FoundationModels only ever surfaces a single invocation, and
+    ///     only once it has already decided to make it.
+    ///   - `toolCallDecision`, `didExecuteToolCall`, and `didFailToolCall` all take a
+    ///     `Transcript.ToolCall`, whose `id` is assigned by FoundationModels and is not visible
+    ///     from inside the tool. Synthesizing an id would hand the delegate an identifier that
+    ///     never matches the `.toolCalls` entry that later appears in the transcript.
+    ///   - `.stop` has no expression at all. FoundationModels offers no way to halt a turn from
+    ///     inside a tool; throwing would surface an error to the caller instead of the contract's
+    ///     clean stop with the tool calls recorded.
+    ///
+    ///   Honoring the delegate partially would be worse than not honoring it: a caller returning
+    ///   `.stop` would have its tool executed anyway, silently. So the delegate is not consulted.
     @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
     private struct AnyToolWrapper: FoundationModels.Tool {
         typealias Arguments = FoundationModels.GeneratedContent
