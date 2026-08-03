@@ -420,17 +420,21 @@ public struct OpenResponsesLanguageModel: LanguageModel {
         let url = baseURL.appendingPathComponent("responses")
         let stream: AsyncThrowingStream<LanguageModelSession.ResponseStream<Content>.Snapshot, any Error> = .init {
             continuation in
-            do {
-                let params = try OpenResponsesAPI.createRequestBody(
-                    model: model,
-                    messages: session.transcript.toOpenResponsesMessages(),
-                    tools: tools,
-                    generating: type,
-                    options: options,
-                    stream: true
-                )
-                let task = Task { @Sendable in
-                    do {
+            let task = Task { @Sendable in
+                do {
+                    var messages = session.transcript.toOpenResponsesMessages()
+
+                    // Each iteration is one turn: stream a response, then execute any tools it requested
+                    // and feed the results back for another turn.
+                    turnLoop: while true {
+                        let params = try OpenResponsesAPI.createRequestBody(
+                            model: model,
+                            messages: messages,
+                            tools: tools,
+                            generating: type,
+                            options: options,
+                            stream: true
+                        )
                         let body = try JSONEncoder().encode(params)
                         let events: AsyncThrowingStream<OpenResponsesStreamEvent, any Error> =
                             httpSession.fetchEventStream(
@@ -440,10 +444,18 @@ public struct OpenResponsesLanguageModel: LanguageModel {
                                 body: body
                             )
                         var accumulatedText = ""
-                        for try await event in events {
+                        // Streamed output items, keyed by their output index. Function-call arguments
+                        // arrive as fragments and are accumulated until the turn ends.
+                        var streamedItems: [Int: OpenResponsesStreamingOutputItem] = [:]
+
+                        eventStream: for try await event in events {
                             switch event {
                             case .outputTextDelta(let delta):
                                 accumulatedText += delta
+
+                                // Grow the observable transcript so a Transcript-driven UI updates live.
+                                session.growStreamingTranscript(text: accumulatedText)
+
                                 var raw: GeneratedContent
                                 let content: Content.PartiallyGenerated?
                                 if type == String.self {
@@ -458,9 +470,24 @@ public struct OpenResponsesLanguageModel: LanguageModel {
                                 if let content {
                                     continuation.yield(.init(content: content, rawContent: raw))
                                 }
+                            case .outputItemAdded(let index, let item):
+                                // Opening event: carries the call id and name, with empty arguments.
+                                streamedItems[index] = OpenResponsesStreamingOutputItem(item: item)
+                            case .functionCallArgumentsDelta(let index, let delta):
+                                // Only accumulate for items the server already opened.
+                                guard streamedItems[index] != nil else { continue }
+                                streamedItems[index]?.argumentFragments += delta
+                            case .outputItemDone(let index, let item):
+                                // Keep any fragments accumulated for this index; the finished item
+                                // may or may not repeat the full arguments string.
+                                let fragments = streamedItems[index]?.argumentFragments ?? ""
+                                streamedItems[index] = OpenResponsesStreamingOutputItem(
+                                    item: item,
+                                    argumentFragments: fragments
+                                )
                             case .completed:
-                                continuation.finish()
-                                return
+                                // Need a label, otherwise this would only break out of the switch.
+                                break eventStream
                             case .failed:
                                 continuation.finish(throwing: OpenResponsesLanguageModelError.streamFailed)
                                 return
@@ -468,15 +495,52 @@ public struct OpenResponsesLanguageModel: LanguageModel {
                                 break
                             }
                         }
-                        continuation.finish()
-                    } catch {
-                        continuation.finish(throwing: error)
+
+                        let assembled = assembleOpenResponsesStreamedOutput(streamedItems)
+                        // The turn is complete once the model stops asking for tools.
+                        guard !assembled.toolCalls.isEmpty else { break turnLoop }
+
+                        // Echo this turn's output items back so the follow-up request keeps the calls in context.
+                        for item in assembled.items {
+                            messages.append(OpenResponsesMessage(role: .raw(rawContent: item), content: .text("")))
+                        }
+
+                        let resolution = try await resolveOpenResponsesToolCalls(assembled.toolCalls, session: session)
+                        switch resolution {
+                        case .stop(let calls):
+                            if !calls.isEmpty {
+                                session.appendTranscriptEntry(.toolCalls(Transcript.ToolCalls(calls)))
+                            }
+                            continuation.finish()
+                            return
+                        case .invocations(let invocations):
+                            guard !invocations.isEmpty else { break turnLoop }
+
+                            // Tool calls must be appended before the outputs of the same turn.
+                            session.appendTranscriptEntry(
+                                .toolCalls(Transcript.ToolCalls(invocations.map { $0.call }))
+                            )
+
+                            for inv in invocations {
+                                session.appendTranscriptEntry(.toolOutput(inv.output))
+                                messages.append(
+                                    OpenResponsesMessage(
+                                        role: .tool(id: inv.call.id),
+                                        content: .text(
+                                            openResponsesConvertSegmentsToToolContentString(inv.output.segments)
+                                        )
+                                    )
+                                )
+                            }
+                        }
                     }
+
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
                 }
-                continuation.onTermination = { _ in task.cancel() }
-            } catch {
-                continuation.finish(throwing: error)
             }
+            continuation.onTermination = { _ in task.cancel() }
         }
         return LanguageModelSession.ResponseStream(stream: stream)
     }
@@ -1034,6 +1098,52 @@ private func extractJSONFromOutput(_ output: [JSONValue]?) -> String? {
     return nil
 }
 
+/// An output item being assembled from a stream, along with any function-call argument
+/// fragments that arrived for it.
+private struct OpenResponsesStreamingOutputItem: Sendable {
+    var item: JSONValue
+    var argumentFragments: String = ""
+}
+
+/// Merges streamed argument fragments into their output items and pulls out the function calls of the turn.
+///
+/// Items are returned in output-index order so they can be echoed back as the assistant's turn.
+/// A function call is only surfaced once its accumulated fragments form parseable JSON.
+private func assembleOpenResponsesStreamedOutput(
+    _ streamedItems: [Int: OpenResponsesStreamingOutputItem]
+) -> (items: [JSONValue], toolCalls: [OpenResponsesToolCall]) {
+    var items: [JSONValue] = []
+    var toolCalls: [OpenResponsesToolCall] = []
+
+    for entry in streamedItems.sorted(by: { $0.key < $1.key }).map(\.value) {
+        guard case .object(var obj) = entry.item else {
+            items.append(entry.item)
+            continue
+        }
+        let type = obj["type"].flatMap { if case .string(let s) = $0 { return s } else { return nil } }
+        guard type == "function_call" else {
+            items.append(entry.item)
+            continue
+        }
+
+        // Prefer the fragments we accumulated; fall back to whatever the finished item carried.
+        let fragments = entry.argumentFragments.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !fragments.isEmpty {
+            obj["arguments"] = .string(fragments)
+        }
+        if case .string(let arguments)? = obj["arguments"], !arguments.isEmpty {
+            let data = arguments.data(using: .utf8)
+            guard data.flatMap({ try? JSONDecoder().decode(JSONValue.self, from: $0) }) != nil else { continue }
+        }
+
+        guard let call = parseOpenResponsesToolCall(from: obj) else { continue }
+        items.append(.object(obj))
+        toolCalls.append(call)
+    }
+
+    return (items, toolCalls)
+}
+
 private func resolveOpenResponsesToolCalls(
     _ toolCalls: [OpenResponsesToolCall],
     session: LanguageModelSession
@@ -1053,6 +1163,12 @@ private func resolveOpenResponsesToolCalls(
 
 private enum OpenResponsesStreamEvent: Decodable, Sendable {
     case outputTextDelta(String)
+    /// An output item was opened. For function calls this carries the call id and name.
+    case outputItemAdded(index: Int, item: JSONValue)
+    /// A fragment of a function call's arguments JSON.
+    case functionCallArgumentsDelta(index: Int, delta: String)
+    /// An output item finished, carrying its final form.
+    case outputItemDone(index: Int, item: JSONValue)
     case completed
     case failed
     case ignored
@@ -1063,6 +1179,23 @@ private enum OpenResponsesStreamEvent: Decodable, Sendable {
         switch type {
         case "response.output_text.delta":
             self = .outputTextDelta(try c.decode(String.self, forKey: .delta))
+        case "response.output_item.added":
+            guard let item = try c.decodeIfPresent(JSONValue.self, forKey: .item) else {
+                self = .ignored
+                return
+            }
+            self = .outputItemAdded(index: try c.decodeIfPresent(Int.self, forKey: .outputIndex) ?? 0, item: item)
+        case "response.function_call_arguments.delta":
+            self = .functionCallArgumentsDelta(
+                index: try c.decodeIfPresent(Int.self, forKey: .outputIndex) ?? 0,
+                delta: try c.decode(String.self, forKey: .delta)
+            )
+        case "response.output_item.done":
+            guard let item = try c.decodeIfPresent(JSONValue.self, forKey: .item) else {
+                self = .ignored
+                return
+            }
+            self = .outputItemDone(index: try c.decodeIfPresent(Int.self, forKey: .outputIndex) ?? 0, item: item)
         case "response.completed":
             self = .completed
         case "response.failed":
@@ -1071,7 +1204,12 @@ private enum OpenResponsesStreamEvent: Decodable, Sendable {
             self = .ignored
         }
     }
-    private enum CodingKeys: String, CodingKey { case type, delta }
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case delta
+        case item
+        case outputIndex = "output_index"
+    }
 }
 
 // MARK: - Errors
