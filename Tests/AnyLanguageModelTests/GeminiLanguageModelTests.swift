@@ -10,7 +10,7 @@ private let geminiAPIKey: String? = ProcessInfo.processInfo.environment["GEMINI_
 struct GeminiLanguageModelTests {
     let model = GeminiLanguageModel(
         apiKey: geminiAPIKey!,
-        model: "gemini-2.5-flash"
+        model: "gemini-flash-latest"
     )
 
     @Test func customHost() throws {
@@ -130,7 +130,10 @@ struct GeminiLanguageModelTests {
         }
 
         #expect(toolAppearedInTranscript, "Expected a tool call to appear in the transcript during streaming.")
-        #expect(toolResponseAppearedInTranscript, "Expected a tool output to appear in the transcript during streaming.")
+        #expect(
+            toolResponseAppearedInTranscript,
+            "Expected a tool output to appear in the transcript during streaming."
+        )
 
         var foundToolOutput = false
         for case let .toolOutput(toolOutput) in session.transcript {
@@ -243,7 +246,7 @@ struct GeminiLanguageModelTests {
         }
 
         private var model: GeminiLanguageModel {
-            GeminiLanguageModel(apiKey: geminiAPIKey!, model: "gemini-2.5-flash")
+            GeminiLanguageModel(apiKey: geminiAPIKey!, model: "gemini-flash-latest")
         }
 
         @Test func basicStructuredOutput() async throws {
