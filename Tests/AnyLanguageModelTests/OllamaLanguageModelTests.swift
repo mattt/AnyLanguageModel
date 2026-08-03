@@ -146,6 +146,41 @@ struct OllamaLanguageModelTests {
         }
     }
 
+    @Test func streamWithTools() async throws {
+        let weatherTool = spy(on: WeatherTool())
+        let session = LanguageModelSession(model: model, tools: [weatherTool])
+
+        let stream = session.streamResponse(to: "How's the weather in San Francisco?")
+
+        var toolCallAppearedDuringStream = false
+        var toolOutputAppearedDuringStream = false
+
+        for try await _ in stream {
+            for entry in session.transcript {
+                switch entry {
+                case .toolCalls: toolCallAppearedDuringStream = true
+                case .toolOutput: toolOutputAppearedDuringStream = true
+                default: break
+                }
+            }
+        }
+
+        #expect(toolCallAppearedDuringStream, "Expected a tool call in the transcript while streaming.")
+        #expect(toolOutputAppearedDuringStream, "Expected a tool output in the transcript while streaming.")
+
+        var foundToolOutput = false
+        for case let .toolOutput(toolOutput) in session.transcript {
+            #expect(!toolOutput.id.isEmpty)
+            #expect(toolOutput.toolName == weatherTool.name)
+            foundToolOutput = true
+        }
+        #expect(foundToolOutput, "Expected the tool output to remain in the final transcript.")
+
+        let calls = await weatherTool.calls
+        #expect(calls.count == 1)
+        #expect(calls.first?.arguments.city == "San Francisco")
+    }
+
     @Test func multimodalWithImageURL() async throws {
         let transcript = Transcript(entries: [
             .prompt(
