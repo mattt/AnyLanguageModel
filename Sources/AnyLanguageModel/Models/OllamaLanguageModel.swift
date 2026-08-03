@@ -511,9 +511,10 @@ private func convertSchemaToOllamaFormat(_ schema: GenerationSchema) throws -> J
 
 /// Converts generated content to the plain JSON Ollama expects for tool call arguments.
 ///
-/// `GeneratedContent`'s own `Codable` conformance encodes its internal representation
-/// (`kind`, `orderedKeys`, …) rather than the value it wraps, so round-trip through
-/// `jsonString` instead.
+/// `GeneratedContent`'s `Codable` conformance is a lossless persistence format: it writes
+/// `kind`/`orderedKeys` so that a `Transcript` can be serialized and read back exactly.
+/// That is deliberate, and not the shape a provider expects for tool arguments, so go
+/// through `jsonString` at the wire boundary instead.
 private func fromGeneratedContent(_ content: GeneratedContent) -> JSONValue {
     let json = content.jsonString
     guard let value = try? JSONDecoder().decode(JSONValue.self, from: Data(json.utf8)) else {

@@ -723,8 +723,8 @@ private func toGeneratedContent(_ value: [String: JSONValue]?) throws -> Generat
 }
 
 private func fromGeneratedContent(_ content: GeneratedContent) throws -> [String: JSONValue] {
-    // `GeneratedContent`'s `Codable` conformance encodes its internal representation
-    // (`kind`, `orderedKeys`, …) rather than the value it wraps, so round-trip through `jsonString`.
+    // `GeneratedContent`'s `Codable` conformance is a lossless persistence format for
+    // round-tripping a `Transcript`, not a wire format, so go through `jsonString`.
     let data = Data(content.jsonString.utf8)
     let jsonValue = try JSONDecoder().decode(JSONValue.self, from: data)
 

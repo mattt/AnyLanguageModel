@@ -816,8 +816,8 @@ extension Transcript {
                 )
             case .toolCalls(let toolCalls):
                 let rawCalls: [JSONValue] = toolCalls.map { call in
-                    // `GeneratedContent`'s `Codable` conformance encodes its internal representation
-                    // (`kind`, `orderedKeys`, …) rather than the value it wraps, so use `jsonString`.
+                    // `GeneratedContent`'s `Codable` conformance is a lossless persistence format
+                    // for round-tripping a `Transcript`, not a wire format, so use `jsonString`.
                     let argsStr = call.arguments.jsonString
                     return .object([
                         "id": .string(call.id),
