@@ -144,6 +144,56 @@ import Testing
             }
         }
 
+        @Test func streamWithTools() async throws {
+            let weatherTool = spy(on: WeatherTool())
+            let session = LanguageModelSession(
+                model: model,
+                tools: [weatherTool],
+                instructions: "You are a helpful assistant. Use available tools when needed."
+            )
+
+            let stream = session.streamResponse(to: "How's the weather in San Francisco?")
+
+            var snapshots: [LanguageModelSession.ResponseStream<String>.Snapshot] = []
+
+            var toolAppearedInTranscript = false
+            var toolResponseAppearedInTranscript = false
+
+            for try await snapshot in stream {
+                snapshots.append(snapshot)
+
+                for entry in session.transcript {
+                    switch entry {
+                    case .toolCalls:
+                        toolAppearedInTranscript = true
+                    case .toolOutput:
+                        toolResponseAppearedInTranscript = true
+                    default: break
+                    }
+                }
+            }
+
+            #expect(toolAppearedInTranscript, "Expected a tool call to appear in the transcript during streaming.")
+            #expect(
+                toolResponseAppearedInTranscript,
+                "Expected a tool output to appear in the transcript during streaming."
+            )
+
+            var foundToolOutput = false
+            for case let .toolOutput(toolOutput) in session.transcript {
+                #expect(!toolOutput.id.isEmpty)
+                #expect(toolOutput.toolName == weatherTool.name)
+                foundToolOutput = true
+            }
+            #expect(foundToolOutput, "Expected the 'getWeather' tool to exist in the final transcript.")
+
+            let calls = await weatherTool.calls
+            #expect(calls.count >= 1)
+            if let first = calls.first {
+                #expect(first.arguments.city.contains("San Francisco"))
+            }
+        }
+
         @Test func multimodalWithImageURL() async throws {
             let transcript = Transcript(entries: [
                 .prompt(
