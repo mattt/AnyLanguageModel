@@ -43,7 +43,7 @@ public struct OpenAILanguageModel: LanguageModel {
     ///
     /// ```swift
     /// var options = GenerationOptions(temperature: 0.7)
-    /// options[custom: OpenAILanguageModel.self] = .init(
+    /// options[custom: OpenAILanguageModel.self] = OpenAILanguageModel.CustomGenerationOptions(
     ///     topP: 0.9,
     ///     frequencyPenalty: 0.5,
     ///     presencePenalty: 0.5,
@@ -500,7 +500,10 @@ public struct OpenAILanguageModel: LanguageModel {
 
             if let refusalMessage = choice.message.refusal {
                 let refusalEntry = Transcript.Entry.response(
-                    Transcript.Response(assetIDs: [], segments: [.text(.init(content: refusalMessage))])
+                    Transcript.Response(
+                        assetIDs: [],
+                        segments: [.text(Transcript.TextSegment(content: refusalMessage))]
+                    )
                 )
                 throw LanguageModelSession.GenerationError.refusal(
                     LanguageModelSession.GenerationError.Refusal(transcriptEntries: [refusalEntry]),
@@ -558,7 +561,7 @@ public struct OpenAILanguageModel: LanguageModel {
         }
 
         let generatedContent = try GeneratedContent(json: text)
-        let content = try type.init(generatedContent)
+        let content = try Content(generatedContent)
         return LanguageModelSession.Response(
             content: content,
             rawContent: generatedContent,
@@ -656,7 +659,7 @@ public struct OpenAILanguageModel: LanguageModel {
 
         if let jsonString = extractJSONFromOutput(lastOutput) {
             let generatedContent = try GeneratedContent(json: jsonString)
-            let content = try type.init(generatedContent)
+            let content = try Content(generatedContent)
             return LanguageModelSession.Response(
                 content: content,
                 rawContent: generatedContent,
@@ -1321,21 +1324,21 @@ extension Transcript {
             switch item {
             case .instructions(let instructions):
                 messages.append(
-                    .init(
+                    OpenAIMessage(
                         role: .system,
                         content: .blocks(convertSegmentsToOpenAIBlocks(instructions.segments))
                     )
                 )
             case .prompt(let prompt):
                 messages.append(
-                    .init(
+                    OpenAIMessage(
                         role: .user,
                         content: .blocks(convertSegmentsToOpenAIBlocks(prompt.segments))
                     )
                 )
             case .response(let response):
                 messages.append(
-                    .init(
+                    OpenAIMessage(
                         role: .assistant,
                         content: .blocks(convertSegmentsToOpenAIBlocks(response.segments))
                     )
@@ -1364,14 +1367,14 @@ extension Transcript {
                 ])
 
                 messages.append(
-                    .init(
+                    OpenAIMessage(
                         role: .raw(rawContent: rawMessage),
                         content: .text("")
                     )
                 )
             case .toolOutput(let toolOutput):
                 messages.append(
-                    .init(
+                    OpenAIMessage(
                         role: .tool(id: toolOutput.id),
                         content: .text(convertSegmentsToToolContentString(toolOutput.segments))
                     )
@@ -1914,13 +1917,19 @@ private func streamingSnapshot<Content>(
 where Content: Generable, Content.PartiallyGenerated: Sendable {
     if type == String.self {
         let raw = GeneratedContent(accumulatedText)
-        return .init(content: (accumulatedText as! Content).asPartiallyGenerated(), rawContent: raw)
+        return LanguageModelSession.ResponseStream<Content>.Snapshot(
+            content: (accumulatedText as! Content).asPartiallyGenerated(),
+            rawContent: raw
+        )
     }
 
     let raw = (try? GeneratedContent(json: accumulatedText)) ?? GeneratedContent(accumulatedText)
     // Skip snapshots until the accumulated JSON parses.
-    guard let parsed = try? type.init(raw) else { return nil }
-    return .init(content: parsed.asPartiallyGenerated(), rawContent: raw)
+    guard let parsed = try? Content(raw) else { return nil }
+    return LanguageModelSession.ResponseStream<Content>.Snapshot(
+        content: parsed.asPartiallyGenerated(),
+        rawContent: raw
+    )
 }
 
 private func resolveOpenAIToolCalls(
@@ -1974,7 +1983,7 @@ private func emptyResponseContent<Content: Generable>(
     }
 
     let raw = GeneratedContent(properties: [:])
-    let content = try type.init(raw)
+    let content = try Content(raw)
     return (content, raw)
 }
 
