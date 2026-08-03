@@ -395,59 +395,121 @@ public struct GeminiLanguageModel: LanguageModel {
 
                     let geminiTools = try buildTools(from: session.tools, serverTools: effectiveServerTools)
 
-                    let params = try createGenerateContentParams(
-                        contents: session.transcript.toGeminiContent(),
-                        tools: geminiTools,
-                        generating: type,
-                        options: options,
-                        thinking: effectiveThinking,
-                        jsonMode: effectiveJsonMode
-                    )
+                    var contents: [GeminiContent] = session.transcript.toGeminiContent()
 
-                    let body = try JSONEncoder().encode(params)
-
-                    let stream: AsyncThrowingStream<GeminiGenerateContentResponse, any Error> =
-                        httpSession
-                        .fetchEventStream(
-                            .post,
-                            url: url,
-                            headers: headers,
-                            body: body
+                    // Multi-turn conversation loop for tool calling.
+                    turnLoop: while true {
+                        let params = try createGenerateContentParams(
+                            contents: contents,
+                            tools: geminiTools,
+                            generating: type,
+                            options: options,
+                            thinking: effectiveThinking,
+                            jsonMode: effectiveJsonMode
                         )
 
-                    var accumulatedText = ""
+                        let body = try JSONEncoder().encode(params)
 
-                    for try await chunk in stream {
-                        guard let candidate = chunk.candidates.first else { continue }
+                        let events: AsyncThrowingStream<GeminiGenerateContentResponse, any Error> =
+                            httpSession
+                            .fetchEventStream(
+                                .post,
+                                url: url,
+                                headers: headers,
+                                body: body
+                            )
 
-                        if let parts = candidate.content.parts {
-                            for part in parts {
-                                if case .text(let textPart) = part {
-                                    accumulatedText += textPart.text
+                        var accumulatedText = ""
+                        var functionCalls: [GeminiFunctionCall] = []
 
-                                    var raw: GeneratedContent
-                                    let content: Content.PartiallyGenerated?
+                        for try await chunk in events {
+                            guard let candidate = chunk.candidates.first else { continue }
 
-                                    if type == String.self {
-                                        raw = GeneratedContent(accumulatedText)
-                                        content = (accumulatedText as! Content).asPartiallyGenerated()
-                                    } else {
-                                        raw =
-                                            (try? GeneratedContent(json: accumulatedText))
-                                            ?? GeneratedContent(accumulatedText)
-                                        if let parsed = try? type.init(raw) {
-                                            content = parsed.asPartiallyGenerated()
+                            if let parts = candidate.content.parts {
+                                for part in parts {
+                                    switch part {
+                                    case .functionCall(let call):
+                                        // Gemini delivers function calls as whole parts, so they only
+                                        // need to be collected until the turn ends.
+                                        functionCalls.append(call)
+                                    case .text(let textPart):
+                                        accumulatedText += textPart.text
+
+                                        // Grow the observable transcript so a Transcript-driven UI updates live.
+                                        session.growStreamingTranscript(text: accumulatedText)
+
+                                        var raw: GeneratedContent
+                                        let content: Content.PartiallyGenerated?
+
+                                        if type == String.self {
+                                            raw = GeneratedContent(accumulatedText)
+                                            content = (accumulatedText as! Content).asPartiallyGenerated()
                                         } else {
-                                            // Skip invalid partial JSON until it parses cleanly.
-                                            content = nil
+                                            raw =
+                                                (try? GeneratedContent(json: accumulatedText))
+                                                ?? GeneratedContent(accumulatedText)
+                                            if let parsed = try? type.init(raw) {
+                                                content = parsed.asPartiallyGenerated()
+                                            } else {
+                                                // Skip invalid partial JSON until it parses cleanly.
+                                                content = nil
+                                            }
                                         }
-                                    }
 
-                                    if let content {
-                                        continuation.yield(.init(content: content, rawContent: raw))
+                                        if let content {
+                                            continuation.yield(.init(content: content, rawContent: raw))
+                                        }
+                                    case .functionResponse, .inlineData, .fileData:
+                                        continue
                                     }
                                 }
                             }
+                        }
+
+                        // The turn finished without the model asking for a tool, so the response is complete.
+                        guard !functionCalls.isEmpty else { break turnLoop }
+
+                        let resolution = try await resolveFunctionCalls(functionCalls, session: session)
+                        switch resolution {
+                        case .stop(let calls):
+                            if !calls.isEmpty {
+                                session.appendTranscriptEntry(.toolCalls(Transcript.ToolCalls(calls)))
+                            }
+                            continuation.finish()
+                            return
+                        case .invocations(let invocations):
+                            // Nothing was executed, so there is no new information to send back.
+                            guard !invocations.isEmpty else { break turnLoop }
+
+                            // Tool calls must be recorded before their outputs.
+                            session.appendTranscriptEntry(
+                                .toolCalls(Transcript.ToolCalls(invocations.map(\.call)))
+                            )
+
+                            var modelParts: [GeminiPart] = []
+                            if !accumulatedText.isEmpty {
+                                modelParts.append(.text(GeminiTextPart(text: accumulatedText)))
+                            }
+                            modelParts.append(contentsOf: functionCalls.map { GeminiPart.functionCall($0) })
+                            contents.append(GeminiContent(role: .model, parts: modelParts))
+
+                            var responseParts: [GeminiPart] = []
+                            responseParts.reserveCapacity(invocations.count)
+                            for invocation in invocations {
+                                session.appendTranscriptEntry(.toolOutput(invocation.output))
+
+                                responseParts.append(
+                                    .functionResponse(
+                                        GeminiFunctionResponse(
+                                            name: invocation.output.toolName,
+                                            response: try toJSONValue(invocation.output)
+                                        )
+                                    )
+                                )
+                            }
+
+                            // Gemini expects function responses to come back from the user role.
+                            contents.append(GeminiContent(role: .user, parts: responseParts))
                         }
                     }
 
@@ -796,8 +858,10 @@ private enum GeminiPart: Codable, Sendable {
             let text = try container.decode(String.self, forKey: .text)
             self = .text(GeminiTextPart(text: text))
         } else if container.contains(.functionCall) {
-            // Note: thoughtSignature may be present but is ignored
-            self = .functionCall(try container.decode(GeminiFunctionCall.self, forKey: .functionCall))
+            var call = try container.decode(GeminiFunctionCall.self, forKey: .functionCall)
+            // Carried alongside the call so it can be echoed back on the next turn.
+            call.thoughtSignature = try container.decodeIfPresent(String.self, forKey: .thoughtSignature)
+            self = .functionCall(call)
         } else if container.contains(.functionResponse) {
             self = .functionResponse(try container.decode(GeminiFunctionResponse.self, forKey: .functionResponse))
         } else if container.contains(.inlineData) {
@@ -821,6 +885,7 @@ private enum GeminiPart: Codable, Sendable {
             try container.encode(part.text, forKey: .text)
         case .functionCall(let call):
             try container.encode(call, forKey: .functionCall)
+            try container.encodeIfPresent(call.thoughtSignature, forKey: .thoughtSignature)
         case .functionResponse(let response):
             try container.encode(response, forKey: .functionResponse)
         case .inlineData(let data):
@@ -877,6 +942,13 @@ private func convertSegmentsToGeminiParts(_ segments: [Transcript.Segment]) -> [
 private struct GeminiFunctionCall: Codable, Sendable {
     let name: String
     let args: [String: JSONValue]?
+
+    /// An opaque signature newer models attach to a function call.
+    ///
+    /// It must be echoed back verbatim when the call is sent again on the follow-up turn, or the
+    /// API rejects the request with `INVALID_ARGUMENT`. It sits beside `functionCall` rather than
+    /// inside it, so ``GeminiPart`` reads and writes it and it stays out of `CodingKeys` here.
+    var thoughtSignature: String?
 
     enum CodingKeys: String, CodingKey {
         case name
