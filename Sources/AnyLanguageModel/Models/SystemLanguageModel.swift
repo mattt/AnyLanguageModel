@@ -93,9 +93,7 @@
                     content: fmResponse.content as! Content,
                     rawContent: generatedContent,
                     transcriptEntries: ArraySlice(
-                        fmResponse.transcriptEntries
-                            .filter(isToolActivity)
-                            .compactMap { toolTranscriptEntry(from: $0) }
+                        fmResponse.transcriptEntries.compactMap { toolActivityEntry(from: $0) }
                     )
                 )
             } else {
@@ -109,9 +107,7 @@
                 )
 
                 let toolEntries = ArraySlice(
-                    fmResponse.transcriptEntries
-                        .filter(isToolActivity)
-                        .compactMap { toolTranscriptEntry(from: $0) }
+                    fmResponse.transcriptEntries.compactMap { toolActivityEntry(from: $0) }
                 )
 
                 func finalize(content: Content) -> LanguageModelSession.Response<Content> {
@@ -201,8 +197,8 @@
                     func mirrorToolEntries(mirroredEntryCount: inout Int) {
                         let fmEntries = Array(fmSession.transcript)
                         guard fmEntries.count > mirroredEntryCount else { return }
-                        for entry in fmEntries[mirroredEntryCount...] where isToolActivity(entry) {
-                            if let toolEntry = toolTranscriptEntry(from: entry) {
+                        for entry in fmEntries[mirroredEntryCount...] {
+                            if let toolEntry = toolActivityEntry(from: entry) {
                                 session.appendTranscriptEntry(toolEntry)
                             }
                         }
@@ -848,27 +844,14 @@
 
     // MARK: - FoundationModels to AnyLanguageModel Conversions
 
-    /// Whether a FoundationModels entry records tool activity.
+    /// Converts a FoundationModels transcript entry into its AnyLanguageModel equivalent if it
+    /// records tool activity.
     ///
-    /// Only these entries are carried back. Instructions, prompts, and responses are owned by
+    /// Returns `nil` for every other entry kind. Instructions, prompts, and responses are owned by
     /// ``LanguageModelSession`` itself — it appends the prompt before calling the model and the
     /// response after — so mirroring them here would duplicate transcript entries.
     @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
-    private func isToolActivity(_ entry: FoundationModels.Transcript.Entry) -> Bool {
-        switch entry {
-        case .toolCalls, .toolOutput: return true
-        default: return false
-        }
-    }
-
-    /// Converts a tool-related FoundationModels transcript entry into its AnyLanguageModel
-    /// equivalent.
-    ///
-    /// Returns `nil` when the entry's contents can't be converted, and for entries that aren't
-    /// tool activity — callers filter with ``isToolActivity(_:)`` first so that the two cases
-    /// stay distinguishable.
-    @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
-    private func toolTranscriptEntry(from entry: FoundationModels.Transcript.Entry) -> Transcript.Entry? {
+    private func toolActivityEntry(from entry: FoundationModels.Transcript.Entry) -> Transcript.Entry? {
         if case .toolCalls(let fmToolCalls) = entry {
             let calls = fmToolCalls.compactMap { call -> Transcript.ToolCall? in
                 guard let arguments = try? AnyLanguageModel.GeneratedContent(call.arguments) else { return nil }
