@@ -176,15 +176,18 @@ import Testing
 
             var foundToolOutput = false
             for case let .toolOutput(toolOutput) in response.transcriptEntries {
-                #expect(!toolOutput.id.isEmpty)
-                #expect(toolOutput.toolName == "getWeather")
+                #expect(!toolOutput.id.isEmpty, "Expected the tool output to carry the id FoundationModels assigned.")
+                #expect(toolOutput.toolName == "getWeather", "Expected the output to name the tool that produced it.")
                 foundToolOutput = true
             }
-            #expect(foundToolOutput)
+            #expect(foundToolOutput, "Expected a tool output among the response's transcript entries.")
 
             let content = response.content
-            #expect(content.contains("San Francisco"))
-            #expect(content.contains("72°F"))
+            #expect(
+                content.contains("San Francisco"),
+                "Expected the answer to mention the city the tool was asked about."
+            )
+            #expect(content.contains("72°F"), "Expected the tool's result to reach the model's answer.")
         }
 
         @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
@@ -213,7 +216,7 @@ import Testing
                 }
             }
 
-            #expect(!snapshots.isEmpty)
+            #expect(!snapshots.isEmpty, "Expected the stream to yield at least one snapshot.")
             #expect(toolAppearedInTranscript, "Expected a tool call to appear in the transcript during streaming.")
             #expect(
                 toolResponseAppearedInTranscript,
@@ -227,16 +230,16 @@ import Testing
             let toolOutputIndex = session.transcript.firstIndex { entry in
                 if case .toolOutput = entry { return true } else { return false }
             }
-            #expect(toolCallIndex != nil)
-            #expect(toolOutputIndex != nil)
+            #expect(toolCallIndex != nil, "Expected a .toolCalls entry in the final transcript.")
+            #expect(toolOutputIndex != nil, "Expected a .toolOutput entry in the final transcript.")
             if let toolCallIndex, let toolOutputIndex {
                 #expect(toolCallIndex < toolOutputIndex, "Expected .toolCalls to precede .toolOutput.")
             }
 
             var foundToolOutput = false
             for case let .toolOutput(toolOutput) in session.transcript {
-                #expect(!toolOutput.id.isEmpty)
-                #expect(toolOutput.toolName == "getWeather")
+                #expect(!toolOutput.id.isEmpty, "Expected the tool output to carry the id FoundationModels assigned.")
+                #expect(toolOutput.toolName == "getWeather", "Expected the output to name the tool that produced it.")
                 foundToolOutput = true
             }
             #expect(foundToolOutput, "Expected the 'getWeather' tool to exist in the final transcript.")
