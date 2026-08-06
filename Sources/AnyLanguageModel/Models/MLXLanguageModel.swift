@@ -288,23 +288,64 @@ import Foundation
             var additionalContextForUserInput: [String: any Sendable]? {
                 additionalContext?.mapValues { $0.toSendable() }
             }
+            
+            /// The nucleus-sampling probability threshold. Only tokens whose cumulative
+            /// probability mass falls within the top `topP` fraction are considered during
+            /// sampling. `nil` lets MLX use its model default.
+            public var topP: Float?
 
+            /// The top-k sampling limit. Only the `topK` highest-probability tokens are
+            /// considered during sampling. `nil` lets MLX use its model default.
+            public var topK: Int?
+
+            /// The minimum probability threshold for token sampling. Tokens with a probability
+            /// below `minP` (relative to the most-probable token) are excluded. `nil` lets MLX
+            /// use its model default.
+            public var minP: Float?
+
+            /// A penalty applied to the logit of any token that has already appeared in the
+            /// output, discouraging repetition. Positive values reduce the likelihood of
+            /// repeating tokens. `nil` lets MLX use its model default.
+            public var presencePenalty: Float?
+
+            /// A multiplicative penalty applied to the logit of tokens that have already
+            /// appeared in the output. Values greater than `1.0` reduce repetition; values less
+            /// than `1.0` encourage it. `nil` lets MLX use its model default.
+            public var repetitionPenalty: Float?
+            
             /// Creates MLX-specific generation options.
             ///
             /// - Parameters:
             ///   - kvCache: KV-cache configuration used for generation.
-            ///   - additionalContext: Additional key-value pairs injected into the chat
-            ///     template rendering context.
             ///   - userInputProcessing: Processing to apply to user media before input preparation.
             ///     Defaults to `nil`, which lets MLX use its default media handling.
+            ///   - additionalContext: Additional key-value pairs injected into the chat
+            ///     template rendering context.
+            ///   - topP: Nucleus-sampling threshold. `nil` uses the model default.
+            ///   - topK: Top-k sampling limit. `nil` uses the model default.
+            ///   - minP: Minimum probability threshold for token sampling. `nil` uses the model default.
+            ///   - presencePenalty: Penalty applied to tokens that have already appeared in the output.
+            ///     `nil` uses the model default.
+            ///   - repetitionPenalty: Multiplicative penalty applied to repeated tokens. `nil` uses
+            ///     the model default.
             public init(
                 kvCache: KVCache,
                 userInputProcessing: UserInputProcessing?,
-                additionalContext: [String: AnyLanguageModel.JSONValue]?
+                additionalContext: [String: AnyLanguageModel.JSONValue]?,
+                topP: Float?,
+                topK: Int?,
+                minP: Float?,
+                presencePenalty: Float?,
+                repetitionPenalty: Float?
             ) {
                 self.kvCache = kvCache
                 self.additionalContext = additionalContext
                 self.userInputProcessing = userInputProcessing
+                self.topP = topP
+                self.topK = topK
+                self.minP = minP
+                self.presencePenalty = presencePenalty
+                self.repetitionPenalty = repetitionPenalty
             }
 
             /// Default MLX generation options used when none are provided at runtime.
@@ -312,7 +353,12 @@ import Foundation
                 .init(
                     kvCache: .default,
                     userInputProcessing: nil,
-                    additionalContext: nil
+                    additionalContext: nil,
+                    topP: nil,
+                    topK: nil,
+                    minP: nil,
+                    presencePenalty: nil,
+                    repetitionPenalty: nil
                 )
             }
         }
@@ -1304,18 +1350,40 @@ import Foundation
 
     // MARK: - Options Mapping
 
+    /// Recover temperature, topP and topK from Foundation Models sampling parameters.
+    /// - Parameter sampling: The sampling options
+    /// - Returns: Temperature, topP, and topK. Temperature is a double to match GenerationOptions.temperature
+    private func parametersFromSampling(sampling: GenerationOptions.SamplingMode?) -> (temperature: Double?, topP: Float?, topK: Int?) {
+        guard let sampling else { return (nil, nil, nil) }
+        
+        switch sampling.mode {
+        case .greedy:
+            return (1.0, nil, nil)
+        case .topK(let topK, _):
+            return (nil, nil, topK)
+        case .nucleus(let topP, _):
+            return (nil, Float(topP), nil)
+        }
+        
+    }
+
     private func toGenerateParameters(_ options: GenerationOptions) -> MLXLMCommon.GenerateParameters {
         let custom = options[custom: MLXLanguageModel.self]
+        let sampling = parametersFromSampling(sampling: options.sampling)
+        
         return MLXLMCommon.GenerateParameters(
             maxTokens: options.maximumResponseTokens,
             maxKVSize: custom?.kvCache.maxSize,
             kvBits: custom?.kvCache.bits,
             kvGroupSize: custom?.kvCache.groupSize ?? 64,
             quantizedKVStart: custom?.kvCache.quantizedStart ?? 0,
-            temperature: Float(options.temperature ?? 0.6),
-            topP: 1.0,
-            repetitionPenalty: nil,
-            repetitionContextSize: 20
+            temperature: Float(options.temperature ?? sampling.temperature ?? 0.6),
+            topP: sampling.topP ?? custom?.topP ?? 1.0,
+            topK: sampling.topK ?? custom?.topK ?? 0,
+            minP: custom?.minP ?? 0,
+            repetitionPenalty: custom?.repetitionPenalty,
+            repetitionContextSize: 20,
+            presencePenalty: custom?.presencePenalty
         )
     }
 
