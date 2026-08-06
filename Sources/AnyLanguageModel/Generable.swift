@@ -163,10 +163,15 @@ extension Int: Generable {
 
     /// Creates an instance with the content.
     public init(_ content: GeneratedContent) throws {
-        guard case .number(let value) = content.kind else {
-            throw GeneratedContentConversionError.typeMismatch
+        switch content.kind {
+        case .number(let value):
+            self = Int(value)
+        case .string(let string):
+            guard let int = Int(string) else { throw GeneratedContentError.typeMismatch }
+            self = int
+        default:
+            throw GeneratedContentError.typeMismatch
         }
-        self = Int(value)
     }
 
     /// An instance that represents the generated content.
