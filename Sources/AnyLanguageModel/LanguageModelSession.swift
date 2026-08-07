@@ -155,38 +155,46 @@ public final class LanguageModelSession: @unchecked Sendable {
         let session = self
         let relay = AsyncThrowingStream<ResponseStream<Content>.Snapshot, any Error> { continuation in
             let stream = upstream
-            Task {
+            let snapshotPump = Task {
                 session.beginResponding()
+                defer { session.endResponding() }
+                
                 var lastSnapshot: ResponseStream<Content>.Snapshot?
                 do {
                     for try await snapshot in stream {
                         lastSnapshot = snapshot
                         continuation.yield(snapshot)
                     }
-                    continuation.finish()
-
-                    // Add response to transcript after stream completes
-                    if let lastSnapshot {
-                        // Extract text content from the generated content
-                        let textContent: String
-                        if case .string(let str) = lastSnapshot.rawContent.kind {
-                            textContent = str
-                        } else {
-                            textContent = lastSnapshot.rawContent.jsonString
-                        }
-
-                        session.withMutation(keyPath: \.transcript) {
-                            session.state.withLock {
-                                $0.transcript.finalizeStreamedTranscript(textContent, assetIDs: [])
-                            }
-                        }
-                    }
                 } catch {
                     continuation.finish(throwing: error)
+                    return
                 }
-                session.endResponding()
+                
+                // Add response to transcript after stream completes
+                if let lastSnapshot {
+                    // Extract text content from the generated content
+                    let textContent: String
+                    if case .string(let str) = lastSnapshot.rawContent.kind {
+                        textContent = str
+                    } else {
+                        textContent = lastSnapshot.rawContent.jsonString
+                    }
+
+                    session.withMutation(keyPath: \.transcript) {
+                        session.state.withLock {
+                            $0.transcript.finalizeStreamedTranscript(textContent, assetIDs: [])
+                        }
+                    }
+                }
+                
+                continuation.finish()
+            }
+            
+            continuation.onTermination = { _ in
+                snapshotPump.cancel()
             }
         }
+        
         return ResponseStream(stream: relay)
     }
 
