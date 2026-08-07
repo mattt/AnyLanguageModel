@@ -1334,7 +1334,15 @@ import Foundation
                         tools: toolSpecs
                     )
                     let lmInput = try await context.processor.prepare(input: userInput)
-                    _ = try context.model.prepare(lmInput, cache: newCache, windowSize: params.prefillStepSize)
+                    
+                    let state: MLXLMCommon.LMOutput.State? = nil
+                    let prepareResult = try context.model.prepare(lmInput, cache: newCache, state: state, windowSize: params.prefill.stepSize)
+                    switch prepareResult {
+                    case .tokens(let tokensToProcess):
+                        _ = context.model(tokensToProcess[text: .newAxis], cache: newCache, state: state)
+                    case .logits:
+                        break
+                    }
                     storeSessionCache(
                         cache: newCache,
                         fullTokens: tokens(from: lmInput),
@@ -1829,7 +1837,8 @@ import Foundation
             let prepareResult = try context.model.prepare(
                 input,
                 cache: cache,
-                windowSize: parameters.prefillStepSize
+                state: state,
+                windowSize: parameters.prefill.stepSize
             )
 
             let output: MLXLMCommon.LMOutput

@@ -1,4 +1,4 @@
-// swift-tools-version: 6.1
+// swift-tools-version: 6.2
 // The swift-tools-version declares the minimum version of Swift required to build this package.
 
 import CompilerPluginSupport
@@ -42,7 +42,9 @@ let package = Package(
         .package(url: "https://github.com/mattt/JSONSchema", from: "1.3.0"),
         .package(url: "https://github.com/mattt/llama.swift", .upToNextMajor(from: "2.7484.0")),
         .package(url: "https://github.com/mattt/PartialJSONDecoder", from: "1.0.0"),
-        .package(url: "https://github.com/ml-explore/mlx-swift-lm", from: "3.0.0"),
+        // Fork is here since the mlx-swift-lm main repo is slow to update.
+//        .package(url: "https://github.com/ml-explore/mlx-swift-lm", from: "3.0.0"),
+        .package(url: "https://github.com/impel-intelligence/mlx-swift-lm", from: "1.0.1"),
         .package(url: "https://github.com/swiftlang/swift-syntax", from: "602.0.0"),
         .package(url: "https://github.com/swift-server/async-http-client.git", from: "1.24.0"),
     ],
