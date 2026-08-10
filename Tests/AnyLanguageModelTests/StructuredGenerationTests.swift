@@ -450,4 +450,166 @@ struct StructuredGenerationTests {
         let result = try await generator.generate()
         #expect(result == "[\"a\",\"a\",\"a\"]")
     }
+
+    // MARK: - Model-driven optional object properties
+
+    private func objectTokenMaps() -> (
+        tokenToText: [Int: String],
+        textToTokens: [String: [Int]]
+    ) {
+        // Structural + single-letter keys so `"x":` / `,"y":` tokenize without collisions.
+        var maps = baseTokenMaps()
+        let quote = 0
+        let comma = 1
+        let colon = 4
+        let x = 10
+        let y = 11
+        let z = 12
+        maps.textToTokens["\"x\":"] = [quote, x, quote, colon]
+        maps.textToTokens["\"y\":"] = [quote, y, quote, colon]
+        maps.textToTokens["\"z\":"] = [quote, z, quote, colon]
+        maps.textToTokens[",\"x\":"] = [comma, quote, x, quote, colon]
+        maps.textToTokens[",\"y\":"] = [comma, quote, y, quote, colon]
+        maps.textToTokens[",\"z\":"] = [comma, quote, z, quote, colon]
+        return maps
+    }
+
+    private func allOptionalObjectSchema() -> GenerationSchema {
+        let stringNode = GenerationSchema.Node.string(.init(enumChoices: ["a"]))
+        let objectNode = GenerationSchema.ObjectNode(
+            description: nil,
+            properties: [
+                "x": stringNode,
+                "y": stringNode,
+                "z": stringNode,
+            ],
+            required: []
+        )
+        // Type argument is unused; only the node shapes generation.
+        return GenerationSchema.primitive(String.self, node: .object(objectNode))
+    }
+
+    @Test func optionalObjectKeysAreChosenBySamplingNotNameHash() async throws {
+        let maps = objectTokenMaps()
+        let schema = allOptionalObjectSchema()
+        let eosToken = 50
+        let quote = 0
+        let y = 11
+        let aToken = 8
+        let colon = 4
+        let rightBrace = 2
+
+        // Open with "y": (not lexicographically first), value "a", then close — leave x/z out.
+        // generateChoice samples every token of the chosen property-start and the enum value.
+        let backend = MockTokenBackend(
+            tokenToText: maps.tokenToText,
+            textToTokens: maps.textToTokens,
+            eosToken: eosToken,
+            endTokens: [eosToken],
+            maximumTokens: 64,
+            samplingQueue: [
+                quote, y, quote, colon,  // "y":
+                aToken,  // enum value "a"
+                rightBrace,  // close
+            ]
+        )
+
+        var generator = try ConstrainedJSONGenerator(backend: backend, schema: schema)
+        let result = try await generator.generate()
+        #expect(result == #"{"y":"a"}"#)
+        #expect(!result.contains("\"x\""))
+        #expect(!result.contains("\"z\""))
+    }
+
+    @Test func optionalObjectKeysVaryWithSamplingQueue() async throws {
+        let maps = objectTokenMaps()
+        let schema = allOptionalObjectSchema()
+        let eosToken = 50
+        let quote = 0
+        let x = 10
+        let z = 12
+        let aToken = 8
+        let comma = 1
+        let colon = 4
+        let rightBrace = 2
+
+        // Emit x then z (skip y) — different key set than the previous test.
+        let backend = MockTokenBackend(
+            tokenToText: maps.tokenToText,
+            textToTokens: maps.textToTokens,
+            eosToken: eosToken,
+            endTokens: [eosToken],
+            maximumTokens: 64,
+            samplingQueue: [
+                quote, x, quote, colon,  // "x":
+                aToken,  // "a"
+                comma, quote, z, quote, colon,  // ,"z":
+                aToken,  // "a"
+                rightBrace,
+            ]
+        )
+
+        var generator = try ConstrainedJSONGenerator(backend: backend, schema: schema)
+        let result = try await generator.generate()
+        #expect(result == #"{"x":"a","z":"a"}"#)
+        #expect(!result.contains("\"y\""))
+    }
+
+    @Test func requiredObjectKeysMustBeEmittedBeforeClose() async throws {
+        let maps = objectTokenMaps()
+        let stringNode = GenerationSchema.Node.string(.init(enumChoices: ["a"]))
+        let objectNode = GenerationSchema.ObjectNode(
+            description: nil,
+            properties: [
+                "x": stringNode,
+                "y": stringNode,
+            ],
+            required: ["x"]
+        )
+        let schema = GenerationSchema.primitive(String.self, node: .object(objectNode))
+        let eosToken = 50
+        let quote = 0
+        let x = 10
+        let aToken = 8
+        let colon = 4
+        let rightBrace = 2
+
+        // "}" is not among candidates until required "x" is emitted.
+        let backend = MockTokenBackend(
+            tokenToText: maps.tokenToText,
+            textToTokens: maps.textToTokens,
+            eosToken: eosToken,
+            endTokens: [eosToken],
+            maximumTokens: 64,
+            samplingQueue: [
+                quote, x, quote, colon,
+                aToken,
+                rightBrace,
+            ]
+        )
+
+        var generator = try ConstrainedJSONGenerator(backend: backend, schema: schema)
+        let result = try await generator.generate()
+        #expect(result == #"{"x":"a"}"#)
+    }
+
+    @Test func emptyObjectWhenModelClosesImmediately() async throws {
+        let maps = objectTokenMaps()
+        let schema = allOptionalObjectSchema()
+        let eosToken = 50
+        let rightBrace = 2
+
+        let backend = MockTokenBackend(
+            tokenToText: maps.tokenToText,
+            textToTokens: maps.textToTokens,
+            eosToken: eosToken,
+            endTokens: [eosToken],
+            maximumTokens: 64,
+            samplingQueue: [rightBrace]
+        )
+
+        var generator = try ConstrainedJSONGenerator(backend: backend, schema: schema)
+        let result = try await generator.generate()
+        #expect(result == "{}")
+    }
 }

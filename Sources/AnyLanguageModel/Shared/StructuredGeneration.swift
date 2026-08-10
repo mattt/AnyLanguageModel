@@ -20,10 +20,16 @@ protocol TokenBackend {
     var totalTokenBudget: Int { get }
 }
 
-/// Heuristics for deciding when to include optional properties in generated output.
-private enum OptionalPropertyBudget {
-    /// Minimum absolute number of tokens that should remain before we consider
-    /// adding optional properties.
+/// Last-resort token-budget floor for optional structure (object keys / array items).
+///
+/// Optional *selection* is model-driven (see ``ConstrainedJSONGenerator``).
+/// This floor only kicks in when generation is about to run out of tokens: once the
+/// schema-valid minimum has been emitted (all required keys, or `minItems` elements),
+/// the generator stops offering further optionals and closes rather than risking a
+/// hard budget failure mid-value.
+private enum OptionalStructureBudget {
+    /// Minimum absolute number of tokens that should remain before offering more
+    /// optional properties or array elements.
     static let minimumRemainingTokens = 8
 
     /// Require at least this fraction of the total budget (divisor form).
@@ -425,17 +431,66 @@ struct ConstrainedJSONGenerator<Backend: TokenBackend> {
     }
 
     private mutating func generateObject(_ node: GenerationSchema.ObjectNode) async throws -> String {
-        let keys = node.properties.keys.sorted()
-        let includedKeys = keys.filter { shouldIncludeOptionalProperty($0, required: node.required) }
+        // Object *key set* is model-driven under the JSON grammar. The previous
+        // implementation pre-filtered optional properties with a hash of the field
+        // name XOR the token budget, so each optional was always-on or always-off
+        // for a given budget — decided before the model was consulted.
+        //
+        // After each property the mask permits any not-yet-emitted key, and permits
+        // `}` once every required property has been emitted. For schemas with no
+        // required properties that makes `{}` reachable (schema-valid, and what the
+        // model asked for) — a visible behaviour change for such schemas.
+        var remainingKeys = Set(node.properties.keys)
+        let required = node.required
         var output = try await emit("{")
+        var emittedAnyProperty = false
 
-        for (index, key) in includedKeys.enumerated() {
-            output += try await emit("\"\(key)\":")
-            output += try await generateNode(node.properties[key] ?? .string(.init()))
+        while !remainingKeys.isEmpty {
+            let missingRequired = required.intersection(remainingKeys)
+            let canClose = missingRequired.isEmpty
+            let budgetAllowsMoreOptionals = hasBudgetForOptionalStructure()
 
-            if index < includedKeys.count - 1 {
-                output += try await emit(",")
+            let keysToOffer: [String]
+            if budgetAllowsMoreOptionals {
+                // Model chooses any not-yet-emitted property (required or optional).
+                keysToOffer = remainingKeys.sorted()
+            } else if canClose {
+                // Genuine last resort: stop offering optionals when the budget is nearly
+                // exhausted. Required properties are already present, so close cleanly.
+                break
+            } else {
+                // Still missing required keys — only those may be emitted under pressure.
+                keysToOffer = missingRequired.sorted()
             }
+
+            var candidates: [String] = keysToOffer.map { key in
+                let prefix = emittedAnyProperty ? "," : ""
+                return "\(prefix)\"\(key)\":"
+            }
+            // Closing is legal once every required property has been emitted. The model
+            // may leave remaining optionals out; that is schema-valid JSON.
+            if canClose {
+                candidates.append("}")
+            }
+
+            guard !candidates.isEmpty else { break }
+
+            let choice = try await generateChoice(candidates)
+            output += choice
+
+            // Model elected to close; remaining keys are optional and intentionally omitted.
+            if choice == "}" {
+                return output
+            }
+
+            guard let key = propertyKey(fromPropertyStart: choice),
+                let valueNode = node.properties[key]
+            else {
+                throw ConstrainedGenerationError.tokenizationFailed
+            }
+            remainingKeys.remove(key)
+            output += try await generateNode(valueNode)
+            emittedAnyProperty = true
         }
 
         output += try await emit("}")
@@ -516,13 +571,30 @@ struct ConstrainedJSONGenerator<Backend: TokenBackend> {
         return output
     }
 
-    private func shouldIncludeOptionalProperty(_ key: String, required: Set<String>) -> Bool {
-        if required.contains(key) { return true }
-        let minimumBudget = OptionalPropertyBudget.minimumBudget(totalTokenBudget: backend.totalTokenBudget)
-        guard backend.remainingTokens > minimumBudget else { return false }
-        let hash = key.utf8.reduce(0) { ($0 &* 31) &+ Int($1) }
-        let combined = hash ^ backend.totalTokenBudget
-        return combined % 2 == 0
+    /// Whether enough budget remains to *offer* more optional structure to the model
+    /// (object properties or array elements).
+    ///
+    /// This is a last-resort guard only. It does not pick which optionals appear or how
+    /// long an array is — those decisions are made by constrained sampling.
+    private func hasBudgetForOptionalStructure() -> Bool {
+        let minimumBudget = OptionalStructureBudget.minimumBudget(
+            totalTokenBudget: backend.totalTokenBudget
+        )
+        return backend.remainingTokens > minimumBudget
+    }
+
+    /// Parses a property-start fragment produced for object key selection.
+    ///
+    /// Expected shapes: `"key":` (first property) or `,"key":` (subsequent).
+    private func propertyKey(fromPropertyStart choice: String) -> String? {
+        var fragment = choice
+        if fragment.first == "," {
+            fragment.removeFirst()
+        }
+        guard fragment.first == "\"", fragment.hasSuffix("\":") else { return nil }
+        fragment.removeFirst()
+        fragment.removeLast(2)
+        return fragment
     }
 
     private func deterministicChoice(from candidates: [String]) -> String {
