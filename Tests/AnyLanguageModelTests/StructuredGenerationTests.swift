@@ -428,7 +428,9 @@ struct StructuredGenerationTests {
         }
     }
 
-    @Test func arrayCountIsDeterministic() async throws {
+    // MARK: - Model-driven array length
+
+    @Test func arrayLengthIsChosenBySamplingNotBudget() async throws {
         let maps = baseTokenMaps()
         let arrayNode = GenerationSchema.ArrayNode(
             description: nil,
@@ -438,17 +440,188 @@ struct StructuredGenerationTests {
         )
         let schema = GenerationSchema.primitive([String].self, node: .array(arrayNode))
         let eosToken = 50
+        let aToken = 8
+        let rightBracket = 3
+
+        // minItems=1 forces first element; model then closes (length 1), not budget-derived 3.
+        // With maximumTokens 17 the old formula was minItems + (17 % 3) = 3.
         let backend = MockTokenBackend(
             tokenToText: maps.tokenToText,
             textToTokens: maps.textToTokens,
             eosToken: eosToken,
             endTokens: [eosToken],
-            maximumTokens: 17
+            maximumTokens: 17,
+            samplingQueue: [
+                aToken,  // first "a"
+                rightBracket,  // close after 1 (`,` would continue)
+            ]
         )
 
         var generator = try ConstrainedJSONGenerator(backend: backend, schema: schema)
         let result = try await generator.generate()
-        #expect(result == "[\"a\",\"a\",\"a\"]")
+        #expect(result == "[\"a\"]")
+    }
+
+    @Test func arrayLengthVariesWithSamplingQueue() async throws {
+        let maps = baseTokenMaps()
+        let arrayNode = GenerationSchema.ArrayNode(
+            description: nil,
+            items: .string(.init(enumChoices: ["a"])),
+            minItems: 1,
+            maxItems: 3
+        )
+        let schema = GenerationSchema.primitive([String].self, node: .array(arrayNode))
+        let eosToken = 50
+        let aToken = 8
+        let comma = 1
+        let rightBracket = 3
+
+        // Emit two elements then close — different length than the previous test.
+        let backend = MockTokenBackend(
+            tokenToText: maps.tokenToText,
+            textToTokens: maps.textToTokens,
+            eosToken: eosToken,
+            endTokens: [eosToken],
+            maximumTokens: 64,
+            samplingQueue: [
+                aToken,  // "a"
+                comma,  // continue
+                aToken,  // "a"
+                rightBracket,  // close
+            ]
+        )
+
+        var generator = try ConstrainedJSONGenerator(backend: backend, schema: schema)
+        let result = try await generator.generate()
+        #expect(result == "[\"a\",\"a\"]")
+    }
+
+    @Test func arrayRespectsMaxItems() async throws {
+        let maps = baseTokenMaps()
+        let arrayNode = GenerationSchema.ArrayNode(
+            description: nil,
+            items: .string(.init(enumChoices: ["a"])),
+            minItems: 1,
+            maxItems: 2
+        )
+        let schema = GenerationSchema.primitive([String].self, node: .array(arrayNode))
+        let eosToken = 50
+        let aToken = 8
+        let comma = 1
+
+        // Model always continues; generator must still stop at maxItems=2.
+        let backend = MockTokenBackend(
+            tokenToText: maps.tokenToText,
+            textToTokens: maps.textToTokens,
+            eosToken: eosToken,
+            endTokens: [eosToken],
+            maximumTokens: 64,
+            samplingQueue: [
+                aToken,
+                comma,
+                aToken,
+                // further commas would be illegal once max is reached — close is forced
+            ]
+        )
+
+        var generator = try ConstrainedJSONGenerator(backend: backend, schema: schema)
+        let result = try await generator.generate()
+        #expect(result == "[\"a\",\"a\"]")
+    }
+
+    @Test func arrayRespectsMinItemsBeforeClose() async throws {
+        let maps = baseTokenMaps()
+        let arrayNode = GenerationSchema.ArrayNode(
+            description: nil,
+            items: .string(.init(enumChoices: ["a"])),
+            minItems: 2,
+            maxItems: 4
+        )
+        let schema = GenerationSchema.primitive([String].self, node: .array(arrayNode))
+        let eosToken = 50
+        let aToken = 8
+        let rightBracket = 3
+
+        // After first element, `]` is not offered — only forced `,` + second element, then close.
+        let backend = MockTokenBackend(
+            tokenToText: maps.tokenToText,
+            textToTokens: maps.textToTokens,
+            eosToken: eosToken,
+            endTokens: [eosToken],
+            maximumTokens: 64,
+            samplingQueue: [
+                aToken,  // first
+                // no close offered here — comma is emitted forcibly
+                aToken,  // second (satisfies minItems)
+                rightBracket,  // model closes
+            ]
+        )
+
+        var generator = try ConstrainedJSONGenerator(backend: backend, schema: schema)
+        let result = try await generator.generate()
+        #expect(result == "[\"a\",\"a\"]")
+    }
+
+    @Test func emptyArrayWhenModelClosesImmediately() async throws {
+        let maps = baseTokenMaps()
+        let arrayNode = GenerationSchema.ArrayNode(
+            description: nil,
+            items: .string(.init(enumChoices: ["a"])),
+            minItems: nil,
+            maxItems: nil
+        )
+        let schema = GenerationSchema.primitive([String].self, node: .array(arrayNode))
+        let eosToken = 50
+        let rightBracket = 3
+
+        let backend = MockTokenBackend(
+            tokenToText: maps.tokenToText,
+            textToTokens: maps.textToTokens,
+            eosToken: eosToken,
+            endTokens: [eosToken],
+            maximumTokens: 64,
+            samplingQueue: [rightBracket]
+        )
+
+        var generator = try ConstrainedJSONGenerator(backend: backend, schema: schema)
+        let result = try await generator.generate()
+        #expect(result == "[]")
+    }
+
+    @Test func arrayTruncatesUnderBudgetPressure() async throws {
+        let maps = baseTokenMaps()
+        let arrayNode = GenerationSchema.ArrayNode(
+            description: nil,
+            items: .string(.init(enumChoices: ["a"])),
+            minItems: 1,
+            maxItems: 8
+        )
+        let schema = GenerationSchema.primitive([String].self, node: .array(arrayNode))
+        let eosToken = 50
+        let aToken = 8
+        let comma = 1
+
+        // Mock maps encode `]` / `"` / `a` but not `[`, so the opening bracket is free.
+        // First element costs 3 tokens (`"`, `a`, `"`). Floor is max(8, budget/10)=8.
+        // With budget 11, remaining after the first element is 8 → not strictly greater
+        // than the floor → force-close. Sampling queue would happily continue with `,`.
+        let backend = MockTokenBackend(
+            tokenToText: maps.tokenToText,
+            textToTokens: maps.textToTokens,
+            eosToken: eosToken,
+            endTokens: [eosToken],
+            maximumTokens: 11,
+            samplingQueue: [
+                aToken,
+                comma,  // would continue if offered — must not be consumed if we truncate
+                aToken,
+            ]
+        )
+
+        var generator = try ConstrainedJSONGenerator(backend: backend, schema: schema)
+        let result = try await generator.generate()
+        // Force-close after satisfying minItems under budget pressure.
+        #expect(result == "[\"a\"]")
     }
 
     // MARK: - Model-driven optional object properties

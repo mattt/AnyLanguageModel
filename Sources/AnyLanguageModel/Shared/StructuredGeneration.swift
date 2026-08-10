@@ -75,10 +75,6 @@ struct ConstrainedJSONGenerator<Backend: TokenBackend> {
     private static var maxIntegerTokenLimit: Int { 20 }
     private static var maxDecimalTokenLimit: Int { 32 }
 
-    /// Heuristics for default array sizes when no bounds are specified.
-    private static var arrayDefaultCountDivisor: Int { 32 }
-    private static var arrayDefaultCountMax: Int { 16 }
-
     private var backend: Backend
     private let schema: GenerationSchema
     private var emittedText = ""
@@ -498,40 +494,129 @@ struct ConstrainedJSONGenerator<Backend: TokenBackend> {
     }
 
     private mutating func generateArray(_ node: GenerationSchema.ArrayNode) async throws -> String {
-        // Derive a default item count from the total token budget when the schema
-        // does not specify explicit minItems/maxItems. We use a small fraction of the
-        // budget and clamp it to a reasonable range to avoid overlong arrays.
-        let budgetBasedCount = backend.totalTokenBudget / Self.arrayDefaultCountDivisor
-        let defaultCount = max(1, min(Self.arrayDefaultCountMax, budgetBasedCount))
-        let count: Int
+        // Array *length* is model-driven under the JSON grammar — same family of fix as
+        // model-driven optional object keys. After each element the mask permits both
+        // continuing (`,`) and closing (`]`), subject to schema `minItems` / `maxItems`.
+        // A budget-derived fixed count (or `totalTokenBudget % rangeSize`) would force the
+        // same length for every document and invent filler or truncate real items.
+        let minItems = max(0, node.minItems ?? 0)
+        let maxItems = node.maxItems
 
-        if let minItems = node.minItems, let maxItems = node.maxItems {
-            if minItems > maxItems {
-                throw ConstrainedGenerationError.invalidArrayBounds(
-                    "Minimum items \(minItems) exceeds maximum \(maxItems)"
-                )
-            }
-            let rangeSize = maxItems - minItems + 1
-            let offset = rangeSize > 0 ? backend.totalTokenBudget % rangeSize : 0
-            count = minItems + offset
-        } else if let minItems = node.minItems {
-            count = minItems
-        } else if let maxItems = node.maxItems {
-            count = maxItems
-        } else {
-            count = defaultCount
+        if let maxItems, minItems > maxItems {
+            throw ConstrainedGenerationError.invalidArrayBounds(
+                "Minimum items \(minItems) exceeds maximum \(maxItems)"
+            )
         }
-        var output = try await emit("[")
 
-        for index in 0 ..< count {
-            output += try await generateNode(node.items)
-            if index < count - 1 {
-                output += try await emit(",")
+        var output = try await emit("[")
+        var count = 0
+
+        while true {
+            if let maxItems, count >= maxItems {
+                break
             }
+
+            let canClose = count >= minItems
+            let budgetAllowsMore = hasBudgetForOptionalStructure()
+
+            if canClose && !budgetAllowsMore {
+                // Genuine last resort: close once minItems is satisfied rather than
+                // failing mid-element under a hard budget floor.
+                break
+            }
+
+            if count > 0 {
+                if canClose {
+                    // Model chooses continue vs close.
+                    let choice = try await generateChoice([",", "]"])
+                    if choice == "]" {
+                        output += choice
+                        return output
+                    }
+                    output += choice
+                } else {
+                    // Still below minItems — must emit another element.
+                    output += try await emit(",")
+                }
+            } else if canClose {
+                // Empty array is legal (`minItems == 0`). Probe whether the model wants
+                // `]` or a first element. Sampling is non-committing for non-`]` tokens
+                // (see ``sampleWhetherToCloseEmptyArray``); the element is then generated
+                // from the same decode state.
+                if try await sampleWhetherToCloseEmptyArray(items: node.items) {
+                    output += try await emit("]")
+                    return output
+                }
+            }
+
+            output += try await generateNode(node.items)
+            count += 1
         }
 
         output += try await emit("]")
         return output
+    }
+
+    /// Probe after `[` when `minItems == 0`: model may close immediately or start an item.
+    ///
+    /// Samples once among `]` and tokens that can start the item type. Choosing `]` means
+    /// close; any other sample is discarded without decoding so ``generateNode`` can emit
+    /// the first element from the same backend state.
+    private mutating func sampleWhetherToCloseEmptyArray(
+        items: GenerationSchema.Node
+    ) async throws -> Bool {
+        let closeToken = try Self.singleToken(for: "]", backend: backend)
+        var allowed = try itemStartTokens(for: items)
+        allowed.insert(closeToken)
+        guard !allowed.isEmpty else {
+            return false
+        }
+        let token = try await backend.sample(from: allowed)
+        return token == closeToken
+    }
+
+    /// Tokens that can begin a JSON value for `node` (empty-array probe).
+    private func itemStartTokens(for node: GenerationSchema.Node) throws -> Set<Int> {
+        switch node {
+        case .string:
+            return [quoteToken]
+        case .object:
+            return [try Self.singleToken(for: "{", backend: backend)]
+        case .array:
+            return [try Self.singleToken(for: "[", backend: backend)]
+        case .boolean:
+            var tokens = Set<Int>()
+            for literal in ["true", "false"] {
+                if let first = try backend.tokenize(literal).first {
+                    tokens.insert(first)
+                }
+            }
+            return tokens
+        case .number(let numberNode):
+            let numeric =
+                numberNode.integerOnly
+                ? integerTerminators.subtracting(basicTerminators)
+                : doubleTerminators.subtracting(basicTerminators)
+            // Only tokens that can start a number (digit or minus — not a bare `.`).
+            return Set(
+                numeric.filter { token in
+                    guard let text = backend.tokenText(token), !text.isEmpty else { return false }
+                    let first = text.first
+                    return first?.isNumber == true || first == "-"
+                }
+            )
+        case .ref(let typeName):
+            guard let referenced = schema.defs[typeName] else {
+                throw ConstrainedGenerationError.missingReference(typeName)
+            }
+            return try itemStartTokens(for: referenced)
+        case .anyOf(let variants):
+            var tokens = Set<Int>()
+            for variant in variants {
+                tokens.formUnion(try itemStartTokens(for: variant))
+            }
+            return tokens
+        }
     }
 
     private mutating func generateString(_ node: GenerationSchema.StringNode) async throws -> String {
