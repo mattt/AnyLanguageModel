@@ -785,4 +785,90 @@ struct StructuredGenerationTests {
         let result = try await generator.generate()
         #expect(result == "{}")
     }
+
+    // MARK: - Decimal / number token mask
+
+    private func numberTokenMaps() -> (
+        tokenToText: [Int: String],
+        textToTokens: [String: [Int]]
+    ) {
+        var maps = baseTokenMaps()
+        let dotToken = 20
+        maps.tokenToText[dotToken] = "."
+        maps.textToTokens["."] = [dotToken]
+        return maps
+    }
+
+    @Test func decimalNumberEmitsStandaloneDot() async throws {
+        // Qwen2.5-style tokenization of 473.00 is 4 7 3 . 0 0. Standalone `.` must be
+        // in the decimal mask; otherwise the model cannot place the point and pads digits
+        // until the token cap (re-serialized as e+31 after Double conversion).
+        var maps = numberTokenMaps()
+        maps.tokenToText[30] = "4"
+        maps.tokenToText[31] = "7"
+        maps.tokenToText[32] = "3"
+        maps.textToTokens["4"] = [30]
+        maps.textToTokens["7"] = [31]
+        maps.textToTokens["3"] = [32]
+        let numberNode = GenerationSchema.NumberNode(
+            description: nil,
+            minimum: nil,
+            maximum: nil,
+            integerOnly: false
+        )
+        let schema = GenerationSchema.primitive(Double.self, node: .number(numberNode))
+        let eosToken = 50
+        let fourToken = 30
+        let sevenToken = 31
+        let threeToken = 32
+        let dotToken = 20
+        let zeroToken = 5
+        let rightBrace = 2
+
+        let backend = MockTokenBackend(
+            tokenToText: maps.tokenToText,
+            textToTokens: maps.textToTokens,
+            eosToken: eosToken,
+            endTokens: [eosToken],
+            maximumTokens: 64,
+            samplingQueue: [
+                fourToken, sevenToken, threeToken,  // 473
+                dotToken, zeroToken, zeroToken,  // .00
+                rightBrace,  // terminate
+            ]
+        )
+
+        var generator = try ConstrainedJSONGenerator(backend: backend, schema: schema)
+        let result = try await generator.generate()
+        #expect(result == "473.00")
+    }
+
+    @Test func standaloneMinusIsAllowedInIntegerMask() async throws {
+        // Standalone `-` then digit, as BPE tokenizers encode negatives.
+        let maps = baseTokenMaps()
+        let numberNode = GenerationSchema.NumberNode(
+            description: nil,
+            minimum: -10,
+            maximum: 0,
+            integerOnly: true
+        )
+        let schema = GenerationSchema.primitive(Int.self, node: .number(numberNode))
+        let eosToken = 50
+        let minusToken = 13
+        let oneToken = 6
+        let rightBrace = 2
+
+        let backend = MockTokenBackend(
+            tokenToText: maps.tokenToText,
+            textToTokens: maps.textToTokens,
+            eosToken: eosToken,
+            endTokens: [eosToken],
+            maximumTokens: 8,
+            samplingQueue: [minusToken, oneToken, rightBrace]
+        )
+
+        var generator = try ConstrainedJSONGenerator(backend: backend, schema: schema)
+        let result = try await generator.generate()
+        #expect(result == "-1")
+    }
 }

@@ -195,28 +195,49 @@ struct ConstrainedJSONGenerator<Backend: TokenBackend> {
         return samples.filter { $0 >= 0 && $0 < vocabSize }.sorted()
     }
 
+    /// ASCII digit `0`...`9` only — JSON numbers must not accept fullwidth / superscript
+    /// forms that `Character.isNumber` would otherwise admit.
+    private static func isASCIIDigit(_ character: Character) -> Bool {
+        character >= "0" && character <= "9"
+    }
+
+    /// Tokens that may appear inside a JSON integer: ASCII digits and standalone `-`.
+    ///
+    /// Standalone `-` is required because BPE tokenizers (Qwen2.5, etc.) encode `-1` as
+    /// two tokens. Requiring every token to contain a digit excluded `-` and made negatives
+    /// unrepresentable except via rare multi-character tokens.
     private static func buildValidIntegerTokens(backend: Backend) -> Set<Int> {
         var allowed = Set<Int>()
         for token in 0 ..< backend.vocabSize {
             if backend.isSpecialToken(token) { continue }
             guard let text = backend.tokenText(token), !text.isEmpty else { continue }
-            if text.allSatisfy({ $0.isNumber || $0 == "-" }),
-                text.contains(where: { $0.isNumber })
-            {
+            let onlyIntegerChars = text.allSatisfy { Self.isASCIIDigit($0) || $0 == "-" }
+            let hasDigit = text.contains { Self.isASCIIDigit($0) }
+            let isStandaloneMinus = text == "-"
+            if onlyIntegerChars && (hasDigit || isStandaloneMinus) {
                 allowed.insert(token)
             }
         }
         return allowed
     }
 
+    /// Tokens that may appear inside a JSON number: ASCII digits, `-`, and `.`.
+    ///
+    /// **Critical:** standalone `.` and `-` must be included. Qwen2.5 encodes `473.00` as
+    /// `4` `7` `3` `.` `0` `0`. The previous filter required every token to contain a digit,
+    /// which dropped `.` and forced the model to pad zeros until `maxDecimalTokenLimit`
+    /// (pathological `e+31` values after Double re-serialization).
     private static func buildValidDecimalTokens(backend: Backend) -> Set<Int> {
         var allowed = Set<Int>()
         for token in 0 ..< backend.vocabSize {
             if backend.isSpecialToken(token) { continue }
             guard let text = backend.tokenText(token), !text.isEmpty else { continue }
-            if text.allSatisfy({ $0.isNumber || $0 == "-" || $0 == "." }),
-                text.contains(where: { $0.isNumber })
-            {
+            let onlyNumberChars = text.allSatisfy {
+                Self.isASCIIDigit($0) || $0 == "-" || $0 == "."
+            }
+            let hasDigit = text.contains { Self.isASCIIDigit($0) }
+            let isStandaloneSignOrDot = text == "-" || text == "."
+            if onlyNumberChars && (hasDigit || isStandaloneSignOrDot) {
                 allowed.insert(token)
             }
         }
