@@ -174,3 +174,55 @@ struct OllamaLanguageModelTests {
         #expect(!response.content.isEmpty)
     }
 }
+
+@Suite("Ollama chat request encoding")
+struct OllamaChatRequestEncodingTests {
+    @Test func attachesImagesToTheUserMessage() throws {
+        let base64Image = Data([0xFF, 0xD8, 0xFF]).base64EncodedString()
+        let params = try createChatParams(
+            model: "llava",
+            messages: [
+                OllamaMessage(
+                    role: .user,
+                    content: "What is in this image?",
+                    images: [base64Image]
+                )
+            ],
+            tools: nil,
+            options: nil,
+            stream: false,
+            format: nil
+        )
+
+        #expect(params["images"] == nil)
+
+        guard case .array(let messages)? = params["messages"],
+            case .object(let message)? = messages.first
+        else {
+            Issue.record("Expected messages to encode as an array of objects")
+            return
+        }
+        #expect(message["images"] == .array([.string(base64Image)]))
+    }
+
+    @Test func omitsImagesForTextOnlyMessages() throws {
+        let params = try createChatParams(
+            model: "llama3.2",
+            messages: [OllamaMessage(role: .user, content: "Hello")],
+            tools: nil,
+            options: nil,
+            stream: false,
+            format: nil
+        )
+
+        #expect(params["images"] == nil)
+
+        guard case .array(let messages)? = params["messages"],
+            case .object(let message)? = messages.first
+        else {
+            Issue.record("Expected messages to encode as an array of objects")
+            return
+        }
+        #expect(message["images"] == nil)
+    }
+}
