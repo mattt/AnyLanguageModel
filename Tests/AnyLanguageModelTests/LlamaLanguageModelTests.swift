@@ -27,6 +27,22 @@ import Testing
             #expect(customModel.repeatLastN == 64)
         }
 
+        @Test func promptLongerThanBatchSize() async throws {
+            let session = LanguageModelSession(model: model)
+            var options = GenerationOptions(maximumResponseTokens: 16)
+            options[custom: LlamaLanguageModel.self] = .init(batchSize: 32)
+
+            let filler = Array(
+                repeating: "The quick brown fox jumps over the lazy dog.",
+                count: 30
+            ).joined(separator: " ")
+            let response = try await session.respond(
+                to: "\(filler)\n\nReply with a single word.",
+                options: options
+            )
+            #expect(!response.content.isEmpty)
+        }
+
         @Test func customGenerationOptionsRoundTrip() {
             var options = GenerationOptions(
                 temperature: 0.6,
