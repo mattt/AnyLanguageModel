@@ -806,7 +806,8 @@ import Foundation
                 model: model,
                 vocab: vocab,
                 context: context,
-                batchSize: options.batchSize
+                batchSize: options.batchSize,
+                contextSize: options.contextSize
             )
 
             // Initialize sampler chain with options
@@ -843,7 +844,7 @@ import Foundation
             var generatedText = ""
             // Track position - for encoder-decoder models, we start from position 1 (after decoder start token)
             // For decoder-only models, we continue from the end of the prompt
-            var n_cur: Int32 = hasEncoder ? 1 : batch.n_tokens
+            var n_cur: Int32 = hasEncoder ? 1 : Int32(promptTokens.count)
 
             for _ in 0 ..< maxTokens {
                 // Sample next token from logits - llama_batch_get_one creates batch with single token at index 0
@@ -945,7 +946,8 @@ import Foundation
                 model: model!,
                 vocab: vocab,
                 context: context,
-                batchSize: options.batchSize
+                batchSize: options.batchSize,
+                contextSize: options.contextSize
             )
 
             guard let sampler = llama_sampler_chain_init(llama_sampler_chain_default_params()) else {
@@ -969,7 +971,7 @@ import Foundation
             applySampling(sampler: samplerPointer, effectiveTemperature: options.temperature, options: options)
 
             let vocabSize = Int(llama_vocab_n_tokens(vocab))
-            let initialPosition: Int32 = hasEncoder ? 1 : batchPointer.pointee.n_tokens
+            let initialPosition: Int32 = hasEncoder ? 1 : Int32(promptTokens.count)
 
             let backend = LlamaTokenBackend(
                 context: context,
@@ -1175,7 +1177,8 @@ import Foundation
                     model: model,
                     vocab: vocab,
                     context: context,
-                    batchSize: options.batchSize
+                    batchSize: options.batchSize,
+                    contextSize: options.contextSize
                 )
 
                 // Initialize sampler chain with options
@@ -1213,7 +1216,7 @@ import Foundation
                 // Generate tokens one by one
                 // Track position - for encoder-decoder models, we start from position 1 (after decoder start token)
                 // For decoder-only models, we continue from the end of the prompt
-                var n_cur: Int32 = hasEncoder ? 1 : batch.n_tokens
+                var n_cur: Int32 = hasEncoder ? 1 : Int32(promptTokens.count)
 
                 for _ in 0 ..< maxTokens {
                     // Sample next token from logits of the last token we just decoded
@@ -1274,30 +1277,42 @@ import Foundation
 
         /// Prepares the initial batch for text generation, handling encoder-decoder vs decoder-only models.
         ///
+        /// Decoder-only prompts longer than the batch capacity are ingested in
+        /// batch-sized chunks. Encoder models must fit the prompt in one batch.
+        ///
         /// - Parameters:
         ///   - batch: The batch to prepare (must be initialized with sufficient capacity).
         ///   - promptTokens: The tokenized prompt tokens.
         ///   - model: The loaded model.
         ///   - vocab: The model vocabulary.
         ///   - context: The model context.
-        ///   - batchSize: The batch capacity to validate against (prevents buffer overflow).
+        ///   - batchSize: The batch capacity per decode call.
+        ///   - contextSize: The context window the prompt must fit within.
         /// - Returns: `true` if the model has an encoder (for position tracking during generation).
-        /// - Throws: `insufficientMemory` if prompt token count exceeds batch capacity, `encoderOnlyModel` if the model cannot generate text, `encodingFailed` or `decodingFailed` on failure.
+        /// - Throws: `promptExceedsContextWindow` if the prompt cannot fit in the context window,
+        ///   `insufficientMemory` if an encoder prompt exceeds the batch capacity, `encoderOnlyModel`
+        ///   if the model cannot generate text, `encodingFailed` or `decodingFailed` on failure.
         private func prepareInitialBatch(
             batch: inout llama_batch,
             promptTokens: [llama_token],
             model: OpaquePointer,
             vocab: OpaquePointer,
             context: OpaquePointer,
-            batchSize: UInt32
+            batchSize: UInt32,
+            contextSize: UInt32
         ) throws -> Bool {
-            // Validate that prompt token count doesn't exceed batch capacity to prevent buffer overflow
-            guard promptTokens.count <= batchSize else {
-                throw LlamaLanguageModelError.insufficientMemory
+            // Leave at least one context cell free for generation.
+            guard promptTokens.count < contextSize else {
+                throw LlamaLanguageModelError.promptExceedsContextWindow
             }
 
             let hasEncoder = llama_model_has_encoder(model)
             let hasDecoder = llama_model_has_decoder(model)
+
+            // Encoder models ingest the full prompt in a single llama_encode call.
+            guard !hasEncoder || promptTokens.count <= batchSize else {
+                throw LlamaLanguageModelError.insufficientMemory
+            }
 
             if hasEncoder {
                 // For encoder models, first encode the prompt
@@ -1343,25 +1358,32 @@ import Foundation
                     throw LlamaLanguageModelError.encoderOnlyModel
                 }
             } else {
-                // Standard decoder-only model (most LLMs)
-                batch.n_tokens = Int32(promptTokens.count)
-                for i in 0 ..< promptTokens.count {
-                    let idx = Int(i)
-                    batch.token[idx] = promptTokens[idx]
-                    batch.pos[idx] = Int32(i)
-                    batch.n_seq_id[idx] = 1
-                    if let seq_ids = batch.seq_id, let seq_id = seq_ids[idx] {
-                        seq_id[0] = 0
+                // Standard decoder-only model (most LLMs): feed the prompt in
+                // batch-sized chunks with absolute positions, requesting logits
+                // only for the final token.
+                let capacity = Int(batchSize)
+                var start = 0
+                while start < promptTokens.count {
+                    let count = min(capacity, promptTokens.count - start)
+                    batch.n_tokens = Int32(count)
+                    for i in 0 ..< count {
+                        batch.token[i] = promptTokens[start + i]
+                        batch.pos[i] = Int32(start + i)
+                        batch.n_seq_id[i] = 1
+                        if let seq_ids = batch.seq_id, let seq_id = seq_ids[i] {
+                            seq_id[0] = 0
+                        }
+                        batch.logits[i] = 0
                     }
-                    batch.logits[idx] = 0
-                }
 
-                if batch.n_tokens > 0 {
-                    batch.logits[Int(batch.n_tokens) - 1] = 1
-                }
+                    if start + count == promptTokens.count {
+                        batch.logits[count - 1] = 1
+                    }
 
-                guard llama_decode(context, batch) == 0 else {
-                    throw LlamaLanguageModelError.decodingFailed
+                    guard llama_decode(context, batch) == 0 else {
+                        throw LlamaLanguageModelError.decodingFailed
+                    }
+                    start += count
                 }
             }
 
@@ -1539,6 +1561,7 @@ import Foundation
         case decodingFailed
         case invalidModelPath
         case insufficientMemory
+        case promptExceedsContextWindow
         case unsupportedFeature
         case encoderOnlyModel
 
@@ -1558,6 +1581,8 @@ import Foundation
                 return "Invalid model file path"
             case .insufficientMemory:
                 return "Insufficient memory for operation"
+            case .promptExceedsContextWindow:
+                return "Prompt is longer than the model's context window"
             case .unsupportedFeature:
                 return "This LlamaLanguageModel does not support image segments"
             case .encoderOnlyModel:
