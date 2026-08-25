@@ -602,25 +602,20 @@ import Foundation
                             var accumulatedText = ""
                             let fullPrompt = try self.formatPrompt(for: session)
 
-                            do {
-                                for try await tokenText in generateTextStream(
-                                    context: context,
-                                    model: model!,
-                                    prompt: fullPrompt,
-                                    maxTokens: maxTokens,
-                                    options: runtimeOptions
-                                ) {
-                                    accumulatedText += tokenText
+                            try self.performTextGeneration(
+                                context: context,
+                                model: model!,
+                                prompt: fullPrompt,
+                                maxTokens: maxTokens,
+                                options: runtimeOptions
+                            ) { tokenText in
+                                accumulatedText += tokenText
 
-                                    let snapshot = LanguageModelSession.ResponseStream<Content>.Snapshot(
-                                        content: (accumulatedText as! Content).asPartiallyGenerated(),
-                                        rawContent: GeneratedContent(accumulatedText)
-                                    )
-                                    continuation.yield(snapshot)
-                                }
-                            } catch {
-                                continuation.finish(throwing: error)
-                                return
+                                let snapshot = LanguageModelSession.ResponseStream<Content>.Snapshot(
+                                    content: (accumulatedText as! Content).asPartiallyGenerated(),
+                                    rawContent: GeneratedContent(accumulatedText)
+                                )
+                                continuation.yield(snapshot)
                             }
 
                             continuation.finish()
@@ -1127,133 +1122,109 @@ import Foundation
             }
         }
 
-        private func generateTextStream(
-            context: OpaquePointer,
-            model: OpaquePointer,
-            prompt: String,
-            maxTokens: Int,
-            options: ResolvedGenerationOptions
-        ) -> AsyncThrowingStream<String, Error> {
-            return AsyncThrowingStream { continuation in
-                self.performTextGeneration(
-                    context: context,
-                    model: model,
-                    prompt: prompt,
-                    maxTokens: maxTokens,
-                    options: options,
-                    continuation: continuation
-                )
-            }
-        }
-
         private func performTextGeneration(
             context: OpaquePointer,
             model: OpaquePointer,
             prompt: String,
             maxTokens: Int,
             options: ResolvedGenerationOptions,
-            continuation: AsyncThrowingStream<String, Error>.Continuation
-        ) {
-            do {
-                guard let vocab = llama_model_get_vocab(model) else {
-                    continuation.finish(throwing: LlamaLanguageModelError.contextInitializationFailed)
-                    return
-                }
+            onToken: (String) -> Void
+        ) throws {
+            guard let vocab = llama_model_get_vocab(model) else {
+                throw LlamaLanguageModelError.contextInitializationFailed
+            }
 
-                // Tokenize the prompt
-                let promptTokens = try tokenizeText(vocab: vocab, text: prompt)
-                guard !promptTokens.isEmpty else {
-                    continuation.finish(throwing: LlamaLanguageModelError.tokenizationFailed)
-                    return
-                }
+            // Tokenize the prompt
+            let promptTokens = try tokenizeText(vocab: vocab, text: prompt)
+            guard !promptTokens.isEmpty else {
+                throw LlamaLanguageModelError.tokenizationFailed
+            }
 
-                // Initialize batch
-                var batch = llama_batch_init(Int32(options.batchSize), 0, 1)
-                defer { llama_batch_free(batch) }
+            // Initialize batch
+            var batch = llama_batch_init(Int32(options.batchSize), 0, 1)
+            defer { llama_batch_free(batch) }
 
-                let hasEncoder = try prepareInitialBatch(
-                    batch: &batch,
-                    promptTokens: promptTokens,
-                    model: model,
-                    vocab: vocab,
-                    context: context,
-                    batchSize: options.batchSize,
-                    contextSize: options.contextSize
-                )
+            let hasEncoder = try prepareInitialBatch(
+                batch: &batch,
+                promptTokens: promptTokens,
+                model: model,
+                vocab: vocab,
+                context: context,
+                batchSize: options.batchSize,
+                contextSize: options.contextSize
+            )
 
-                // Initialize sampler chain with options
-                guard let sampler = llama_sampler_chain_init(llama_sampler_chain_default_params()) else {
-                    throw LlamaLanguageModelError.decodingFailed
-                }
-                defer { llama_sampler_free(sampler) }
-                let samplerPtr = UnsafeMutablePointer<llama_sampler>(sampler)
+            // Initialize sampler chain with options
+            guard let sampler = llama_sampler_chain_init(llama_sampler_chain_default_params()) else {
+                throw LlamaLanguageModelError.decodingFailed
+            }
+            defer { llama_sampler_free(sampler) }
+            let samplerPtr = UnsafeMutablePointer<llama_sampler>(sampler)
 
-                let effectiveTemperature = Float(options.temperature)
+            let effectiveTemperature = Float(options.temperature)
 
-                // Apply repeat/frequency/presence penalties from custom options
-                let effectiveRepeatPenalty = options.repeatPenalty
-                let effectiveRepeatLastN = options.repeatLastN
-                let effectiveFrequencyPenalty = options.frequencyPenalty
-                let effectivePresencePenalty = options.presencePenalty
+            // Apply repeat/frequency/presence penalties from custom options
+            let effectiveRepeatPenalty = options.repeatPenalty
+            let effectiveRepeatLastN = options.repeatLastN
+            let effectiveFrequencyPenalty = options.frequencyPenalty
+            let effectivePresencePenalty = options.presencePenalty
 
-                if effectiveRepeatPenalty != 1.0 || effectiveFrequencyPenalty != 0.0 || effectivePresencePenalty != 0.0
-                {
-                    llama_sampler_chain_add(
-                        samplerPtr,
-                        llama_sampler_init_penalties(
-                            llama_vocab_n_tokens(vocab),
-                            effectiveRepeatLastN,
-                            effectiveRepeatPenalty,
-                            effectiveFrequencyPenalty,
-                            effectivePresencePenalty
-                        )
+            if effectiveRepeatPenalty != 1.0 || effectiveFrequencyPenalty != 0.0 || effectivePresencePenalty != 0.0 {
+                llama_sampler_chain_add(
+                    samplerPtr,
+                    llama_sampler_init_penalties(
+                        llama_vocab_n_tokens(vocab),
+                        effectiveRepeatLastN,
+                        effectiveRepeatPenalty,
+                        effectiveFrequencyPenalty,
+                        effectivePresencePenalty
                     )
+                )
+            }
+
+            // Check for mirostat sampling (takes precedence over standard sampling)
+            applySampling(sampler: samplerPtr, effectiveTemperature: effectiveTemperature, options: options)
+
+            // Generate tokens one by one
+            // Track position - for encoder-decoder models, we start from position 1 (after decoder start token)
+            // For decoder-only models, we continue from the end of the prompt
+            var n_cur: Int32 = hasEncoder ? 1 : Int32(promptTokens.count)
+
+            for _ in 0 ..< maxTokens {
+                if Task.isCancelled {
+                    break
                 }
 
-                // Check for mirostat sampling (takes precedence over standard sampling)
-                applySampling(sampler: samplerPtr, effectiveTemperature: effectiveTemperature, options: options)
+                // Sample next token from logits of the last token we just decoded
+                let nextToken = llama_sampler_sample(sampler, context, batch.n_tokens - 1)
+                llama_sampler_accept(sampler, nextToken)
 
-                // Generate tokens one by one
-                // Track position - for encoder-decoder models, we start from position 1 (after decoder start token)
-                // For decoder-only models, we continue from the end of the prompt
-                var n_cur: Int32 = hasEncoder ? 1 : Int32(promptTokens.count)
-
-                for _ in 0 ..< maxTokens {
-                    // Sample next token from logits of the last token we just decoded
-                    let nextToken = llama_sampler_sample(sampler, context, batch.n_tokens - 1)
-                    llama_sampler_accept(sampler, nextToken)
-
-                    // Check for end of sequence
-                    if llama_vocab_is_eog(vocab, nextToken) {
-                        break
-                    }
-
-                    // Convert token to text and yield it
-                    if let tokenText = tokenToText(vocab: vocab, token: nextToken) {
-                        continuation.yield(tokenText)
-                    }
-
-                    // Prepare batch for next token
-                    batch.n_tokens = 1
-                    batch.token[0] = nextToken
-                    batch.pos[0] = n_cur
-                    batch.n_seq_id[0] = 1
-                    if let seq_ids = batch.seq_id, let seq_id = seq_ids[0] {
-                        seq_id[0] = 0
-                    }
-                    batch.logits[0] = 1
-
-                    n_cur += 1
-
-                    let decodeResult = llama_decode(context, batch)
-                    guard decodeResult == 0 else {
-                        break
-                    }
+                // Check for end of sequence
+                if llama_vocab_is_eog(vocab, nextToken) {
+                    break
                 }
 
-                continuation.finish()
-            } catch {
-                continuation.finish(throwing: error)
+                // Convert token to text and yield it
+                if let tokenText = tokenToText(vocab: vocab, token: nextToken) {
+                    onToken(tokenText)
+                }
+
+                // Prepare batch for next token
+                batch.n_tokens = 1
+                batch.token[0] = nextToken
+                batch.pos[0] = n_cur
+                batch.n_seq_id[0] = 1
+                if let seq_ids = batch.seq_id, let seq_id = seq_ids[0] {
+                    seq_id[0] = 0
+                }
+                batch.logits[0] = 1
+
+                n_cur += 1
+
+                let decodeResult = llama_decode(context, batch)
+                guard decodeResult == 0 else {
+                    break
+                }
             }
         }
 
