@@ -580,31 +580,63 @@ struct ConstrainedJSONGenerator<Backend: TokenBackend> {
 
     /// Probe after `[` when `minItems == 0`: model may close immediately or start an item.
     ///
-    /// Samples once among `]` and tokens that can start the item type. Choosing `]` means
-    /// close; any other sample is discarded without decoding so ``generateNode`` can emit
-    /// the first element from the same backend state.
+    /// Samples once among closing tokens and tokens that can start the item type. Choosing
+    /// a close means close; any other sample is discarded without decoding so
+    /// ``generateNode`` can emit the first element from the same backend state.
+    ///
+    /// Byte-pair vocabularies put most item-start probability on merged tokens (a quote
+    /// fused with the first word, or a leading space), so the probe admits every token
+    /// whose first non-whitespace character starts the item type, not just the bare
+    /// single-character token.
     private mutating func sampleWhetherToCloseEmptyArray(
         items: GenerationSchema.Node
     ) async throws -> Bool {
-        let closeToken = try Self.singleToken(for: "]", backend: backend)
+        let closeTokens = tokensMatchingTrimmed("]")
         var allowed = try itemStartTokens(for: items)
-        allowed.insert(closeToken)
-        guard !allowed.isEmpty else {
+        allowed.formUnion(closeTokens)
+        guard !allowed.isEmpty, !closeTokens.isEmpty else {
             return false
         }
         let token = try await backend.sample(from: allowed)
-        return token == closeToken
+        return closeTokens.contains(token)
+    }
+
+    /// Tokens whose text equals `text` after trimming surrounding whitespace.
+    private func tokensMatchingTrimmed(_ text: String) -> Set<Int> {
+        var tokens = Set<Int>()
+        for token in 0 ..< backend.vocabSize {
+            if backend.isSpecialToken(token) { continue }
+            guard let tokenText = backend.tokenText(token) else { continue }
+            if tokenText.trimmingCharacters(in: .whitespacesAndNewlines) == text {
+                tokens.insert(token)
+            }
+        }
+        return tokens
+    }
+
+    /// Tokens whose first non-whitespace character is `prefix`.
+    private func tokensStarting(with prefix: Character) -> Set<Int> {
+        var tokens = Set<Int>()
+        for token in 0 ..< backend.vocabSize {
+            if backend.isSpecialToken(token) { continue }
+            guard let text = backend.tokenText(token) else { continue }
+            guard let first = text.drop(while: { $0.isWhitespace }).first else { continue }
+            if first == prefix {
+                tokens.insert(token)
+            }
+        }
+        return tokens
     }
 
     /// Tokens that can begin a JSON value for `node` (empty-array probe).
     private func itemStartTokens(for node: GenerationSchema.Node) throws -> Set<Int> {
         switch node {
         case .string:
-            return [quoteToken]
+            return tokensStarting(with: "\"")
         case .object:
-            return [try Self.singleToken(for: "{", backend: backend)]
+            return tokensStarting(with: "{")
         case .array:
-            return [try Self.singleToken(for: "[", backend: backend)]
+            return tokensStarting(with: "[")
         case .boolean:
             var tokens = Set<Int>()
             for literal in ["true", "false"] {
