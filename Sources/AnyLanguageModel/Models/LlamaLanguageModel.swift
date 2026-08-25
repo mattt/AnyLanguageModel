@@ -192,6 +192,25 @@ import Foundation
         /// The path to the GGUF model file.
         public let modelPath: String
 
+        /// The number of model layers to offload to the GPU.
+        ///
+        /// A negative value offloads all layers, and `0` runs entirely on the CPU.
+        public let gpuLayers: Int32
+
+        /// The default GPU layer count for the current platform.
+        ///
+        /// All layers are offloaded by default: the prebuilt llama.cpp binaries
+        /// ship with Metal enabled and the shader library embedded. The simulator
+        /// defaults to CPU-only execution, which remains the reliable
+        /// configuration there.
+        public static var defaultGPULayerCount: Int32 {
+            #if targetEnvironment(simulator)
+                return 0
+            #else
+                return -1
+            #endif
+        }
+
         /// The context size for the model.
         ///
         /// - Important: This property is deprecated.
@@ -425,8 +444,11 @@ import Foundation
         ///
         /// - Parameters:
         ///   - modelPath: The path to the GGUF model file.
-        public init(modelPath: String) {
+        ///   - gpuLayers: The number of model layers to offload to the GPU.
+        ///     Defaults to ``defaultGPULayerCount``.
+        public init(modelPath: String, gpuLayers: Int32 = LlamaLanguageModel.defaultGPULayerCount) {
             self.modelPath = modelPath
+            self.gpuLayers = gpuLayers
             self.legacyDefaults = ResolvedGenerationOptions()
         }
 
@@ -668,9 +690,7 @@ import Foundation
 
         private func createModelParams() -> llama_model_params {
             var params = llama_model_default_params()
-
-            // Force CPU-only execution to avoid Metal GPU issues
-            params.n_gpu_layers = 0
+            params.n_gpu_layers = gpuLayers
 
             // Try to reduce memory usage
             params.load_mode = LLAMA_LOAD_MODE_MMAP
