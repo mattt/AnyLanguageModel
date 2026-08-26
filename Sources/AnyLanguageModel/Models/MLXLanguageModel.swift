@@ -53,7 +53,8 @@ import Foundation
         ) async throws -> ModelContext {
             let cacheKey = key as NSString
             if let cached = cache.object(forKey: cacheKey),
-                case .loaded(let context) = cached.value {
+                case .loaded(let context) = cached.value
+            {
                 return context
             }
 
@@ -287,7 +288,7 @@ import Foundation
             var additionalContextForUserInput: [String: any Sendable]? {
                 additionalContext?.mapValues { $0.toSendable() }
             }
-
+            
             /// The nucleus-sampling probability threshold. Only tokens whose cumulative
             /// probability mass falls within the top `topP` fraction are considered during
             /// sampling. `nil` lets MLX use its model default.
@@ -311,7 +312,7 @@ import Foundation
             /// appeared in the output. Values greater than `1.0` reduce repetition; values less
             /// than `1.0` encourage it. `nil` lets MLX use its model default.
             public var repetitionPenalty: Float?
-
+            
             /// Creates MLX-specific generation options.
             ///
             /// - Parameters:
@@ -853,7 +854,8 @@ import Foundation
             let existingEntry = getSessionCache(for: session)
 
             if let existingEntry,
-                isCacheHit(entry: existingEntry, currentTokens: fullTokens, signature: signature, lmInput: lmInput) {
+                isCacheHit(entry: existingEntry, currentTokens: fullTokens, signature: signature, lmInput: lmInput)
+            {
                 let cachedCount = existingEntry.prefillTokenCount
                 let newTokens = lmInput.text.tokens[cachedCount...]
                 let newMask = lmInput.text.mask?[cachedCount...]
@@ -1298,6 +1300,70 @@ import Foundation
             return LanguageModelSession.ResponseStream(stream: stream)
         }
 
+        public func _prewarm(
+            for session: LanguageModelSession,
+            promptPrefix: Prompt?,
+            modelID: String,
+            hub: HubClient?,
+            directory: URL?
+        ) async throws {
+            guard Self.acquireGenerationSlot(for: session) else {
+                return
+            }
+            defer { Self.releaseGenerationSlot(for: session) }
+
+            let generationScope = beginGenerationScope()
+            defer { endGenerationScope(generationScope) }
+
+            let context = try await loadContext(modelId: modelId, hub: hub, directory: directory)
+            guard let instructions = session.instructions?.description, !instructions.isEmpty else {
+                return
+            }
+
+            let toolSpecs = mlxToolSpecs(for: session)
+
+            let params = toGenerateParameters(.init())
+            let newCache = context.model.newCache(parameters: params)
+            let userInput = MLXLMCommon.UserInput(
+                chat: [.init(role: .system, content: instructions)],
+                processing: .init(resize: nil),
+                tools: toolSpecs
+            )
+            let lmInput = try await context.processor.prepare(input: userInput)
+            
+            let state: MLXLMCommon.LMOutput.State? = nil
+            let prepareResult = try context.model.prepare(lmInput, cache: newCache, state: state, windowSize: params.prefill.stepSize)
+            switch prepareResult {
+            case .tokens(let tokensToProcess):
+                _ = context.model(tokensToProcess[text: .newAxis], cache: newCache, state: state)
+            case .logits:
+                break
+            }
+            storeSessionCache(
+                cache: newCache,
+                fullTokens: tokens(from: lmInput),
+                generateParameters: params,
+                session: session
+            )
+        }
+        
+        public func prewarm(
+            for session: LanguageModelSession,
+            promptPrefix: Prompt?
+        ) async throws {
+            let modelId = self.modelId
+            let hub = self.hub
+            let directory = self.directory
+
+            try await _prewarm(
+                for: session,
+                promptPrefix: promptPrefix,
+                modelID: modelId,
+                hub: hub,
+                directory: directory
+           )
+        }
+        
         /// Prewarms the model
         public func prewarm(
             for session: LanguageModelSession,
@@ -1308,48 +1374,13 @@ import Foundation
             let directory = self.directory
 
             Task {
-                guard Self.acquireGenerationSlot(for: session) else {
-                    return
-                }
-                defer { Self.releaseGenerationSlot(for: session) }
-
-                let generationScope = beginGenerationScope()
-                defer { endGenerationScope(generationScope) }
-
-                do {
-                    let context = try await loadContext(modelId: modelId, hub: hub, directory: directory)
-                    guard let instructions = session.instructions?.description, !instructions.isEmpty else {
-                        return
-                    }
-
-                    let toolSpecs = mlxToolSpecs(for: session)
-
-                    let params = toGenerateParameters(.init())
-                    let newCache = context.model.newCache(parameters: params)
-                    let userInput = MLXLMCommon.UserInput(
-                        chat: [.init(role: .system, content: instructions)],
-                        processing: .init(resize: nil),
-                        tools: toolSpecs
-                    )
-                    let lmInput = try await context.processor.prepare(input: userInput)
-
-                    let state: MLXLMCommon.LMOutput.State? = nil
-                    let prepareResult = try context.model.prepare(lmInput, cache: newCache, state: state, windowSize: params.prefill.stepSize)
-                    switch prepareResult {
-                    case .tokens(let tokensToProcess):
-                        _ = context.model(tokensToProcess[text: .newAxis], cache: newCache, state: state)
-                    case .logits:
-                        break
-                    }
-                    storeSessionCache(
-                        cache: newCache,
-                        fullTokens: tokens(from: lmInput),
-                        generateParameters: params,
-                        session: session
-                    )
-                } catch {
-                    // Ignore errors during prewarm
-                }
+                try await _prewarm(
+                    for: session,
+                    promptPrefix: promptPrefix,
+                    modelID: modelId,
+                    hub: hub,
+                    directory: directory
+                )
             }
         }
     }
@@ -1361,7 +1392,7 @@ import Foundation
     /// - Returns: Temperature, topP, and topK. Temperature is a double to match GenerationOptions.temperature
     private func parametersFromSampling(sampling: GenerationOptions.SamplingMode?) -> (temperature: Double?, topP: Float?, topK: Int?) {
         guard let sampling else { return (nil, nil, nil) }
-
+        
         switch sampling.mode {
         case .greedy:
             return (1.0, nil, nil)
@@ -1370,13 +1401,13 @@ import Foundation
         case .nucleus(let topP, _):
             return (nil, Float(topP), nil)
         }
-
+        
     }
 
     private func toGenerateParameters(_ options: GenerationOptions) -> MLXLMCommon.GenerateParameters {
         let custom = options[custom: MLXLanguageModel.self]
         let sampling = parametersFromSampling(sampling: options.sampling)
-
+        
         return MLXLMCommon.GenerateParameters(
             maxTokens: options.maximumResponseTokens,
             maxKVSize: custom?.kvCache.maxSize,
@@ -1426,7 +1457,8 @@ import Foundation
         // Add instructions from session if present and not in transcript
         if !hasInstructionsInTranscript,
             let instructions = session.instructions?.description,
-            !instructions.isEmpty {
+            !instructions.isEmpty
+        {
             chat.append(.init(role: .system, content: instructions))
         }
 
@@ -1489,12 +1521,14 @@ import Foundation
                 case .data(let data, _):
                     #if canImport(UIKit)
                         if let uiImage = UIKit.UIImage(data: data),
-                            let ciImage = CIImage(image: uiImage) {
+                            let ciImage = CIImage(image: uiImage)
+                        {
                             images.append(.ciImage(ciImage))
                         }
                     #elseif canImport(AppKit)
                         if let nsImage = AppKit.NSImage(data: data),
-                            let cgImage = nsImage.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+                            let cgImage = nsImage.cgImage(forProposedRect: nil, context: nil, hints: nil)
+                        {
                             let ciImage = CIImage(cgImage: cgImage)
                             images.append(.ciImage(ciImage))
                         }
@@ -1533,12 +1567,12 @@ import Foundation
         let functionSpec: [String: any Sendable] = [
             "name": tool.name,
             "description": tool.description,
-            "parameters": parametersDict
+            "parameters": parametersDict,
         ]
 
         let toolSpec: ToolSpec = [
             "type": "function",
-            "function": functionSpec
+            "function": functionSpec,
         ]
 
         return toolSpec
@@ -1548,7 +1582,7 @@ import Foundation
         [
             "type": "object",
             "properties": [String: any Sendable](),
-            "required": [String]()
+            "required": [String](),
         ]
     }
 
@@ -1653,11 +1687,13 @@ import Foundation
 
         if let constValue = jsonSchema.const,
             let data = try? encoder.encode(constValue),
-            let constString = String(data: data, encoding: .utf8) {
+            let constString = String(data: data, encoding: .utf8)
+        {
             header += ". Expected value: \(constString)"
         } else if let enumValues = jsonSchema.enum, !enumValues.isEmpty,
             let data = try? encoder.encode(enumValues),
-            let enumString = String(data: data, encoding: .utf8) {
+            let enumString = String(data: data, encoding: .utf8)
+        {
             header += ". Allowed values: \(enumString)"
         }
 
