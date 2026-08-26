@@ -273,7 +273,7 @@ struct AnthropicCustomOptionsTests {
             .auto,
             .any,
             .tool(name: "my_tool"),
-            .disabled,
+            .disabled
         ]
 
         for choice in choices {
@@ -532,7 +532,7 @@ struct OpenAICustomOptionsTests {
         let options = OpenAILanguageModel.CustomGenerationOptions(
             extraBody: [
                 "reasoning": .object(["enabled": .bool(true)]),
-                "custom_param": .string("value"),
+                "custom_param": .string("value")
             ]
         )
 
@@ -701,7 +701,7 @@ struct OllamaCustomOptionsTests {
         // CustomGenerationOptions is a typealias to [String: JSONValue]
         let options: OllamaLanguageModel.CustomGenerationOptions = [
             "seed": .int(42),
-            "repeat_penalty": .double(1.2),
+            "repeat_penalty": .double(1.2)
         ]
 
         #expect(options.count == 2)
@@ -723,7 +723,7 @@ struct OllamaCustomOptionsTests {
     @Test func codable() throws {
         let options: OllamaLanguageModel.CustomGenerationOptions = [
             "seed": .int(42),
-            "stop": .array([.string("END")]),
+            "stop": .array([.string("END")])
         ]
 
         let data = try JSONEncoder().encode(options)
@@ -740,7 +740,7 @@ struct OllamaCustomOptionsTests {
         options[custom: OllamaLanguageModel.self] = [
             "seed": .int(42),
             "repeat_penalty": .double(1.1),
-            "stop": .array([.string("END"), .string("STOP")]),
+            "stop": .array([.string("END"), .string("STOP")])
         ]
 
         let retrieved = options[custom: OllamaLanguageModel.self]
@@ -759,7 +759,7 @@ struct OllamaCustomOptionsTests {
             "num_ctx": .int(4096),
             "top_p": .double(0.9),
             "penalize_newline": .bool(false),
-            "stop": .array([.string("###")]),
+            "stop": .array([.string("###")])
         ]
 
         #expect(options["num_ctx"] == .int(4096))
@@ -810,7 +810,7 @@ struct GeminiCustomOptionsTests {
                 .googleSearch,
                 .urlContext,
                 .codeExecution,
-                .googleMaps(latitude: 37.7749, longitude: -122.4194),
+                .googleMaps(latitude: 37.7749, longitude: -122.4194)
             ]
         )
 

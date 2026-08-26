@@ -37,7 +37,7 @@ struct StructuredGenerationTests {
             zToken: "z",
             minusToken: "-",
             minusOneToken: "-1",
-            eosToken: "<eos>",
+            eosToken: "<eos>"
         ]
 
         let textToTokens: [String: [Int]] = [
@@ -56,7 +56,7 @@ struct StructuredGenerationTests {
             "z": [zToken],
             "-": [minusToken],
             "-1": [minusOneToken],
-            "ab": [aToken, bToken],
+            "ab": [aToken, bToken]
         ]
 
         return (tokenToText, textToTokens)

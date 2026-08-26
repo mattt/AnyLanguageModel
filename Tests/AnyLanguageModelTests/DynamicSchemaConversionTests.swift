@@ -133,7 +133,7 @@ import Testing
                 description: "A person",
                 properties: [
                     "name": .string(description: "The person's name"),
-                    "age": .integer(description: "The person's age"),
+                    "age": .integer(description: "The person's age")
                 ],
                 required: ["name"]
             )
@@ -149,7 +149,7 @@ import Testing
                     "street": .string(),
                     "city": .string(),
                     "region": .string(),
-                    "postalCode": .string(),
+                    "postalCode": .string()
                 ],
                 required: ["street", "city", "region"]
             )
@@ -157,7 +157,7 @@ import Testing
             let schema: JSONSchema = .object(
                 properties: [
                     "name": .string(),
-                    "address": addressSchema,
+                    "address": addressSchema
                 ],
                 required: ["name", "address"]
             )
@@ -171,7 +171,7 @@ import Testing
             let schema: JSONSchema = .object(
                 properties: [
                     "tags": .array(items: .string(), minItems: 1),
-                    "scores": .array(items: .integer()),
+                    "scores": .array(items: .integer())
                 ],
                 required: ["tags"]
             )
@@ -186,7 +186,7 @@ import Testing
         @Test func convertAnyOfSchema() throws {
             let schema: JSONSchema = .anyOf([
                 .string(),
-                .integer(),
+                .integer()
             ])
             let dynamic = convertToDynamicSchema(schema)
 
@@ -416,7 +416,7 @@ import Testing
                         name: "active",
                         description: "Is active",
                         type: Bool.self
-                    ),
+                    )
                 ]
             )
 

@@ -186,7 +186,7 @@ struct OllamaLanguageModelTests {
             .prompt(
                 Transcript.Prompt(segments: [
                     .text(.init(content: "Describe this image")),
-                    .image(.init(url: testImageURL)),
+                    .image(.init(url: testImageURL))
                 ])
             )
         ])
@@ -200,7 +200,7 @@ struct OllamaLanguageModelTests {
             .prompt(
                 Transcript.Prompt(segments: [
                     .text(.init(content: "Describe this image")),
-                    .image(.init(data: testImageData, mimeType: "image/png")),
+                    .image(.init(data: testImageData, mimeType: "image/png"))
                 ])
             )
         ])

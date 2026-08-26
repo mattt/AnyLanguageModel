@@ -199,7 +199,7 @@ import Testing
                 .prompt(
                     Transcript.Prompt(segments: [
                         .text(.init(content: "Describe this image")),
-                        .image(.init(url: testImageURL)),
+                        .image(.init(url: testImageURL))
                     ])
                 )
             ])
@@ -217,7 +217,7 @@ import Testing
                 .prompt(
                     Transcript.Prompt(segments: [
                         .text(.init(content: "Describe this image")),
-                        .image(.init(data: testImageData, mimeType: "image/png")),
+                        .image(.init(data: testImageData, mimeType: "image/png"))
                     ])
                 )
             ])
@@ -324,7 +324,7 @@ import Testing
             custom.additionalContext = [
                 "user_name": JSONValue.string("Alice"),
                 "turn_count": JSONValue.int(3),
-                "verbose": JSONValue.bool(true),
+                "verbose": JSONValue.bool(true)
             ]
             options[custom: MLXLanguageModel.self] = custom
 

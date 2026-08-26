@@ -8,7 +8,7 @@ extension JSONDecoder.DateDecodingStrategy {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [
             .withInternetDateTime,
-            .withFractionalSeconds,
+            .withFractionalSeconds
         ]
 
         if let date = formatter.date(from: string) {

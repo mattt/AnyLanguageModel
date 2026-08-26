@@ -525,7 +525,7 @@ public struct AnthropicLanguageModel: LanguageModel {
 
                     while true {
                         var accumulatedText: String = ""
-                        var stopReason: String? = nil
+                        var stopReason: String?
 
                         let params = try createMessageParams(
                             model: model,
@@ -596,8 +596,7 @@ public struct AnthropicLanguageModel: LanguageModel {
                                     // Send text back normally
                                     if expectsStructuredResponse {
                                         if let snapshot: LanguageModelSession.ResponseStream<Content>.Snapshot =
-                                            try? partialSnapshot(from: accumulatedText)
-                                        {
+                                            try? partialSnapshot(from: accumulatedText) {
                                             continuation.yield(snapshot)
                                         }
                                     } else {
@@ -729,7 +728,7 @@ public struct AnthropicLanguageModel: LanguageModel {
     private func buildHeaders() -> [String: String] {
         var headers: [String: String] = [
             "x-api-key": tokenProvider(),
-            "anthropic-version": apiVersion,
+            "anthropic-version": apiVersion
         ]
 
         if let betas = betas, !betas.isEmpty {
@@ -754,7 +753,7 @@ private func createMessageParams(
     var params: [String: JSONValue] = [
         "model": .string(model),
         "messages": try JSONValue(messages),
-        "max_tokens": .int(options.maximumResponseTokens ?? 1024),
+        "max_tokens": .int(options.maximumResponseTokens ?? 1024)
     ]
 
     if let system {
@@ -774,7 +773,7 @@ private func createMessageParams(
                     "format": .object(
                         [
                             "type": .string("json_schema"),
-                            "schema": schemaValue,
+                            "schema": schemaValue
                         ]
                     )
                 ]
@@ -814,7 +813,7 @@ private func createMessageParams(
             case .tool(let name):
                 params["tool_choice"] = .object([
                     "type": .string("tool"),
-                    "name": .string(name),
+                    "name": .string(name)
                 ])
             case .disabled:
                 params["tool_choice"] = .object(["type": .string("none")])

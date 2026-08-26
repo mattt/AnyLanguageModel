@@ -184,8 +184,7 @@ public struct GeneratedContent: Sendable, Equatable, Generable, CustomDebugStrin
 
         for attempt in attempts {
             if let data = attempt.data(using: .utf8),
-                let parsed = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
-            {
+                let parsed = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]) {
                 self = try Self.fromJSONValue(parsed)
                 return
             }

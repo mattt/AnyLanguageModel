@@ -11,7 +11,7 @@ struct DynamicGenerationSchemaTests {
             description: "A person object",
             properties: [
                 .init(name: "name", description: "Full name", schema: .init(type: String.self)),
-                .init(name: "age", schema: .init(type: Int.self), isOptional: true),
+                .init(name: "age", schema: .init(type: Int.self), isOptional: true)
             ]
         )
 

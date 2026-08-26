@@ -158,7 +158,7 @@ public final class LanguageModelSession: @unchecked Sendable {
             let snapshotPump = Task {
                 session.beginResponding()
                 defer { session.endResponding() }
-                
+
                 var lastSnapshot: ResponseStream<Content>.Snapshot?
                 do {
                     for try await snapshot in stream {
@@ -169,7 +169,7 @@ public final class LanguageModelSession: @unchecked Sendable {
                     continuation.finish(throwing: error)
                     return
                 }
-                
+
                 // Add response to transcript after stream completes
                 if let lastSnapshot {
                     // Extract text content from the generated content
@@ -186,15 +186,15 @@ public final class LanguageModelSession: @unchecked Sendable {
                         }
                     }
                 }
-                
+
                 continuation.finish()
             }
-            
+
             continuation.onTermination = { _ in
                 snapshotPump.cancel()
             }
         }
-        
+
         return ResponseStream(stream: relay)
     }
 

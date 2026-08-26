@@ -200,7 +200,7 @@ struct GeminiLanguageModelTests {
         let schema = JSONSchema.object(
             properties: [
                 "name": .string(),
-                "age": .integer(),
+                "age": .integer()
             ],
             required: ["name", "age"]
         )

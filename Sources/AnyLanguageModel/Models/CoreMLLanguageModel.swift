@@ -205,8 +205,7 @@
 
                             // Compute delta vs accumulated text and yield
                             if assistantText.count >= accumulatedText.count,
-                                assistantText.hasPrefix(accumulatedText)
-                            {
+                                assistantText.hasPrefix(accumulatedText) {
                                 let startIdx = assistantText.index(
                                     assistantText.startIndex,
                                     offsetBy: accumulatedText.count
@@ -435,13 +434,11 @@
 
             if let constValue = jsonSchema.const,
                 let data = try? encoder.encode(constValue),
-                let constString = String(data: data, encoding: .utf8)
-            {
+                let constString = String(data: data, encoding: .utf8) {
                 header += ". Expected value: \(constString)"
             } else if let enumValues = jsonSchema.enum, !enumValues.isEmpty,
                 let data = try? encoder.encode(JSONValue.array(enumValues)),
-                let enumString = String(data: data, encoding: .utf8)
-            {
+                let enumString = String(data: data, encoding: .utf8) {
                 header += ". Allowed values: \(enumString)"
             }
 

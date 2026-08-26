@@ -29,7 +29,7 @@ struct ConvertibleToGeneratedContentTests {
     @Test func defaultInstructionsAndPromptRepresentationsUseJSONString() throws {
         let content = GeneratedContent(properties: [
             "name": "AnyLanguageModel",
-            "stars": 5,
+            "stars": 5
         ])
         let decoder = JSONDecoder()
         let expectedValue = try decoder.decode(JSONValue.self, from: Data(content.jsonString.utf8))

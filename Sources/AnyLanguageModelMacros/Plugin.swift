@@ -5,6 +5,6 @@ import SwiftSyntaxMacros
 struct AnyLanguageModelMacrosPlugin: CompilerPlugin {
     let providingMacros: [any Macro.Type] = [
         GenerableMacro.self,
-        GuideMacro.self,
+        GuideMacro.self
     ]
 }

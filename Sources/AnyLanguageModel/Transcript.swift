@@ -364,8 +364,7 @@ public struct Transcript: Sendable, Equatable, Codable {
             // This is a best-effort approach
             let desc = schema.debugDescription
             if let range = desc.range(of: "$ref("),
-                let endRange = desc.range(of: ")", range: range.upperBound ..< desc.endIndex)
-            {
+                let endRange = desc.range(of: ")", range: range.upperBound ..< desc.endIndex) {
                 let name = desc[range.upperBound ..< endRange.lowerBound]
                 return String(name)
             }

@@ -372,7 +372,7 @@ public struct GenerationSchema: Equatable, Codable, CustomDebugStringConvertible
                 allDefs[defName] = defNode
             }
 
-            if case .ref(_) = tSchema.root {
+            if case .ref = tSchema.root {
                 // Already in defs
             } else {
                 allDefs[tName] = tSchema.root
@@ -457,8 +457,7 @@ public struct GenerationSchema: Equatable, Codable, CustomDebugStringConvertible
 
     func withResolvedRoot() -> GenerationSchema? {
         if case .ref(let refName) = root,
-            let defNode = defs[refName]
-        {
+            let defNode = defs[refName] {
             return GenerationSchema(root: defNode, defs: defs)
         }
         return nil
@@ -620,7 +619,7 @@ public struct GenerationSchema: Equatable, Codable, CustomDebugStringConvertible
         }
 
         // Encode root
-        if case .ref(_) = root {
+        if case .ref = root {
             try root.encode(to: encoder)
         } else {
             try root.encode(to: encoder)
@@ -777,7 +776,7 @@ extension GenerationSchema {
                 let typeName = String(reflecting: Value.self)
 
                 var deps = schema.defs
-                if case .ref(_) = schema.root {
+                if case .ref = schema.root {
                     // Already a ref
                 } else {
                     deps[typeName] = schema.root

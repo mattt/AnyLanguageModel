@@ -225,7 +225,7 @@ struct GenerableMacroTests {
         let content = GeneratedContent(
             properties: [
                 "name": GeneratedContent("Bob"),
-                "age": GeneratedContent(kind: .number(25)),
+                "age": GeneratedContent(kind: .number(25))
             ],
             id: generationID
         )
@@ -243,7 +243,7 @@ struct GenerableMacroTests {
                 "items": GeneratedContent(
                     kind: .array([
                         GeneratedContent(properties: ["name": "Alpha"]),
-                        GeneratedContent(properties: ["name": "Beta"]),
+                        GeneratedContent(properties: ["name": "Beta"])
                     ])
                 )
             ]
@@ -260,7 +260,7 @@ struct GenerableMacroTests {
         let content = GeneratedContent(
             properties: [
                 "title": "Hello",
-                "count": 3,
+                "count": 3
             ]
         )
 
@@ -277,7 +277,7 @@ struct GenerableMacroTests {
                 "names": GeneratedContent(
                     kind: .array([
                         GeneratedContent("Alpha"),
-                        GeneratedContent("Beta"),
+                        GeneratedContent("Beta")
                     ])
                 )
             ]
@@ -296,7 +296,7 @@ struct GenerableMacroTests {
                 "names": GeneratedContent(
                     kind: .array([
                         GeneratedContent("Alpha"),
-                        GeneratedContent("Beta"),
+                        GeneratedContent("Beta")
                     ])
                 )
             ]
@@ -317,14 +317,14 @@ struct GenerableMacroTests {
                         GeneratedContent(
                             kind: .array([
                                 GeneratedContent(properties: ["name": "Alpha"]),
-                                GeneratedContent(properties: ["name": "Beta"]),
+                                GeneratedContent(properties: ["name": "Beta"])
                             ])
                         ),
                         GeneratedContent(
                             kind: .array([
                                 GeneratedContent(properties: ["name": "Gamma"])
                             ])
-                        ),
+                        )
                     ])
                 )
             ]
@@ -344,7 +344,7 @@ struct GenerableMacroTests {
             properties: [
                 "title": "Hello",
                 "count": 3,
-                "flag": true,
+                "flag": true
             ]
         )
 
@@ -375,7 +375,7 @@ struct GenerableMacroTests {
                 "items": GeneratedContent(
                     kind: .array([
                         GeneratedContent(properties: ["name": "Alpha"]),
-                        GeneratedContent(properties: ["name": "Beta"]),
+                        GeneratedContent(properties: ["name": "Beta"])
                     ])
                 )
             ]
@@ -466,9 +466,9 @@ struct GenerableMacroTests {
     #Playground {
         let content = GeneratedContent(properties: [
             "name": "Alice",
-            "age": 30,
+            "age": 30
         ])
-        let _ = try TestArguments(content)
+        _ = try TestArguments(content)
     }
 
     // Define a factory method as an alternative to the memberwise initializer.
@@ -477,13 +477,13 @@ struct GenerableMacroTests {
             try! TestArguments(
                 GeneratedContent(properties: [
                     "name": name,
-                    "age": age,
+                    "age": age
                 ])
             )
         }
     }
 
     #Playground {
-        let _ = TestArguments.create(name: "Bob", age: 42)
+        _ = TestArguments.create(name: "Bob", age: 42)
     }
 #endif  // canImport(Playgrounds)

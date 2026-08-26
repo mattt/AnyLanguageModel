@@ -187,7 +187,7 @@ struct ConstrainedJSONGenerator<Backend: TokenBackend> {
             2,
             max(0, vocabSize / 2),
             max(0, vocabSize - 1),
-            backend.eosToken,
+            backend.eosToken
         ]
         samples.formUnion(backend.endTokens)
         return samples.filter { $0 >= 0 && $0 < vocabSize }.sorted()
@@ -199,8 +199,7 @@ struct ConstrainedJSONGenerator<Backend: TokenBackend> {
             if backend.isSpecialToken(token) { continue }
             guard let text = backend.tokenText(token), !text.isEmpty else { continue }
             if text.allSatisfy({ $0.isNumber || $0 == "-" }),
-                text.contains(where: { $0.isNumber })
-            {
+                text.contains(where: { $0.isNumber }) {
                 allowed.insert(token)
             }
         }
@@ -213,8 +212,7 @@ struct ConstrainedJSONGenerator<Backend: TokenBackend> {
             if backend.isSpecialToken(token) { continue }
             guard let text = backend.tokenText(token), !text.isEmpty else { continue }
             if text.allSatisfy({ $0.isNumber || $0 == "-" || $0 == "." }),
-                text.contains(where: { $0.isNumber })
-            {
+                text.contains(where: { $0.isNumber }) {
                 allowed.insert(token)
             }
         }

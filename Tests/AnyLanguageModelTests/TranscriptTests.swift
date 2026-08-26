@@ -65,7 +65,7 @@ struct TranscriptTests {
                     toolDefinitions: []
                 )
             ),
-            .prompt(.init(segments: [.text(.init(content: "Hello"))])),
+            .prompt(.init(segments: [.text(.init(content: "Hello"))]))
         ])
 
         let session = LanguageModelSession(model: MockLanguageModel(), transcript: transcript)

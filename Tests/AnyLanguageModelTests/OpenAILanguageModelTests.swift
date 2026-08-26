@@ -654,7 +654,7 @@ struct OpenAILanguageModelTests {
             let toolCalls = Transcript.ToolCalls([call])
             return Transcript(entries: [
                 .toolCalls(toolCalls),
-                .prompt(makePrompt()),
+                .prompt(makePrompt())
             ])
         }
     }
@@ -671,8 +671,7 @@ private func withOpenAIRateLimitRetry<T>(
         } catch let error as URLSessionError {
             if case .httpError(_, let detail) = error,
                 detail.contains("rate_limit_exceeded"),
-                attempt < maxAttempts
-            {
+                attempt < maxAttempts {
                 let delaySeconds = UInt64(attempt)
                 try await Task.sleep(nanoseconds: delaySeconds * 1_000_000_000)
                 attempt += 1

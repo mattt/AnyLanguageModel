@@ -34,7 +34,7 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
                 generatePartiallyGeneratedStruct(structName: structName, properties: properties),
                 generateAsPartiallyGeneratedMethod(structName: structName),
                 generateInstructionsRepresentationProperty(),
-                generatePromptRepresentationProperty(),
+                generatePromptRepresentationProperty()
             ]
         } else if let enumDecl = declaration.as(EnumDeclSyntax.self) {
             let enumName = enumDecl.name.text
@@ -56,7 +56,7 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
                 ),
                 generateAsPartiallyGeneratedMethodForEnum(enumName: enumName),
                 generateInstructionsRepresentationProperty(),
-                generatePromptRepresentationProperty(),
+                generatePromptRepresentationProperty()
             ]
         } else {
             throw GenerableMacroError.notApplicableToType
@@ -104,8 +104,7 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
         for member in structDecl.memberBlock.members {
             if let varDecl = member.decl.as(VariableDeclSyntax.self),
                 let binding = varDecl.bindings.first,
-                let identifier = binding.pattern.as(IdentifierPatternSyntax.self)
-            {
+                let identifier = binding.pattern.as(IdentifierPatternSyntax.self) {
                 let propertyName = identifier.identifier.text
                 let propertyType = binding.typeAnnotation?.type.description ?? "String"
                 let guideInfo = extractGuideInfo(from: varDecl.attributes)
@@ -126,16 +125,14 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
     private static func extractGuideInfo(from attributes: AttributeListSyntax) -> GuideInfo {
         for attribute in attributes {
             if let attr = attribute.as(AttributeSyntax.self),
-                attr.attributeName.description == "Guide"
-            {
+                attr.attributeName.description == "Guide" {
                 if let arguments = attr.arguments?.as(LabeledExprListSyntax.self) {
                     var description: String?
                     var constraints = Constraints()
 
                     for arg in arguments {
                         if arg.label?.text == "description",
-                            let stringLiteral = arg.expression.as(StringLiteralExprSyntax.self)
-                        {
+                            let stringLiteral = arg.expression.as(StringLiteralExprSyntax.self) {
                             description = stringLiteral.segments.description.trimmingCharacters(
                                 in: .init(charactersIn: "\"")
                             )
@@ -144,8 +141,7 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
 
                         if description == nil,
                             arg.label == nil,
-                            let stringLiteral = arg.expression.as(StringLiteralExprSyntax.self)
-                        {
+                            let stringLiteral = arg.expression.as(StringLiteralExprSyntax.self) {
                             description = stringLiteral.segments.description.trimmingCharacters(
                                 in: .init(charactersIn: "\"")
                             )
@@ -161,8 +157,7 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
                         if let functionCall = guideExpression.as(FunctionCallExprSyntax.self) {
                             applyConstraints(from: functionCall, into: &constraints)
                         } else if let memberAccess = guideExpression.as(MemberAccessExprSyntax.self),
-                            let functionCall = memberAccess.base?.as(FunctionCallExprSyntax.self)
-                        {
+                            let functionCall = memberAccess.base?.as(FunctionCallExprSyntax.self) {
                             applyConstraints(from: functionCall, into: &constraints)
                         }
                     }
@@ -189,8 +184,7 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
         switch functionName {
         case "count":
             if let intLiteral = firstArgument.expression.as(IntegerLiteralExprSyntax.self),
-                let value = Int(intLiteral.literal.text)
-            {
+                let value = Int(intLiteral.literal.text) {
                 constraints.minimumCount = value
                 constraints.maximumCount = value
             } else if let rangeExpression = firstArgument.expression.as(SequenceExprSyntax.self) {
@@ -200,14 +194,12 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
             }
         case "minimumCount":
             if let intLiteral = firstArgument.expression.as(IntegerLiteralExprSyntax.self),
-                let value = Int(intLiteral.literal.text)
-            {
+                let value = Int(intLiteral.literal.text) {
                 constraints.minimumCount = value
             }
         case "maximumCount":
             if let intLiteral = firstArgument.expression.as(IntegerLiteralExprSyntax.self),
-                let value = Int(intLiteral.literal.text)
-            {
+                let value = Int(intLiteral.literal.text) {
                 constraints.maximumCount = value
             }
         case "minimum":
@@ -238,8 +230,7 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
 
             if functionName == "pattern",
                 let firstArg = functionCall.arguments.first,
-                let stringLiteral = firstArg.expression.as(StringLiteralExprSyntax.self)
-            {
+                let stringLiteral = firstArg.expression.as(StringLiteralExprSyntax.self) {
                 return stringLiteral.segments.description.trimmingCharacters(in: .init(charactersIn: "\""))
             }
         }
@@ -327,8 +318,7 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
 
             if let min = minValue, let max = maxValue {
                 if let minExpr = numericLiteralExpression(for: baseType, value: min),
-                    let maxExpr = numericLiteralExpression(for: baseType, value: max)
-                {
+                    let maxExpr = numericLiteralExpression(for: baseType, value: max) {
                     guides.append(".range(\(minExpr)...\(maxExpr))")
                 }
             } else {
@@ -364,8 +354,7 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
         } else if let floatLiteral = expression.as(FloatLiteralExprSyntax.self) {
             return Double(floatLiteral.literal.text)
         } else if let prefixExpression = expression.as(PrefixOperatorExprSyntax.self),
-            prefixExpression.operator.text == "-"
-        {
+            prefixExpression.operator.text == "-" {
             if let value = parseNumericLiteral(prefixExpression.expression) {
                 return -value
             }
@@ -447,7 +436,7 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
         "Double",
         "Float",
         "Bool",
-        "Decimal",
+        "Decimal"
     ]
 
     private static func partiallyGeneratedTypeName(for type: String) -> String {
@@ -572,8 +561,7 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
                     return
                         "properties[\"\(propName)\"] = \(propName).map { GeneratedContent($0) } ?? GeneratedContent(kind: .null)"
                 } else if baseType == "Int" || baseType == "Double" || baseType == "Float"
-                    || baseType == "Bool" || baseType == "Decimal"
-                {
+                    || baseType == "Bool" || baseType == "Decimal" {
                     return
                         "properties[\"\(propName)\"] = \(propName).map { $0.generatedContent } ?? GeneratedContent(kind: .null)"
                 } else if isDictionaryType(baseType) {
@@ -613,10 +601,10 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
             stringLiteral: """
                 nonisolated public init(\(parameters)) {
                     \(assignments)
-                    
+
                     var properties: [String: GeneratedContent] = [:]
                     \(propertyConversions)
-                    
+
                     self._rawGeneratedContent = GeneratedContent(
                         kind: .structure(
                             properties: properties,
@@ -721,8 +709,7 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
     }
 
     private static func generatePropertyExtraction(propertyName: String, propertyType: String)
-        -> String
-    {
+        -> String {
         switch propertyType {
         case "String":
             return """
@@ -756,8 +743,7 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
                 let baseType = propertyType.replacingOccurrences(of: "?", with: "")
 
                 if baseType == "Int" || baseType == "String" || baseType == "Double"
-                    || baseType == "Float" || baseType == "Bool"
-                {
+                    || baseType == "Float" || baseType == "Bool" {
                     return """
                         if let value = properties["\(propertyName)"] {
                             switch value.kind {
@@ -828,8 +814,7 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
                     return
                         "properties[\"\(propName)\"] = \(propName).map { GeneratedContent($0) } ?? GeneratedContent(kind: .null)"
                 } else if baseType == "Int" || baseType == "Double" || baseType == "Float"
-                    || baseType == "Bool" || baseType == "Decimal"
-                {
+                    || baseType == "Bool" || baseType == "Decimal" {
                     return
                         "properties[\"\(propName)\"] = \(propName).map { $0.generatedContent } ?? GeneratedContent(kind: .null)"
                 } else if isDictionaryType(baseType) {
@@ -1319,8 +1304,7 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
     }
 
     private static func generateSingleValueSerialization(caseName: String, valueType: String)
-        -> String
-    {
+        -> String {
         switch valueType {
         case "String", "Int", "Double", "Bool":
             return """

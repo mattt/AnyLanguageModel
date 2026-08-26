@@ -733,8 +733,7 @@ public struct OpenAILanguageModel: LanguageModel {
                                     session.growStreamingTranscript(text: accumulatedText)
 
                                     if let snapshot: LanguageModelSession.ResponseStream<Content>.Snapshot =
-                                        streamingSnapshot(from: accumulatedText, generating: type)
-                                    {
+                                        streamingSnapshot(from: accumulatedText, generating: type) {
                                         continuation.yield(snapshot)
                                     }
 
@@ -868,8 +867,7 @@ public struct OpenAILanguageModel: LanguageModel {
                                     session.growStreamingTranscript(text: accumulatedText)
 
                                     if let snapshot: LanguageModelSession.ResponseStream<Content>.Snapshot =
-                                        streamingSnapshot(from: accumulatedText, generating: type)
-                                    {
+                                        streamingSnapshot(from: accumulatedText, generating: type) {
                                         continuation.yield(snapshot)
                                     }
                                 }
@@ -942,7 +940,7 @@ private enum ChatCompletions {
         var body: [String: JSONValue] = [
             "model": .string(model),
             "messages": .array(messages.map { $0.jsonValue(for: .chatCompletions) }),
-            "stream": .bool(stream),
+            "stream": .bool(stream)
         ]
 
         if let tools {
@@ -956,8 +954,8 @@ private enum ChatCompletions {
                 "json_schema": .object([
                     "name": .string("response_schema"),
                     "strict": .bool(true),
-                    "schema": jsonSchemaValue,
-                ]),
+                    "schema": jsonSchemaValue
+                ])
             ])
         }
 
@@ -1092,7 +1090,7 @@ private enum Responses {
 
         var body: [String: JSONValue] = [
             "model": .string(model),
-            "stream": .bool(stream),
+            "stream": .bool(stream)
         ]
 
         var outputs: [JSONValue] = []
@@ -1116,7 +1114,7 @@ private enum Responses {
                         case .imageURL(let url):
                             return .object([
                                 "type": .string("input_image"),
-                                "image_url": .string(url),
+                                "image_url": .string(url)
                             ])
                         }
                     }
@@ -1124,7 +1122,7 @@ private enum Responses {
                 let object = JSONValue.object([
                     "type": .string("message"),
                     "role": .string("user"),
-                    "content": .array(contentBlocks),
+                    "content": .array(contentBlocks)
                 ])
                 outputs.append(object)
 
@@ -1142,7 +1140,7 @@ private enum Responses {
                             case .imageURL(let url):
                                 return .object([
                                     "type": .string("input_image"),
-                                    "image_url": .string(url),
+                                    "image_url": .string(url)
                                 ])
                             }
                         }
@@ -1152,7 +1150,7 @@ private enum Responses {
                     .object([
                         "type": .string("function_call_output"),
                         "call_id": .string(id),
-                        "output": outputValue,
+                        "output": outputValue
                     ])
                 )
 
@@ -1161,21 +1159,19 @@ private enum Responses {
                 if case .object(let assistantMessageObject) = rawContent,
                     case .string(let messageRole) = assistantMessageObject["role"],
                     messageRole == "assistant",
-                    case .array(let assistantToolCalls) = assistantMessageObject["tool_calls"]
-                {
+                    case .array(let assistantToolCalls) = assistantMessageObject["tool_calls"] {
                     for assistantToolCall in assistantToolCalls {
                         if case .object(let toolCallObject) = assistantToolCall,
                             case .string(let toolCallID) = toolCallObject["id"],
                             case .object(let functionCallObject) = toolCallObject["function"],
                             case .string(let functionName) = functionCallObject["name"],
-                            case .string(let functionArguments) = functionCallObject["arguments"]
-                        {
+                            case .string(let functionArguments) = functionCallObject["arguments"] {
                             outputs.append(
                                 .object([
                                     "type": .string("function_call"),
                                     "call_id": .string(toolCallID),
                                     "name": .string(functionName),
-                                    "arguments": .string(functionArguments),
+                                    "arguments": .string(functionArguments)
                                 ])
                             )
                         }
@@ -1214,7 +1210,7 @@ private enum Responses {
                     "type": .string("json_schema"),
                     "name": .string("response_schema"),
                     "strict": .bool(true),
-                    "schema": jsonSchemaValue,
+                    "schema": jsonSchemaValue
                 ])
             ])
         }
@@ -1355,15 +1351,15 @@ extension Transcript {
                         "type": .string("function"),
                         "function": .object([
                             "name": .string(call.toolName),
-                            "arguments": .string(argumentsJSON),
-                        ]),
+                            "arguments": .string(argumentsJSON)
+                        ])
                     ])
                 }
 
                 let rawMessage: JSONValue = .object([
                     "role": .string("assistant"),
                     "content": .null,
-                    "tool_calls": .array(openAIToolCalls),
+                    "tool_calls": .array(openAIToolCalls)
                 ])
 
                 messages.append(
@@ -1394,8 +1390,8 @@ private struct OpenAIMessage: Hashable, Codable, Sendable {
             case .system: return "system"
             case .user: return "user"
             case .assistant: return "assistant"
-            case .tool(id: _): return "tool"
-            case .raw(rawContent: _): return "raw"
+            case .tool: return "tool"
+            case .raw: return "raw"
             }
         }
     }
@@ -1438,20 +1434,20 @@ private struct OpenAIMessage: Hashable, Codable, Sendable {
                 return .object([
                     "role": .string(role.description),
                     "tool_call_id": .string(id),
-                    "content": contentAsJsonValue(for: apiVariant),
+                    "content": contentAsJsonValue(for: apiVariant)
                 ])
             case .responses:
                 return .object([
                     "type": .string("function_call_output"),
                     "call_id": .string(id),
-                    "content": contentAsJsonValue(for: apiVariant),
+                    "content": contentAsJsonValue(for: apiVariant)
                 ])
             }
 
         case .system, .user, .assistant:
             return .object([
                 "role": .string(role.description),
-                "content": contentAsJsonValue(for: apiVariant),
+                "content": contentAsJsonValue(for: apiVariant)
             ])
         }
     }
@@ -1469,7 +1465,7 @@ private enum Block: Hashable, Codable, Sendable {
         case .imageURL(let url):
             return .object([
                 "type": .string("image_url"),
-                "image_url": .object(["url": .string(url)]),
+                "image_url": .object(["url": .string(url)])
             ])
         }
     }
@@ -1482,7 +1478,7 @@ private enum Block: Hashable, Codable, Sendable {
             // Responses API uses input_image at top-level input, but inside messages we mirror block
             return .object([
                 "type": .string("input_image"),
-                "image_url": .object(["url": .string(url)]),
+                "image_url": .object(["url": .string(url)])
             ])
         }
     }
@@ -1545,14 +1541,14 @@ private struct OpenAITool: Hashable, Codable, Sendable {
         case .chatCompletions:
             return .object([
                 "type": .string(type),
-                "function": function.jsonValue,
+                "function": function.jsonValue
             ])
         case .responses:
             // Responses API expects name, description, and parameters at the top level
             var obj: [String: JSONValue] = [
                 "type": .string(type),
                 "name": .string(function.name),
-                "description": .string(function.description),
+                "description": .string(function.description)
             ]
             if let rawParameters = function.rawParameters {
                 obj["parameters"] = rawParameters
@@ -1575,7 +1571,7 @@ private struct OpenAIFunction: Hashable, Codable, Sendable {
     var jsonValue: JSONValue {
         var obj: [String: JSONValue] = [
             "name": .string(name),
-            "description": .string(description),
+            "description": .string(description)
         ]
         if let rawParameters {
             obj["parameters"] = rawParameters
@@ -1595,7 +1591,7 @@ private struct OpenAIParameters: Hashable, Codable, Sendable {
         return .object([
             "type": .string(type),
             "properties": .object(properties.mapValues { $0.jsonValue }),
-            "required": .array(required.map { .string($0) }),
+            "required": .array(required.map { .string($0) })
         ])
     }
 }
@@ -1891,8 +1887,8 @@ private func assistantMessageEchoing(toolCalls: [OpenAIToolCall], text: String) 
             "type": .string("function"),
             "function": .object([
                 "name": .string(call.function?.name ?? ""),
-                "arguments": .string(call.function?.arguments ?? "{}"),
-            ]),
+                "arguments": .string(call.function?.arguments ?? "{}")
+            ])
         ])
     }
 
@@ -1901,7 +1897,7 @@ private func assistantMessageEchoing(toolCalls: [OpenAIToolCall], text: String) 
             rawContent: .object([
                 "role": .string("assistant"),
                 "content": text.isEmpty ? .null : .string(text),
-                "tool_calls": .array(encodedCalls),
+                "tool_calls": .array(encodedCalls)
             ])
         ),
         content: .text("")
@@ -2000,14 +1996,12 @@ private func extractTextFromOutput(_ output: [JSONValue]?) -> String? {
         if case let .object(obj) = block,
             case let .string(type)? = obj["type"],
             type == "message",
-            case let .array(contentBlocks)? = obj["content"]
-        {
+            case let .array(contentBlocks)? = obj["content"] {
             for contentBlock in contentBlocks {
                 if case let .object(contentObj) = contentBlock,
                     case let .string(contentType)? = contentObj["type"],
                     contentType == "output_text",
-                    case let .string(text)? = contentObj["text"]
-                {
+                    case let .string(text)? = contentObj["text"] {
                     textParts.append(text)
                 }
             }
@@ -2024,14 +2018,12 @@ private func extractJSONFromOutput(_ output: [JSONValue]?) -> String? {
         if case let .object(obj) = block,
             case let .string(type)? = obj["type"],
             type == "message",
-            case let .array(contentBlocks)? = obj["content"]
-        {
+            case let .array(contentBlocks)? = obj["content"] {
             for contentBlock in contentBlocks {
                 if case let .object(contentObj) = contentBlock,
                     case let .string(contentType)? = contentObj["type"],
                     contentType == "output_text",
-                    case let .string(jsonString)? = contentObj["text"]
-                {
+                    case let .string(jsonString)? = contentObj["text"] {
                     return jsonString
                 }
             }
@@ -2047,8 +2039,7 @@ private func extractToolCallsFromOutput(_ output: [JSONValue]?) -> [OpenAIToolCa
     var toolCalls: [OpenAIToolCall] = []
     for block in output {
         if case let .object(obj) = block,
-            case let .string(type)? = obj["type"]
-        {
+            case let .string(type)? = obj["type"] {
             // Handle direct function_call at top level
             if type == "function_call" {
                 // Responses API uses "call_id", Chat Completions uses "id"
@@ -2085,8 +2076,7 @@ private func extractToolCallsFromOutput(_ output: [JSONValue]?) -> [OpenAIToolCa
                 for contentBlock in contentBlocks {
                     if case let .object(contentObj) = contentBlock,
                         case let .string(contentType)? = contentObj["type"],
-                        (contentType == "tool_call" || contentType == "tool_use")
-                    {
+                        contentType == "tool_call" || contentType == "tool_use" {
                         guard
                             let id = contentObj["id"].flatMap({
                                 if case .string(let s) = $0 { return s } else { return nil }
@@ -2176,8 +2166,7 @@ private extension GenerationSchema {
             schemaObj["additionalProperties"] = .bool(false)
 
             if case .object(let properties)? = schemaObj["properties"],
-                !properties.isEmpty
-            {
+                !properties.isEmpty {
                 // OpenAI strict mode requires all properties to be listed as required,
                 // even if the underlying schema marks them optional.
                 let allPropertyNames = Array(properties.keys).sorted()

@@ -786,8 +786,7 @@ import Foundation
             maxTokens: Int,
             options: ResolvedGenerationOptions
         ) async throws
-            -> String
-        {
+            -> String {
             guard let vocab = llama_model_get_vocab(model) else {
                 throw LlamaLanguageModelError.contextInitializationFailed
             }
@@ -900,13 +899,11 @@ import Foundation
 
             if let constValue = jsonSchema.const,
                 let data = try? encoder.encode(constValue),
-                let constString = String(data: data, encoding: .utf8)
-            {
+                let constString = String(data: data, encoding: .utf8) {
                 header += ". Expected value: \(constString)"
             } else if let enumValues = jsonSchema.enum, !enumValues.isEmpty,
                 let data = try? encoder.encode(JSONValue.array(enumValues)),
-                let enumString = String(data: data, encoding: .utf8)
-            {
+                let enumString = String(data: data, encoding: .utf8) {
                 header += ". Allowed values: \(enumString)"
             }
 
@@ -1192,8 +1189,7 @@ import Foundation
                 let effectiveFrequencyPenalty = options.frequencyPenalty
                 let effectivePresencePenalty = options.presencePenalty
 
-                if effectiveRepeatPenalty != 1.0 || effectiveFrequencyPenalty != 0.0 || effectivePresencePenalty != 0.0
-                {
+                if effectiveRepeatPenalty != 1.0 || effectiveFrequencyPenalty != 0.0 || effectivePresencePenalty != 0.0 {
                     llama_sampler_chain_add(
                         samplerPtr,
                         llama_sampler_init_penalties(

@@ -245,8 +245,7 @@ public struct OllamaLanguageModel: LanguageModel {
                                         )
                                         continuation.yield(snapshot)
                                     } else if let raw = try? GeneratedContent(json: partialText),
-                                        let parsed = try? type.init(raw)
-                                    {
+                                        let parsed = try? type.init(raw) {
                                         let snapshot = LanguageModelSession.ResponseStream<Content>.Snapshot(
                                             content: parsed.asPartiallyGenerated(),
                                             rawContent: raw
@@ -395,8 +394,8 @@ private func convertToolToOllamaFormat(_ tool: any Tool) throws -> [String: JSON
         "function": .object([
             "name": .string(tool.name),
             "description": .string(tool.description),
-            "parameters": try JSONValue(resolvedSchema),
-        ]),
+            "parameters": try JSONValue(resolvedSchema)
+        ])
     ]
 }
 
@@ -438,7 +437,7 @@ private func createChatParams(
     var params: [String: JSONValue] = [
         "model": .string(model),
         "messages": try JSONValue(messages),
-        "stream": .bool(stream),
+        "stream": .bool(stream)
     ]
 
     if let tools {
