@@ -16,7 +16,7 @@ public protocol LanguageModel: Sendable {
         for session: LanguageModelSession,
         promptPrefix: Prompt?
     )
-    
+
     func prewarm(
         for session: LanguageModelSession,
         promptPrefix: Prompt?
@@ -63,14 +63,13 @@ extension LanguageModel {
     ) {
         return
     }
-    
+
     public func prewarm(
         for session: LanguageModelSession,
         promptPrefix: Prompt? = nil
     ) async throws {
         return
     }
-
 
     public func logFeedbackAttachment(
         within session: LanguageModelSession,

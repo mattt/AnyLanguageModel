@@ -12,7 +12,7 @@ let package = Package(
         .iOS(.v17),
         .tvOS(.v17),
         .watchOS(.v10),
-        .visionOS(.v1),
+        .visionOS(.v1)
     ],
 
     products: [
@@ -26,7 +26,7 @@ let package = Package(
         .trait(name: "MLX"),
         .trait(name: "Llama"),
         .trait(name: "AsyncHTTPClient"),
-        .default(enabledTraits: ["MLX"]),
+        .default(enabledTraits: ["MLX"])
     ],
     dependencies: [
         .package(url: "https://github.com/huggingface/swift-transformers", from: "1.0.0"),
@@ -36,7 +36,7 @@ let package = Package(
             from: "1.3.0",
             traits: [
                 .defaults,
-                .trait(name: "AsyncHTTPClient", condition: .when(traits: ["AsyncHTTPClient"])),
+                .trait(name: "AsyncHTTPClient", condition: .when(traits: ["AsyncHTTPClient"]))
             ]
         ),
         .package(url: "https://github.com/mattt/JSONSchema", from: "1.3.0"),
@@ -46,7 +46,7 @@ let package = Package(
 //        .package(url: "https://github.com/ml-explore/mlx-swift-lm", from: "3.0.0"),
         .package(url: "https://github.com/impel-intelligence/mlx-swift-lm", from: "1.0.1"),
         .package(url: "https://github.com/swiftlang/swift-syntax", from: "602.0.0"),
-        .package(url: "https://github.com/swift-server/async-http-client.git", from: "1.24.0"),
+        .package(url: "https://github.com/swift-server/async-http-client.git", from: "1.24.0")
     ],
     targets: [
         .target(
@@ -100,7 +100,7 @@ let package = Package(
                     name: "AsyncHTTPClient",
                     package: "async-http-client",
                     condition: .when(traits: ["AsyncHTTPClient"])
-                ),
+                )
             ]
         ),
         .macro(
@@ -109,7 +109,7 @@ let package = Package(
                 .product(name: "SwiftCompilerPlugin", package: "swift-syntax"),
                 .product(name: "SwiftSyntax", package: "swift-syntax"),
                 .product(name: "SwiftSyntaxBuilder", package: "swift-syntax"),
-                .product(name: "SwiftSyntaxMacros", package: "swift-syntax"),
+                .product(name: "SwiftSyntaxMacros", package: "swift-syntax")
             ]
         ),
         .testTarget(
@@ -120,8 +120,8 @@ let package = Package(
                     name: "AsyncHTTPClient",
                     package: "async-http-client",
                     condition: .when(traits: ["AsyncHTTPClient"])
-                ),
+                )
             ],
-        ),
+        )
     ]
 )

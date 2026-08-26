@@ -111,11 +111,10 @@ public final class LanguageModelSession: @unchecked Sendable {
     public func prewarm(promptPrefix: Prompt? = nil) {
         model.prewarm(for: self, promptPrefix: promptPrefix)
     }
-    
+
     public func prewarm(promptPrefix: Prompt? = nil) async throws {
         try await model.prewarm(for: self, promptPrefix: promptPrefix)
     }
-
 
     nonisolated private func beginResponding() {
         withMutation(keyPath: \.isResponding) {
