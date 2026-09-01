@@ -535,7 +535,7 @@ import Foundation
             private var activeScopes: [UUID: GPUMemoryConfiguration] = [:]
 
             private init() {
-                GPU.set(cacheLimit: GPUMemoryConfiguration.automatic.idleCacheLimit)
+                MLX.Memory.cacheLimit = GPUMemoryConfiguration.automatic.idleCacheLimit
             }
 
             func register(_ configuration: GPUMemoryConfiguration) {
@@ -547,7 +547,7 @@ import Foundation
                     }
                 }
                 if let cacheLimitToSet {
-                    GPU.set(cacheLimit: cacheLimitToSet)
+                    MLX.Memory.cacheLimit = cacheLimitToSet
                 }
             }
 
@@ -558,7 +558,7 @@ import Foundation
                     activeScopes[id] = configuration
                     return effectiveActiveLimit()
                 }
-                GPU.set(cacheLimit: cacheLimitToSet)
+                MLX.Memory.cacheLimit = cacheLimitToSet
                 return id
             }
 
@@ -570,7 +570,7 @@ import Foundation
                     }
                     return effectiveActiveLimit()
                 }
-                GPU.set(cacheLimit: cacheLimitToSet)
+                MLX.Memory.cacheLimit = cacheLimitToSet
             }
 
             func evictIfSafe() {
@@ -584,9 +584,9 @@ import Foundation
                     shouldClearCache = shouldClearOnEviction()
                 }
                 guard shouldUpdateCacheLimit else { return }
-                GPU.set(cacheLimit: cacheLimitToSet)
+                MLX.Memory.cacheLimit = cacheLimitToSet
                 if shouldClearCache {
-                    GPU.clearCache()
+                    MLX.Memory.clearCache()
                 }
             }
 
