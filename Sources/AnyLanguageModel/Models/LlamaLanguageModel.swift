@@ -1132,18 +1132,37 @@ import Foundation
             }
 
             mutating func sample(from allowedTokens: Set<Int>) async throws -> Int {
-                guard let logits = llama_get_logits(context) else {
+                // Masking llama_get_logits in place does not constrain
+                // llama_sampler_sample: the context can refresh that buffer when
+                // the sampler fetches logits, dropping the mask. Build a candidate
+                // array holding only the allowed tokens and run the sampler chain
+                // over it instead.
+                guard let logits = llama_get_logits_ith(context, batch.pointee.n_tokens - 1) else {
                     return eosToken
                 }
 
-                for tokenIndex in 0 ..< vocabSize {
-                    if !allowedTokens.contains(tokenIndex) {
-                        logits[tokenIndex] = -Float.infinity
-                    }
+                var candidates = allowedTokens.compactMap { token -> llama_token_data? in
+                    guard token >= 0, token < vocabSize else { return nil }
+                    return llama_token_data(id: llama_token(token), logit: logits[token], p: 0)
+                }
+                guard !candidates.isEmpty else {
+                    return eosToken
                 }
 
-                let tokenIndex = batch.pointee.n_tokens - 1
-                return Int(llama_sampler_sample(sampler, context, tokenIndex))
+                let selectedToken = candidates.withUnsafeMutableBufferPointer { buffer -> Int in
+                    var array = llama_token_data_array(
+                        data: buffer.baseAddress,
+                        size: buffer.count,
+                        selected: -1,
+                        sorted: false
+                    )
+                    llama_sampler_apply(sampler, &array)
+                    guard array.selected >= 0, array.selected < Int64(array.size), let data = array.data else {
+                        return eosToken
+                    }
+                    return Int(data[Int(array.selected)].id)
+                }
+                return selectedToken
             }
         }
 
