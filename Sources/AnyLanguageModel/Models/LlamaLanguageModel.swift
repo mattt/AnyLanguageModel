@@ -139,10 +139,11 @@ import Foundation
 
             /// Text appended after the assistant header of the rendered prompt.
             ///
-            /// The model continues generating from this text. Use it to steer the
-            /// start of the response, for example prefilling an empty
-            /// `<think></think>` block to suppress a model's default reasoning
-            /// output when its chat template offers no switch for it.
+            /// The model continues generating from this text.
+            /// Use it to steer the start of the response,
+            /// for example by prefilling an empty `<think></think>` block
+            /// to suppress a model's default reasoning output
+            /// when its chat template offers no switch for it.
             public var assistantPrefill: String?
 
             /// Creates custom generation options for llama.cpp.
