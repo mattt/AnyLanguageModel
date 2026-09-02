@@ -17,6 +17,10 @@ import Testing
         @Test func initialization() {
             let customModel = LlamaLanguageModel(modelPath: "/path/to/model.gguf")
             #expect(customModel.modelPath == "/path/to/model.gguf")
+            #expect(customModel.gpuLayers == LlamaLanguageModel.defaultGPULayerCount)
+
+            let cpuOnlyModel = LlamaLanguageModel(modelPath: "/path/to/model.gguf", gpuLayers: 0)
+            #expect(cpuOnlyModel.gpuLayers == 0)
             #expect(customModel.contextSize == 2048)
             #expect(customModel.batchSize == 512)
             #expect(customModel.threads == Int32(ProcessInfo.processInfo.processorCount))
