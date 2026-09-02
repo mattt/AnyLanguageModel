@@ -58,12 +58,14 @@ struct TranscriptTests {
     @Test func sessionRestoresInstructionsFromTranscript() throws {
         let instructions = "First\n\nSecond trailing spaces   "
         let transcript = Transcript(entries: [
-            .instructions(.init(
-                id: "instructions-id",
-                segments: [.text(.init(content: instructions))],
-                toolDefinitions: []
-            )),
-            .prompt(.init(segments: [.text(.init(content: "Hello"))]))
+            .instructions(
+                .init(
+                    id: "instructions-id",
+                    segments: [.text(.init(content: instructions))],
+                    toolDefinitions: []
+                )
+            ),
+            .prompt(.init(segments: [.text(.init(content: "Hello"))])),
         ])
 
         let session = LanguageModelSession(model: MockLanguageModel(), transcript: transcript)
