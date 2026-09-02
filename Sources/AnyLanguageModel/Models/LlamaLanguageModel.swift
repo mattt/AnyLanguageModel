@@ -540,7 +540,6 @@ import Foundation
             }
 
             llama_set_causal_attn(context, true)
-            llama_set_warmup(context, false)
             llama_set_n_threads(context, runtimeOptions.threads, runtimeOptions.threads)
 
             let fullPrompt: String
@@ -635,7 +634,6 @@ import Foundation
 
                             // Stabilize runtime behavior per-context
                             llama_set_causal_attn(context, true)
-                            llama_set_warmup(context, false)
                             llama_set_n_threads(context, runtimeOptions.threads, runtimeOptions.threads)
 
                             var accumulatedText = ""
