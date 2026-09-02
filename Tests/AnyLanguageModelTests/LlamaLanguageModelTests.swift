@@ -65,7 +65,8 @@ import Testing
                 repeatLastN: 48,
                 frequencyPenalty: 0.05,
                 presencePenalty: 0.05,
-                mirostat: .v2(tau: 5.0, eta: 0.2)
+                mirostat: .v2(tau: 5.0, eta: 0.2),
+                assistantPrefill: "<think></think>"
             )
             options[custom: LlamaLanguageModel.self] = custom
 
@@ -82,6 +83,7 @@ import Testing
             #expect(retrieved?.frequencyPenalty == 0.05)
             #expect(retrieved?.presencePenalty == 0.05)
             #expect(retrieved?.mirostat == .v2(tau: 5.0, eta: 0.2))
+            #expect(retrieved?.assistantPrefill == "<think></think>")
         }
 
         @Test func customGenerationOptionsDefaults() {
