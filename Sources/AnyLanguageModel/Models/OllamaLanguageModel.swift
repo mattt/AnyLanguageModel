@@ -79,7 +79,11 @@ public struct OllamaLanguageModel: LanguageModel {
         let userSegments = extractPromptSegments(from: session, fallbackText: prompt.description)
         let (ollamaText, ollamaImages) = convertSegmentsToOllama(userSegments)
         let messages = [
-            OllamaMessage(role: .user, content: ollamaText)
+            OllamaMessage(
+                role: .user,
+                content: ollamaText,
+                images: ollamaImages.isEmpty ? nil : ollamaImages
+            )
         ]
         let ollamaOptions = convertOptions(options)
         let ollamaTools = try session.tools.map { tool in
@@ -99,7 +103,6 @@ public struct OllamaLanguageModel: LanguageModel {
             tools: ollamaTools.isEmpty ? nil : ollamaTools,
             options: ollamaOptions,
             stream: false,
-            images: ollamaImages.isEmpty ? nil : ollamaImages,
             format: ollamaFormat
         )
 
@@ -164,7 +167,11 @@ public struct OllamaLanguageModel: LanguageModel {
         let userSegments = extractPromptSegments(from: session, fallbackText: prompt.description)
         let (ollamaText, ollamaImages) = convertSegmentsToOllama(userSegments)
         let messages = [
-            OllamaMessage(role: .user, content: ollamaText)
+            OllamaMessage(
+                role: .user,
+                content: ollamaText,
+                images: ollamaImages.isEmpty ? nil : ollamaImages
+            )
         ]
         let ollamaOptions = convertOptions(options)
         let url = baseURL.appendingPathComponent("api/chat")
@@ -190,7 +197,6 @@ public struct OllamaLanguageModel: LanguageModel {
                         tools: ollamaTools.isEmpty ? nil : ollamaTools,
                         options: ollamaOptions,
                         stream: true,
-                        images: (ollamaImages.isEmpty ? nil : ollamaImages),
                         format: ollamaFormat
                     )
                     let body = try JSONEncoder().encode(params)
@@ -448,13 +454,12 @@ private func toGeneratedContent(_ value: JSONValue?) throws -> GeneratedContent 
     return try GeneratedContent(json: json)
 }
 
-private func createChatParams(
+func createChatParams(
     model: String,
     messages: [OllamaMessage],
     tools: [[String: JSONValue]]?,
     options: [String: JSONValue]?,
     stream: Bool,
-    images: [String]?,
     format: JSONValue?
 ) throws -> [String: JSONValue] {
     var params: [String: JSONValue] = [
@@ -471,10 +476,6 @@ private func createChatParams(
         params["options"] = .object(options)
     }
 
-    if let images, !images.isEmpty {
-        params["images"] = .array(images.map { .string($0) })
-    }
-
     if let format {
         params["format"] = format
     }
@@ -484,7 +485,7 @@ private func createChatParams(
 
 // MARK: - Supporting Types
 
-private struct OllamaMessage: Hashable, Codable, Sendable {
+struct OllamaMessage: Hashable, Codable, Sendable {
     enum Role: String, Hashable, Codable, Sendable {
         case system
         case user
@@ -494,6 +495,13 @@ private struct OllamaMessage: Hashable, Codable, Sendable {
 
     let role: Role
     let content: String
+    let images: [String]?
+
+    init(role: Role, content: String, images: [String]? = nil) {
+        self.role = role
+        self.content = content
+        self.images = images
+    }
 }
 
 private func convertSegmentsToOllama(_ segments: [Transcript.Segment]) -> (String, [String]) {
