@@ -588,6 +588,47 @@ struct StructuredGenerationTests {
         #expect(result == "[]")
     }
 
+    @Test func emptyArrayProbeAdmitsMergedTokens() async throws {
+        var maps = baseTokenMaps()
+        // Byte-pair vocabularies carry the item start and the close on merged tokens.
+        let spacedBracket = 60
+        let quoteA = 61
+        maps.tokenToText[spacedBracket] = " ]"
+        maps.tokenToText[quoteA] = "\"a"
+        let arrayNode = GenerationSchema.ArrayNode(
+            description: nil,
+            items: .string(.init(enumChoices: ["a"])),
+            minItems: nil,
+            maxItems: 1
+        )
+        let schema = GenerationSchema.primitive([String].self, node: .array(arrayNode))
+        let eosToken = 50
+
+        // The probe must offer the whitespace-prefixed close, and choosing it closes the array.
+        let closing = MockTokenBackend(
+            tokenToText: maps.tokenToText,
+            textToTokens: maps.textToTokens,
+            eosToken: eosToken,
+            endTokens: [eosToken],
+            maximumTokens: 64,
+            samplingQueue: [spacedBracket]
+        )
+        var closingGenerator = try ConstrainedJSONGenerator(backend: closing, schema: schema)
+        #expect(try await closingGenerator.generate() == "[]")
+
+        // The probe must offer the merged item start, and choosing it fills the array.
+        let filling = MockTokenBackend(
+            tokenToText: maps.tokenToText,
+            textToTokens: maps.textToTokens,
+            eosToken: eosToken,
+            endTokens: [eosToken],
+            maximumTokens: 64,
+            samplingQueue: [quoteA]
+        )
+        var fillingGenerator = try ConstrainedJSONGenerator(backend: filling, schema: schema)
+        #expect(try await fillingGenerator.generate() == "[\"a\"]")
+    }
+
     @Test func arrayTruncatesUnderBudgetPressure() async throws {
         let maps = baseTokenMaps()
         let arrayNode = GenerationSchema.ArrayNode(

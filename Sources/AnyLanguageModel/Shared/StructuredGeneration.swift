@@ -614,6 +614,21 @@ struct ConstrainedJSONGenerator<Backend: TokenBackend> {
         return tokens
     }
 
+    /// Tokens whose text, after leading whitespace, is a non-empty prefix of one of `literals`.
+    private func tokensPrefixing(anyOf literals: [String]) -> Set<Int> {
+        var tokens = Set<Int>()
+        for token in 0 ..< backend.vocabSize {
+            if backend.isSpecialToken(token) { continue }
+            guard let text = backend.tokenText(token) else { continue }
+            let trimmed = text.drop(while: { $0.isWhitespace })
+            guard !trimmed.isEmpty else { continue }
+            if literals.contains(where: { $0.hasPrefix(trimmed) }) {
+                tokens.insert(token)
+            }
+        }
+        return tokens
+    }
+
     /// Tokens whose first non-whitespace character is `prefix`.
     private func tokensStarting(with prefix: Character) -> Set<Int> {
         var tokens = Set<Int>()
@@ -638,13 +653,7 @@ struct ConstrainedJSONGenerator<Backend: TokenBackend> {
         case .array:
             return tokensStarting(with: "[")
         case .boolean:
-            var tokens = Set<Int>()
-            for literal in ["true", "false"] {
-                if let first = try backend.tokenize(literal).first {
-                    tokens.insert(first)
-                }
-            }
-            return tokens
+            return tokensPrefixing(anyOf: ["true", "false"])
         case .number(let numberNode):
             let numeric =
                 numberNode.integerOnly
@@ -653,9 +662,10 @@ struct ConstrainedJSONGenerator<Backend: TokenBackend> {
             // Only tokens that can start a number (digit or minus — not a bare `.`).
             return Set(
                 numeric.filter { token in
-                    guard let text = backend.tokenText(token), !text.isEmpty else { return false }
-                    let first = text.first
-                    return first?.isNumber == true || first == "-"
+                    guard let text = backend.tokenText(token),
+                        let first = text.drop(while: { $0.isWhitespace }).first
+                    else { return false }
+                    return first.isNumber || first == "-"
                 }
             )
         case .ref(let typeName):
