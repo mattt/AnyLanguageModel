@@ -72,78 +72,23 @@
             includeSchemaInPrompt: Bool,
             options: GenerationOptions
         ) async throws -> LanguageModelSession.Response<Content> where Content: Generable {
-            let fmPrompt = prompt.toFoundationModels()
-            let fmOptions = options.toFoundationModels()
-
             let fmSession = FoundationModels.LanguageModelSession(
                 model: systemModel,
                 tools: session.tools.toFoundationModels(),
-                transcript: session.transcript.toFoundationModels(
+                transcript: fmTranscriptDroppingDuplicatePrompt(session.transcript, prompt: prompt).toFoundationModels(
                     instructions: session.instructions,
                     toolDefinitions: session.tools
                         .filter(\.includesSchemaInInstructions)
                         .map { Transcript.ToolDefinition(tool: $0) }
                 )
             )
-
-            if type == String.self {
-                let fmResponse = try await fmSession.respond(to: fmPrompt, options: fmOptions)
-                let generatedContent = GeneratedContent(fmResponse.content)
-                return LanguageModelSession.Response(
-                    content: fmResponse.content as! Content,
-                    rawContent: generatedContent,
-                    transcriptEntries: []
-                )
-            } else {
-                // For non-String types, use schema-based generation
-                let schema = FoundationModels.GenerationSchema(type.generationSchema)
-                let fmResponse = try await fmSession.respond(
-                    to: fmPrompt,
-                    schema: schema,
-                    includeSchemaInPrompt: includeSchemaInPrompt,
-                    options: fmOptions
-                )
-
-                func finalize(content: Content) -> LanguageModelSession.Response<Content> {
-                    let normalizedRaw = content.generatedContent
-                    if let jsonValue = try? JSONValue(normalizedRaw),
-                        case .array(let values) = jsonValue,
-                        values.isEmpty,
-                        let placeholder = placeholderContent(for: type)
-                    {
-                        return LanguageModelSession.Response(
-                            content: placeholder.content,
-                            rawContent: placeholder.rawContent,
-                            transcriptEntries: []
-                        )
-                    }
-                    return LanguageModelSession.Response(
-                        content: content,
-                        rawContent: normalizedRaw,
-                        transcriptEntries: []
-                    )
-                }
-
-                do {
-                    let generatedContent = try GeneratedContent(fmResponse.content)
-                    let content = try type.init(generatedContent)
-
-                    return finalize(content: content)
-                } catch {
-                    // Attempt partial JSON decoding before surfacing an error.
-                    let decoder = PartialJSONDecoder()
-                    let jsonString = fmResponse.content.jsonString
-                    if let partialContent = try? decoder.decode(GeneratedContent.self, from: jsonString).value,
-                        let content = try? type.init(partialContent)
-                    {
-                        return finalize(content: content)
-                    }
-                    if let placeholder = placeholderContent(for: type) {
-                        return finalize(content: placeholder.content)
-                    }
-                    throw error
-                }
-            }
+            return try await fmRespond(
+                makeSession: { fmSession },
+                fmPrompt: prompt.toFoundationModels(),
+                fmOptions: options.toFoundationModels(),
+                type: type,
+                includeSchemaInPrompt: includeSchemaInPrompt
+            )
         }
 
         nonisolated public func streamResponse<Content>(
@@ -153,191 +98,23 @@
             includeSchemaInPrompt: Bool,
             options: GenerationOptions
         ) -> sending LanguageModelSession.ResponseStream<Content> where Content: Generable {
-            let fmPrompt = prompt.toFoundationModels()
-            let fmOptions = options.toFoundationModels()
-
             let fmSession = FoundationModels.LanguageModelSession(
                 model: systemModel,
                 tools: session.tools.toFoundationModels(),
-                transcript: session.transcript.toFoundationModels(
+                transcript: fmTranscriptDroppingDuplicatePrompt(session.transcript, prompt: prompt).toFoundationModels(
                     instructions: session.instructions,
                     toolDefinitions: session.tools
                         .filter(\.includesSchemaInInstructions)
                         .map { Transcript.ToolDefinition(tool: $0) }
                 )
             )
-
-            let stream: AsyncThrowingStream<LanguageModelSession.ResponseStream<Content>.Snapshot, Error> =
-                AsyncThrowingStream { continuation in
-
-                    func accumulateText(
-                        _ chunkText: String,
-                        accumulatedText: inout String,
-                        lastLength: inout Int
-                    ) {
-                        if chunkText.count >= lastLength, chunkText.hasPrefix(accumulatedText) {
-                            let startIdx = chunkText.index(chunkText.startIndex, offsetBy: lastLength)
-                            let delta = String(chunkText[startIdx...])
-                            accumulatedText += delta
-                            lastLength = chunkText.count
-                        } else if chunkText.hasPrefix(accumulatedText) {
-                            accumulatedText = chunkText
-                            lastLength = chunkText.count
-                        } else if accumulatedText.hasPrefix(chunkText) {
-                            accumulatedText = chunkText
-                            lastLength = chunkText.count
-                        } else {
-                            accumulatedText += chunkText
-                            lastLength = accumulatedText.count
-                        }
-                    }
-
-                    func processStringStream() async {
-                        let fmStream: FoundationModels.LanguageModelSession.ResponseStream<String> =
-                            fmSession.streamResponse(to: fmPrompt, options: fmOptions)
-
-                        var accumulatedText = ""
-                        do {
-                            var lastLength = 0
-                            for try await snapshot in fmStream {
-                                var chunkText: String = snapshot.content
-
-                                // Handle "null" from FoundationModels as first temp result
-                                if chunkText == "null" && accumulatedText == "" {
-                                    chunkText = ""
-                                }
-
-                                accumulateText(
-                                    chunkText,
-                                    accumulatedText: &accumulatedText,
-                                    lastLength: &lastLength
-                                )
-
-                                let raw = GeneratedContent(accumulatedText)
-                                let snapshotContent = (accumulatedText as! Content).asPartiallyGenerated()
-                                continuation.yield(.init(content: snapshotContent, rawContent: raw))
-                            }
-                            continuation.finish()
-                        } catch {
-                            continuation.finish(throwing: error)
-                        }
-                    }
-
-                    func processStructuredStream() async {
-                        let schema = FoundationModels.GenerationSchema(type.generationSchema)
-                        let partialDecoder = PartialJSONDecoder()
-                        let fmStream = fmSession.streamResponse(
-                            to: fmPrompt,
-                            schema: schema,
-                            includeSchemaInPrompt: includeSchemaInPrompt,
-                            options: fmOptions
-                        )
-
-                        func processTextFallback() async {
-                            let fmTextStream: FoundationModels.LanguageModelSession.ResponseStream<String> =
-                                fmSession.streamResponse(to: fmPrompt, options: fmOptions)
-
-                            var accumulatedText = ""
-                            var didYield = false
-                            do {
-                                var lastLength = 0
-                                for try await snapshot in fmTextStream {
-                                    var chunkText: String = snapshot.content
-                                    if chunkText == "null" && accumulatedText.isEmpty {
-                                        chunkText = ""
-                                    }
-
-                                    accumulateText(
-                                        chunkText,
-                                        accumulatedText: &accumulatedText,
-                                        lastLength: &lastLength
-                                    )
-
-                                    let jsonString = accumulatedText
-                                    if let partialContent = try? partialDecoder.decode(
-                                        GeneratedContent.self,
-                                        from: jsonString
-                                    )
-                                    .value {
-                                        let partial: Content.PartiallyGenerated? = try? .init(partialContent)
-                                        if let partial {
-                                            continuation.yield(.init(content: partial, rawContent: partialContent))
-                                            didYield = true
-                                        }
-                                    }
-                                }
-                                if !didYield, let placeholder = placeholderPartialContent(for: type) {
-                                    continuation.yield(
-                                        .init(content: placeholder.content, rawContent: placeholder.rawContent)
-                                    )
-                                }
-                                continuation.finish()
-                            } catch {
-                                if !didYield, let placeholder = placeholderPartialContent(for: type) {
-                                    continuation.yield(
-                                        .init(content: placeholder.content, rawContent: placeholder.rawContent)
-                                    )
-                                }
-                                continuation.finish(throwing: error)
-                            }
-                        }
-
-                        var didYield = false
-                        do {
-                            for try await snapshot in fmStream {
-                                let jsonString = snapshot.content.jsonString
-                                let raw =
-                                    (try? GeneratedContent(snapshot.content))
-                                    ?? (try? GeneratedContent(json: jsonString))
-                                    ?? GeneratedContent(jsonString)
-
-                                // Prefer partial decoding so we can surface intermediate snapshots.
-                                if let partialContent = try? partialDecoder.decode(
-                                    GeneratedContent.self,
-                                    from: jsonString
-                                )
-                                .value {
-                                    let partial: Content.PartiallyGenerated? = try? .init(partialContent)
-                                    if let partial {
-                                        continuation.yield(.init(content: partial, rawContent: partialContent))
-                                        didYield = true
-                                        continue
-                                    }
-                                }
-
-                                // Fallback to full conversion when partial decoding isn't possible.
-                                if let value = try? type.init(raw) {
-                                    let snapshotContent = value.asPartiallyGenerated()
-                                    continuation.yield(.init(content: snapshotContent, rawContent: raw))
-                                    didYield = true
-                                }
-                            }
-                            if !didYield, let placeholder = placeholderPartialContent(for: type) {
-                                continuation.yield(
-                                    .init(content: placeholder.content, rawContent: placeholder.rawContent)
-                                )
-                            }
-                            continuation.finish()
-                        } catch {
-                            if didYield {
-                                continuation.finish(throwing: error)
-                            } else {
-                                await processTextFallback()
-                            }
-                        }
-                    }
-
-                    let streamingTask: _Concurrency.Task<Void, Never> = _Concurrency.Task(priority: nil) {
-                        if type == String.self {
-                            await processStringStream()
-                        } else {
-                            await processStructuredStream()
-                        }
-                    }
-                    continuation.onTermination = { _ in streamingTask.cancel() }
-                }
-
-            return LanguageModelSession.ResponseStream(stream: stream)
+            return fmStreamResponse(
+                makeSession: { fmSession },
+                fmPrompt: prompt.toFoundationModels(),
+                fmOptions: options.toFoundationModels(),
+                type: type,
+                includeSchemaInPrompt: includeSchemaInPrompt
+            )
         }
 
         nonisolated public func logFeedbackAttachment(
@@ -368,22 +145,38 @@
     // MARK: - Helpers
 
     @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
+    func fmTranscriptDroppingDuplicatePrompt(_ transcript: Transcript, prompt: Prompt) -> Transcript {
+        guard let lastEntry = transcript.last, case .prompt(let lastPrompt) = lastEntry else {
+            return transcript
+        }
+        let lastText = lastPrompt.segments.compactMap { segment -> String? in
+            if case .text(let textSegment) = segment { return textSegment.content }
+            return nil
+        }.joined()
+        guard lastText == prompt.description else {
+            return transcript
+        }
+        return Transcript(entries: transcript.dropLast())
+    }
+
+
+    @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
     extension Prompt {
-        fileprivate func toFoundationModels() -> FoundationModels.Prompt {
+        func toFoundationModels() -> FoundationModels.Prompt {
             FoundationModels.Prompt(self.description)
         }
     }
 
     @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
     extension Instructions {
-        fileprivate func toFoundationModels() -> FoundationModels.Instructions {
+        func toFoundationModels() -> FoundationModels.Instructions {
             FoundationModels.Instructions(self.description)
         }
     }
 
     @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
     extension GenerationOptions {
-        fileprivate func toFoundationModels() -> FoundationModels.GenerationOptions {
+        func toFoundationModels() -> FoundationModels.GenerationOptions {
             var options = FoundationModels.GenerationOptions()
 
             if let temperature = self.temperature {
@@ -399,7 +192,7 @@
 
     @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
     extension LanguageModelFeedback.Sentiment {
-        fileprivate func toFoundationModels() -> FoundationModels.LanguageModelFeedback.Sentiment {
+        func toFoundationModels() -> FoundationModels.LanguageModelFeedback.Sentiment {
             switch self {
             case .positive: .positive
             case .negative: .negative
@@ -410,7 +203,7 @@
 
     @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
     extension LanguageModelFeedback.Issue {
-        fileprivate func toFoundationModels() -> FoundationModels.LanguageModelFeedback.Issue {
+        func toFoundationModels() -> FoundationModels.LanguageModelFeedback.Issue {
             FoundationModels.LanguageModelFeedback.Issue(
                 category: self.category.toFoundationModels(),
                 explanation: self.explanation
@@ -420,7 +213,7 @@
 
     @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
     extension LanguageModelFeedback.Issue.Category {
-        fileprivate func toFoundationModels() -> FoundationModels.LanguageModelFeedback.Issue.Category {
+        func toFoundationModels() -> FoundationModels.LanguageModelFeedback.Issue.Category {
             switch self {
             case .unhelpful: .unhelpful
             case .tooVerbose: .tooVerbose
@@ -436,7 +229,7 @@
 
     @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
     extension Array where Element == (any Tool) {
-        fileprivate func toFoundationModels() -> [any FoundationModels.Tool] {
+        func toFoundationModels() -> [any FoundationModels.Tool] {
             map { AnyToolWrapper($0) }
         }
     }
@@ -658,7 +451,7 @@
 
     @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
     extension Transcript {
-        fileprivate func toFoundationModels(
+        func toFoundationModels(
             instructions: AnyLanguageModel.Instructions?,
             toolDefinitions: [Transcript.ToolDefinition]
         ) -> FoundationModels.Transcript {
@@ -738,7 +531,7 @@
 
     @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
     extension Array where Element == Transcript.Segment {
-        fileprivate func toFoundationModels() -> [FoundationModels.Transcript.Segment] {
+        func toFoundationModels() -> [FoundationModels.Transcript.Segment] {
             compactMap { segment -> FoundationModels.Transcript.Segment? in
                 switch segment {
                 case .text(let textSegment):
@@ -764,7 +557,7 @@
 
     @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
     extension Array where Element == Transcript.ToolDefinition {
-        fileprivate func toFoundationModels() -> [FoundationModels.Transcript.ToolDefinition] {
+        func toFoundationModels() -> [FoundationModels.Transcript.ToolDefinition] {
             map { toolDef in
                 FoundationModels.Transcript.ToolDefinition(
                     name: toolDef.name,
@@ -864,4 +657,269 @@
             return GeneratedContent("placeholder")
         }
     }
+
+    // MARK: - Shared FoundationModels Session Bridging
+
+    @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
+    func fmRespond<Content>(
+        makeSession: @Sendable () async throws -> FoundationModels.LanguageModelSession,
+        fmPrompt: FoundationModels.Prompt,
+        fmOptions: FoundationModels.GenerationOptions,
+        type: Content.Type,
+        includeSchemaInPrompt: Bool
+    ) async throws -> LanguageModelSession.Response<Content> where Content: Generable {
+        let fmSession = try await makeSession()
+        if type == String.self {
+            let fmResponse = try await fmSession.respond(to: fmPrompt, options: fmOptions)
+            let responseText = String(fmResponse.content.drop(while: { $0 == "\n" }))
+            let generatedContent = GeneratedContent(responseText)
+            return LanguageModelSession.Response(
+                content: responseText as! Content,
+                rawContent: generatedContent,
+                transcriptEntries: []
+            )
+        } else {
+            // For non-String types, use schema-based generation
+            let schema = FoundationModels.GenerationSchema(type.generationSchema)
+            let fmResponse = try await fmSession.respond(
+                to: fmPrompt,
+                schema: schema,
+                includeSchemaInPrompt: includeSchemaInPrompt,
+                options: fmOptions
+            )
+
+            func finalize(content: Content) -> LanguageModelSession.Response<Content> {
+                let normalizedRaw = content.generatedContent
+                if let jsonValue = try? JSONValue(normalizedRaw),
+                    case .array(let values) = jsonValue,
+                    values.isEmpty,
+                    let placeholder = placeholderContent(for: type)
+                {
+                    return LanguageModelSession.Response(
+                        content: placeholder.content,
+                        rawContent: placeholder.rawContent,
+                        transcriptEntries: []
+                    )
+                }
+                return LanguageModelSession.Response(
+                    content: content,
+                    rawContent: normalizedRaw,
+                    transcriptEntries: []
+                )
+            }
+
+            do {
+                let generatedContent = try GeneratedContent(fmResponse.content)
+                let content = try type.init(generatedContent)
+
+                return finalize(content: content)
+            } catch {
+                // Attempt partial JSON decoding before surfacing an error.
+                let decoder = PartialJSONDecoder()
+                let jsonString = fmResponse.content.jsonString
+                if let partialContent = try? decoder.decode(GeneratedContent.self, from: jsonString).value,
+                    let content = try? type.init(partialContent)
+                {
+                    return finalize(content: content)
+                }
+                if let placeholder = placeholderContent(for: type) {
+                    return finalize(content: placeholder.content)
+                }
+                throw error
+            }
+        }
+    }
+
+    @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
+    func fmStreamResponse<Content>(
+        makeSession: @escaping @Sendable () async throws -> FoundationModels.LanguageModelSession,
+        fmPrompt: FoundationModels.Prompt,
+        fmOptions: FoundationModels.GenerationOptions,
+        type: Content.Type,
+        includeSchemaInPrompt: Bool
+    ) -> LanguageModelSession.ResponseStream<Content> where Content: Generable {
+        let stream: AsyncThrowingStream<LanguageModelSession.ResponseStream<Content>.Snapshot, Error> =
+            AsyncThrowingStream { continuation in
+
+                func accumulateText(
+                    _ chunkText: String,
+                    accumulatedText: inout String,
+                    lastLength: inout Int
+                ) {
+                    if chunkText.count >= lastLength, chunkText.hasPrefix(accumulatedText) {
+                        let startIdx = chunkText.index(chunkText.startIndex, offsetBy: lastLength)
+                        let delta = String(chunkText[startIdx...])
+                        accumulatedText += delta
+                        lastLength = chunkText.count
+                    } else if chunkText.hasPrefix(accumulatedText) {
+                        accumulatedText = chunkText
+                        lastLength = chunkText.count
+                    } else if accumulatedText.hasPrefix(chunkText) {
+                        accumulatedText = chunkText
+                        lastLength = chunkText.count
+                    } else {
+                        accumulatedText += chunkText
+                        lastLength = accumulatedText.count
+                    }
+                }
+
+                func processStringStream(_ fmSession: FoundationModels.LanguageModelSession) async {
+                    let fmStream: FoundationModels.LanguageModelSession.ResponseStream<String> =
+                        fmSession.streamResponse(to: fmPrompt, options: fmOptions)
+
+                    var accumulatedText = ""
+                    do {
+                        var lastLength = 0
+                        for try await snapshot in fmStream {
+                            var chunkText: String = snapshot.content
+
+                            // Handle "null" from FoundationModels as first temp result
+                            if chunkText == "null" && accumulatedText == "" {
+                                chunkText = ""
+                            }
+                            if chunkText.hasPrefix("\n") {
+                                chunkText = String(chunkText.drop(while: { $0 == "\n" }))
+                            }
+
+                            accumulateText(
+                                chunkText,
+                                accumulatedText: &accumulatedText,
+                                lastLength: &lastLength
+                            )
+
+                            let raw = GeneratedContent(accumulatedText)
+                            let snapshotContent = (accumulatedText as! Content).asPartiallyGenerated()
+                            continuation.yield(.init(content: snapshotContent, rawContent: raw))
+                        }
+                        continuation.finish()
+                    } catch {
+                        continuation.finish(throwing: error)
+                    }
+                }
+
+                func processStructuredStream(_ fmSession: FoundationModels.LanguageModelSession) async {
+                    let schema = FoundationModels.GenerationSchema(type.generationSchema)
+                    let partialDecoder = PartialJSONDecoder()
+                    let fmStream = fmSession.streamResponse(
+                        to: fmPrompt,
+                        schema: schema,
+                        includeSchemaInPrompt: includeSchemaInPrompt,
+                        options: fmOptions
+                    )
+
+                    func processTextFallback() async {
+                        let fmTextStream: FoundationModels.LanguageModelSession.ResponseStream<String> =
+                            fmSession.streamResponse(to: fmPrompt, options: fmOptions)
+
+                        var accumulatedText = ""
+                        var didYield = false
+                        do {
+                            var lastLength = 0
+                            for try await snapshot in fmTextStream {
+                                var chunkText: String = snapshot.content
+                                if chunkText.hasPrefix("\n") {
+                                    chunkText = String(chunkText.drop(while: { $0 == "\n" }))
+                                }
+                                if chunkText == "null" && accumulatedText.isEmpty {
+                                    chunkText = ""
+                                }
+
+                                accumulateText(
+                                    chunkText,
+                                    accumulatedText: &accumulatedText,
+                                    lastLength: &lastLength
+                                )
+
+                                let jsonString = accumulatedText
+                                if let partialContent = try? partialDecoder.decode(
+                                    GeneratedContent.self,
+                                    from: jsonString
+                                )
+                                .value {
+                                    let partial: Content.PartiallyGenerated? = try? .init(partialContent)
+                                    if let partial {
+                                        continuation.yield(.init(content: partial, rawContent: partialContent))
+                                        didYield = true
+                                    }
+                                }
+                            }
+                            if !didYield, let placeholder = placeholderPartialContent(for: type) {
+                                continuation.yield(
+                                    .init(content: placeholder.content, rawContent: placeholder.rawContent)
+                                )
+                            }
+                            continuation.finish()
+                        } catch {
+                            if !didYield, let placeholder = placeholderPartialContent(for: type) {
+                                continuation.yield(
+                                    .init(content: placeholder.content, rawContent: placeholder.rawContent)
+                                )
+                            }
+                            continuation.finish(throwing: error)
+                        }
+                    }
+
+                    var didYield = false
+                    do {
+                        for try await snapshot in fmStream {
+                            let jsonString = snapshot.content.jsonString
+                            let raw =
+                                (try? GeneratedContent(snapshot.content))
+                                ?? (try? GeneratedContent(json: jsonString))
+                                ?? GeneratedContent(jsonString)
+
+                            // Prefer partial decoding so we can surface intermediate snapshots.
+                            if let partialContent = try? partialDecoder.decode(
+                                GeneratedContent.self,
+                                from: jsonString
+                            )
+                            .value {
+                                let partial: Content.PartiallyGenerated? = try? .init(partialContent)
+                                if let partial {
+                                    continuation.yield(.init(content: partial, rawContent: partialContent))
+                                    didYield = true
+                                    continue
+                                }
+                            }
+
+                            // Fallback to full conversion when partial decoding isn't possible.
+                            if let value = try? type.init(raw) {
+                                let snapshotContent = value.asPartiallyGenerated()
+                                continuation.yield(.init(content: snapshotContent, rawContent: raw))
+                                didYield = true
+                            }
+                        }
+                        if !didYield, let placeholder = placeholderPartialContent(for: type) {
+                            continuation.yield(
+                                .init(content: placeholder.content, rawContent: placeholder.rawContent)
+                            )
+                        }
+                        continuation.finish()
+                    } catch {
+                        if didYield {
+                            continuation.finish(throwing: error)
+                        } else {
+                            await processTextFallback()
+                        }
+                    }
+                }
+
+                let streamingTask: _Concurrency.Task<Void, Never> = _Concurrency.Task(priority: nil) {
+                    do {
+                        let fmSession = try await makeSession()
+                        if type == String.self {
+                            await processStringStream(fmSession)
+                        } else {
+                            await processStructuredStream(fmSession)
+                        }
+                    } catch {
+                        continuation.finish(throwing: error)
+                    }
+                }
+                continuation.onTermination = { _ in streamingTask.cancel() }
+            }
+
+        return LanguageModelSession.ResponseStream(stream: stream)
+    }
+
 #endif
