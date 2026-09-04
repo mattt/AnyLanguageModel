@@ -25,6 +25,7 @@ let package = Package(
         .trait(name: "CoreML"),
         .trait(name: "MLX"),
         .trait(name: "Llama"),
+        .trait(name: "CoreAI"),
         .trait(name: "AsyncHTTPClient"),
         .default(enabledTraits: []),
     ],
@@ -40,6 +41,7 @@ let package = Package(
             ]
         ),
         .package(url: "https://github.com/mattt/JSONSchema", from: "1.3.0"),
+        .package(url: "https://github.com/james-333i/coreai-models", branch: "anylanguagemodel-compat"),
         .package(url: "https://github.com/mattt/llama.swift", .upToNextMajor(from: "2.7484.0")),
         .package(url: "https://github.com/mattt/PartialJSONDecoder", from: "1.0.0"),
         .package(url: "https://github.com/ml-explore/mlx-swift-lm", from: "3.0.0"),
@@ -93,6 +95,11 @@ let package = Package(
                     name: "LlamaSwift",
                     package: "llama.swift",
                     condition: .when(traits: ["Llama"])
+                ),
+                .product(
+                    name: "CoreAILM",
+                    package: "coreai-models",
+                    condition: .when(traits: ["CoreAI"])
                 ),
                 .product(
                     name: "AsyncHTTPClient",
