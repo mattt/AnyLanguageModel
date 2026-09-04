@@ -613,7 +613,8 @@ private func resolveFunctionCalls(
             Transcript.ToolCall(
                 id: callID,
                 toolName: call.name,
-                arguments: args
+                arguments: args,
+                providerMetadata: call.thoughtSignature.map { [thoughtSignatureMetadataKey: $0] }
             )
         )
     }
@@ -786,7 +787,13 @@ extension Transcript {
                 // Add model's response with function calls
                 let functionCallParts: [GeminiPart] = toolCalls.map { call in
                     let args = try? fromGeneratedContent(call.arguments)
-                    return .functionCall(GeminiFunctionCall(name: call.toolName, args: args))
+                    return .functionCall(
+                        GeminiFunctionCall(
+                            name: call.toolName,
+                            args: args,
+                            thoughtSignature: call.providerMetadata?[thoughtSignatureMetadataKey]
+                        )
+                    )
                 }
                 messages.append(
                     .init(
@@ -895,8 +902,11 @@ private enum GeminiPart: Codable, Sendable {
             let text = try container.decode(String.self, forKey: .text)
             self = .text(GeminiTextPart(text: text))
         } else if container.contains(.functionCall) {
-            // Note: thoughtSignature may be present but is ignored
-            self = .functionCall(try container.decode(GeminiFunctionCall.self, forKey: .functionCall))
+            // `thoughtSignature` is a sibling of `functionCall` within the part, not a member of it.
+            // Thinking models require it to be echoed back verbatim, so it travels with the call.
+            var call = try container.decode(GeminiFunctionCall.self, forKey: .functionCall)
+            call.thoughtSignature = try container.decodeIfPresent(String.self, forKey: .thoughtSignature)
+            self = .functionCall(call)
         } else if container.contains(.functionResponse) {
             self = .functionResponse(try container.decode(GeminiFunctionResponse.self, forKey: .functionResponse))
         } else if container.contains(.inlineData) {
@@ -920,6 +930,7 @@ private enum GeminiPart: Codable, Sendable {
             try container.encode(part.text, forKey: .text)
         case .functionCall(let call):
             try container.encode(call, forKey: .functionCall)
+            try container.encodeIfPresent(call.thoughtSignature, forKey: .thoughtSignature)
         case .functionResponse(let response):
             try container.encode(response, forKey: .functionResponse)
         case .inlineData(let data):
@@ -973,9 +984,24 @@ private func convertSegmentsToGeminiParts(_ segments: [Transcript.Segment]) -> [
     return parts
 }
 
+/// Key under which a thought signature is kept in ``Transcript/ToolCall/providerMetadata``.
+private let thoughtSignatureMetadataKey = "thoughtSignature"
+
 private struct GeminiFunctionCall: Codable, Sendable {
     let name: String
     let args: [String: JSONValue]?
+
+    /// The opaque thought signature Gemini attached to this call, if any.
+    ///
+    /// Deliberately absent from ``CodingKeys``: on the wire the signature sits on the enclosing
+    /// part, so ``GeminiPart`` is what reads and writes it.
+    var thoughtSignature: String?
+
+    init(name: String, args: [String: JSONValue]?, thoughtSignature: String? = nil) {
+        self.name = name
+        self.args = args
+        self.thoughtSignature = thoughtSignature
+    }
 
     enum CodingKeys: String, CodingKey {
         case name
