@@ -65,6 +65,12 @@ import Testing
             }
         }
 
+        /// The number of `contents` entries in a request body.
+        private func contentCount(in body: Data) throws -> Int {
+            let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+            return (json?["contents"] as? [[String: Any]] ?? []).count
+        }
+
         @Test("echoes the thought signature back with the function results")
         func echoesSignatureOnFollowUpRequest() async throws {
             StubURLProtocol.reset()
@@ -100,6 +106,30 @@ import Testing
             let signatures = try functionCallSignatures(in: bodies[2])
             #expect(!signatures.isEmpty)
             #expect(signatures.allSatisfy { $0 == Self.signature })
+        }
+
+        @Test("does not replay the conversation history on later turns")
+        func doesNotReplayHistoryOnLaterTurns() async throws {
+            StubURLProtocol.reset()
+            StubURLProtocol.enqueue(json: functionCallResponse(signature: Self.signature))
+            StubURLProtocol.enqueue(json: textResponse("It is sunny in Paris."))
+            StubURLProtocol.enqueue(json: textResponse("You asked about the weather."))
+            StubURLProtocol.enqueue(json: textResponse("Paris, specifically."))
+
+            let session = LanguageModelSession(model: makeModel(), tools: [WeatherTool()])
+            _ = try await session.respond(to: "What is the weather in Paris?")
+            _ = try await session.respond(to: "What did I just ask about?")
+            _ = try await session.respond(to: "Which city was that?")
+
+            let bodies = StubURLProtocol.recordedBodies
+            try #require(bodies.count == 4)
+
+            // One entry per turn, plus the tool call and its output. A response that reported the
+            // whole transcript instead of its own entries would compound: 1, 3, 6, 14.
+            #expect(try bodies.map { try contentCount(in: $0) } == [1, 3, 5, 7])
+
+            // The tool call is replayed once, still signed, however many turns later.
+            #expect(try functionCallSignatures(in: bodies[3]) == [Self.signature])
         }
     }
 
