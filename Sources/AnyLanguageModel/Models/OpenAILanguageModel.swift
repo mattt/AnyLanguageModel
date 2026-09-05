@@ -385,7 +385,10 @@ public struct OpenAILanguageModel: LanguageModel {
     public let baseURL: URL
 
     /// The closure providing the API key for authentication.
-    private let tokenProvider: @Sendable () -> String
+    private let tokenProvider: @Sendable () async throws -> String
+
+    /// The closure providing custom HTTP headers.
+    private let headerProvider: @Sendable () async throws -> [String: String]
 
     /// The model identifier to use for generation.
     public let model: String
@@ -395,17 +398,19 @@ public struct OpenAILanguageModel: LanguageModel {
 
     private let httpSession: HTTPSession
 
-    /// Creates an OpenAI language model.
+    /// Creates an OpenAI language model with synchronous or static token and header providers.
     ///
     /// - Parameters:
     ///   - baseURL: The base URL for the API endpoint. Defaults to OpenAI's official API.
     ///   - apiKey: Your OpenAI API key or a closure that returns it.
+    ///   - headers: Custom HTTP headers or a closure that returns them.
     ///   - model: The model identifier (for example, "gpt-4" or "gpt-3.5-turbo").
     ///   - apiVariant: The API variant to use. Defaults to `.chatCompletions`.
     ///   - session: The HTTP session or client used for network requests.
     public init(
         baseURL: URL = defaultBaseURL,
         apiKey tokenProvider: @escaping @autoclosure @Sendable () -> String,
+        headers headerProvider: @escaping @autoclosure @Sendable () -> [String: String] = [:],
         model: String,
         apiVariant: APIVariant = .chatCompletions,
         session: HTTPSession = makeDefaultSession(),
@@ -417,9 +422,49 @@ public struct OpenAILanguageModel: LanguageModel {
 
         self.baseURL = baseURL
         self.tokenProvider = tokenProvider
+        self.headerProvider = headerProvider
         self.model = model
         self.apiVariant = apiVariant
         self.httpSession = session
+    }
+
+    /// Creates an OpenAI language model with asynchronous token and header providers.
+    ///
+    /// - Parameters:
+    ///   - baseURL: The base URL for the API endpoint. Defaults to OpenAI's official API.
+    ///   - apiKey: An asynchronous closure that provides the OpenAI API key.
+    ///   - headers: An asynchronous closure that provides custom HTTP headers.
+    ///   - model: The model identifier (for example, "gpt-4" or "gpt-3.5-turbo").
+    ///   - apiVariant: The API variant to use. Defaults to `.chatCompletions`.
+    ///   - session: The HTTP session or client used for network requests.
+    public init(
+        baseURL: URL = defaultBaseURL,
+        apiKey tokenProvider: @escaping @Sendable () async throws -> String,
+        headers headerProvider: @escaping @Sendable () async throws -> [String: String] = { [:] },
+        model: String,
+        apiVariant: APIVariant = .chatCompletions,
+        session: HTTPSession = makeDefaultSession(),
+    ) {
+        var baseURL = baseURL
+        if !baseURL.path.hasSuffix("/") {
+            baseURL = baseURL.appendingPathComponent("")
+        }
+
+        self.baseURL = baseURL
+        self.tokenProvider = tokenProvider
+        self.headerProvider = headerProvider
+        self.model = model
+        self.apiVariant = apiVariant
+        self.httpSession = session
+    }
+
+    private func buildHeaders() async throws -> [String: String] {
+        var headers = [
+            "Authorization": "Bearer \(try await tokenProvider())"
+        ]
+        let custom = try await headerProvider()
+        headers.merge(custom) { _, new in new }
+        return headers
     }
 
     public func respond<Content>(
@@ -488,9 +533,7 @@ public struct OpenAILanguageModel: LanguageModel {
             let resp: ChatCompletions.Response = try await httpSession.fetch(
                 .post,
                 url: url,
-                headers: [
-                    "Authorization": "Bearer \(tokenProvider())"
-                ],
+                headers: try await buildHeaders(),
                 body: body
             )
 
@@ -596,9 +639,7 @@ public struct OpenAILanguageModel: LanguageModel {
             let resp: Responses.Response = try await httpSession.fetch(
                 .post,
                 url: url,
-                headers: [
-                    "Authorization": "Bearer \(tokenProvider())"
-                ],
+                headers: try await buildHeaders(),
                 body: body
             )
 
@@ -707,9 +748,7 @@ public struct OpenAILanguageModel: LanguageModel {
                                 httpSession.fetchEventStream(
                                     .post,
                                     url: url,
-                                    headers: [
-                                        "Authorization": "Bearer \(tokenProvider())"
-                                    ],
+                                    headers: try await buildHeaders(),
                                     body: body
                                 )
 
@@ -791,9 +830,7 @@ public struct OpenAILanguageModel: LanguageModel {
                                 httpSession.fetchEventStream(
                                     .post,
                                     url: url,
-                                    headers: [
-                                        "Authorization": "Bearer \(tokenProvider())"
-                                    ],
+                                    headers: try await buildHeaders(),
                                     body: body
                                 )
 

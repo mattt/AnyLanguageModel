@@ -360,23 +360,28 @@ public struct OpenResponsesLanguageModel: LanguageModel {
     public let baseURL: URL
 
     /// Closure that provides the API key for authentication.
-    private let tokenProvider: @Sendable () -> String
+    private let tokenProvider: @Sendable () async throws -> String
+
+    /// Closure that provides custom HTTP headers.
+    private let headerProvider: @Sendable () async throws -> [String: String]
 
     /// Model identifier to use for generation.
     public let model: String
 
     private let httpSession: HTTPSession
 
-    /// Creates an Open Responses language model.
+    /// Creates an Open Responses language model with synchronous or static token and header providers.
     ///
     /// - Parameters:
     ///   - baseURL: Base URL for the API (e.g. `https://api.openai.com/v1/` or `https://openrouter.ai/api/v1/`). Must end with `/`.
     ///   - apiKey: API key or closure that returns it.
+    ///   - headers: Custom HTTP headers or a closure that returns them.
     ///   - model: Model identifier (e.g. `gpt-4o-mini` or provider-specific id).
     ///   - session: The HTTP session or client used for network requests.
     public init(
         baseURL: URL,
         apiKey tokenProvider: @escaping @autoclosure @Sendable () -> String,
+        headers headerProvider: @escaping @autoclosure @Sendable () -> [String: String] = [:],
         model: String,
         session: HTTPSession = makeDefaultSession(),
     ) {
@@ -386,8 +391,44 @@ public struct OpenResponsesLanguageModel: LanguageModel {
         }
         self.baseURL = baseURL
         self.tokenProvider = tokenProvider
+        self.headerProvider = headerProvider
         self.model = model
         self.httpSession = session
+    }
+
+    /// Creates an Open Responses language model with asynchronous token and header providers.
+    ///
+    /// - Parameters:
+    ///   - baseURL: Base URL for the API (e.g. `https://api.openai.com/v1/` or `https://openrouter.ai/api/v1/`). Must end with `/`.
+    ///   - apiKey: An asynchronous closure that provides the API key.
+    ///   - headers: An asynchronous closure that provides custom HTTP headers.
+    ///   - model: Model identifier (e.g. `gpt-4o-mini` or provider-specific id).
+    ///   - session: The HTTP session or client used for network requests.
+    public init(
+        baseURL: URL,
+        apiKey tokenProvider: @escaping @Sendable () async throws -> String,
+        headers headerProvider: @escaping @Sendable () async throws -> [String: String] = { [:] },
+        model: String,
+        session: HTTPSession = makeDefaultSession(),
+    ) {
+        var baseURL = baseURL
+        if !baseURL.path.hasSuffix("/") {
+            baseURL = baseURL.appendingPathComponent("")
+        }
+        self.baseURL = baseURL
+        self.tokenProvider = tokenProvider
+        self.headerProvider = headerProvider
+        self.model = model
+        self.httpSession = session
+    }
+
+    private func buildHeaders() async throws -> [String: String] {
+        var headers = [
+            "Authorization": "Bearer \(try await tokenProvider())"
+        ]
+        let custom = try await headerProvider()
+        headers.merge(custom) { _, new in new }
+        return headers
     }
 
     public func respond<Content>(
@@ -436,7 +477,7 @@ public struct OpenResponsesLanguageModel: LanguageModel {
                             httpSession.fetchEventStream(
                                 .post,
                                 url: url,
-                                headers: ["Authorization": "Bearer \(tokenProvider())"],
+                                headers: try await buildHeaders(),
                                 body: body
                             )
                         var accumulatedText = ""
@@ -508,7 +549,7 @@ public struct OpenResponsesLanguageModel: LanguageModel {
             let resp: OpenResponsesAPI.Response = try await httpSession.fetch(
                 .post,
                 url: url,
-                headers: ["Authorization": "Bearer \(tokenProvider())"],
+                headers: try await buildHeaders(),
                 body: body
             )
 
