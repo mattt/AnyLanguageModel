@@ -155,4 +155,3 @@ struct AnthropicLanguageModelTests {
         #expect(!response.content.isEmpty)
     }
 }
-
