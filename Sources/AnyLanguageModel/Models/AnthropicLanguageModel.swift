@@ -264,7 +264,7 @@ public struct AnthropicLanguageModel: LanguageModel {
             /// Extended capability for long-horizon work.
             /// Use Case: Long-running agentic and coding tasks (over 30 minutes) with token budgets in the millions
             /// Availability: Claude Fable 5, Claude Mythos 5, Claude Opus 4.8, Claude Opus 4.7, and Claude Sonnet 5.
-            case extraHigh = "xHigh"
+            case extraHigh = "xhigh"
             /// High capability. Equivalent to not setting the parameter.
             /// Use Case: Complex reasoning, difficult coding problems, agentic tasks
             /// Availability: All Models
@@ -637,6 +637,9 @@ private func createMessageParams(
             case .disabled:
                 params["tool_choice"] = .object(["type": .string("none")])
             }
+        }
+        if let serviceTier = customOptions.serviceTier {
+            params["service_tier"] = .string(serviceTier.rawValue)
         }
         if let effort = customOptions.effort {
             // If output_config was previously set during the response schema options, we need to append insert into that dictionary instead of replacing it.
